@@ -1,6 +1,17 @@
 # DotNetOpenApiExtract
 
+[![NuGet](https://img.shields.io/nuget/v/DotNetOpenApiExtract)](https://www.nuget.org/packages/DotNetOpenApiExtract)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 CLI tool that extracts OpenAPI specifications from compiled .NET assemblies (DLL + XML docs) using static reflection — **no application startup required**.
+
+## Installation
+
+```bash
+dotnet tool install -g DotNetOpenApiExtract
+```
+
+## Usage
 
 ```bash
 dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --output openapi.json
