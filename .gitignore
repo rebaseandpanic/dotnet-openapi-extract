@@ -7,6 +7,9 @@
 # Each project is a separate independent git repository
 projects/*
 
+# Pack output
+nupkg/
+
 # Claude Code settings
 .claude/
 CLAUDE.md

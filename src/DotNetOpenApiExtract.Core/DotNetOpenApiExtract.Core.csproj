@@ -4,10 +4,25 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- NuGet metadata -->
+    <PackageId>DotNetOpenApiExtract.Core</PackageId>
+    <Description>Core library for extracting OpenAPI specifications from compiled .NET assemblies via static reflection — no application startup required</Description>
+    <Authors>rebaseandpanic</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/rebaseandpanic/dotnet-openapi-extract</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/rebaseandpanic/dotnet-openapi-extract</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>openapi;swagger;dotnet;reflection;static-analysis;codegen</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotNetOpenApiExtract.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
