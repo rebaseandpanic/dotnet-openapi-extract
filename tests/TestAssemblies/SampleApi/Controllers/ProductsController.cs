@@ -44,4 +44,16 @@ public class ProductsController : ControllerBase
     {
         throw new NotImplementedException();
     }
+
+    /// <summary>
+    /// Legacy search endpoint — marked obsolete at the action level.
+    /// </summary>
+    [HttpGet]
+    [Obsolete("Use the /products/search endpoint instead")]
+    [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
+    [SwaggerOperation(Summary = "Legacy search (deprecated)", OperationId = "LegacySearch")]
+    public ActionResult<List<ProductDto>> LegacySearch()
+    {
+        throw new NotImplementedException();
+    }
 }

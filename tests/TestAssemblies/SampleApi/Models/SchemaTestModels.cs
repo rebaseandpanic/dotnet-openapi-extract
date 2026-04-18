@@ -296,3 +296,23 @@ public sealed class PaginationMeta
     /// <summary>Has next page</summary>
     public bool HasNext { get; set; }
 }
+
+/// <summary>DTO marked obsolete at the class level.</summary>
+[Obsolete("This DTO is deprecated, use a newer model instead")]
+public sealed class ObsoleteDto
+{
+    /// <summary>The name field.</summary>
+    public string Name { get; set; } = "";
+}
+
+/// <summary>Enum marked obsolete at type level.</summary>
+[Obsolete("This enum is deprecated")]
+public enum ObsoleteEnum
+{
+    /// <summary>Red value.</summary>
+    Red,
+    /// <summary>Green value.</summary>
+    Green,
+    /// <summary>Blue value.</summary>
+    Blue,
+}

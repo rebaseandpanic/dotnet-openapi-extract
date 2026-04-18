@@ -263,9 +263,18 @@ public class ActionDiscoveryTests : IDisposable
     [Fact]
     public void AllControllers_TotalActionCountIsCorrect()
     {
-        // Users: 4, Health: 1, Orders: 3, Products: 3, Files: 5 = 16
+        // Non-versioning: Users=4, Health=1, Orders=3, Products=4, Files=5, Deprecated=2, ObsoleteDto=1 — 20
+        // Versioning (actions each): Versioned=2, Status=1, VersioningUnion=1, VersioningDedup=1,
+        //                            VersioningActionNeutral=1, VersioningIntConstructor=1,
+        //                            VersioningStatusSuffix=1, VersioningDoubleStatusSuffix=1 — 9
+        // Audit gap fixtures: VersioningBareDouble=1, VersioningNeutralOverridesVersion=1 — 2
+        // Security: Secure=3 — 3
+        // JsonConverter: JsonConverter=1 — 1
+        // RateLimiting (T13): RateLimiting=4 — 4 (added GetDisableWins for Disable+Enable precedence test)
+        // Caching (T13): Caching=6 — 6 (added GetNoStoreWithDuration, GetLocationNone)
+        // Total: 45
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(16);
+        allActions.Should().HaveCount(45);
     }
 
     // -------------------------------------------------------------------------

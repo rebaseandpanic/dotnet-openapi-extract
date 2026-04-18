@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using DotNetOpenApiExtract.Core;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Schema;
 using Microsoft.OpenApi;
@@ -624,8 +625,8 @@ public sealed class SchemaGeneratorTests : IDisposable
     [Fact]
     public void GenerateSchema_WithCamelCaseOption_PropertyNamesAreCamelCase()
     {
-        // CamelCase is the default (true), so properties like "DisplayName" → "displayName"
-        var generator = new SchemaGenerator(new SchemaOptions { CamelCasePropertyNames = true });
+        // CamelCase is the default, so properties like "DisplayName" → "displayName"
+        var generator = new SchemaGenerator(new SchemaOptions { NamingPolicy = JsonNamingPolicy.CamelCase });
         var type = GetType("UserDto");
         generator.GenerateSchema(type);
 
@@ -638,7 +639,7 @@ public sealed class SchemaGeneratorTests : IDisposable
     [Fact]
     public void GenerateSchema_WithoutCamelCaseOption_PropertyNamesRetainPascalCase()
     {
-        var generator = new SchemaGenerator(new SchemaOptions { CamelCasePropertyNames = false });
+        var generator = new SchemaGenerator(new SchemaOptions { NamingPolicy = JsonNamingPolicy.Preserve });
         var type = GetType("UserDto");
         generator.GenerateSchema(type);
 

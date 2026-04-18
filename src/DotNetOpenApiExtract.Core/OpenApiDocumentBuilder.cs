@@ -1,15 +1,38 @@
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Discovery;
 using DotNetOpenApiExtract.Core.Extraction;
 using DotNetOpenApiExtract.Core.Schema;
 using DotNetOpenApiExtract.Core.Documentation;
+using DotNetOpenApiExtract.Core.SourceAnalysis;
+using Microsoft.CodeAnalysis;
 
 // Alias to resolve ambiguity: our ParameterLocation vs Microsoft.OpenApi.ParameterLocation
 using OurParameterLocation = DotNetOpenApiExtract.Core.Extraction.ParameterLocation;
 using OpenApiParameterLocation = Microsoft.OpenApi.ParameterLocation;
 
 namespace DotNetOpenApiExtract.Core;
+
+/// <summary>
+/// Controls how a path base detected via <c>app.UsePathBase()</c> is emitted into
+/// the generated OpenAPI document.
+/// </summary>
+public enum PathBaseEmission
+{
+    /// <summary>
+    /// Prepend the path base to every path key in <c>paths</c>.
+    /// This is the default and the safer choice for client code-generators that
+    /// ignore the <c>servers</c> array.
+    /// </summary>
+    PathPrefix,
+
+    /// <summary>
+    /// Add the path base as a relative server URL in <c>servers[]</c> and leave
+    /// path keys unchanged.
+    /// </summary>
+    ServersEntry,
+}
 
 /// <summary>
 /// Configuration for building an OpenAPI document.
@@ -35,10 +58,12 @@ public sealed class OpenApiDocumentOptions
     public string? Description { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/> (the default), property names are emitted
-    /// in camelCase to match the ASP.NET Core default JSON serializer behavior.
+    /// JSON property naming policy. Defaults to <see langword="null"/> which resolves to
+    /// <see cref="JsonNamingPolicy.CamelCase"/> (the ASP.NET Core default).
+    /// Overridden by Roslyn analysis if <c>ConfigureHttpJsonOptions</c> or
+    /// <c>AddJsonOptions</c> is detected in the entry assembly's source.
     /// </summary>
-    public bool CamelCasePropertyNames { get; init; } = true;
+    public JsonNamingPolicy? NamingPolicy { get; init; }
 
     /// <summary>
     /// When <see langword="true"/>, enum values are rendered as strings rather
@@ -52,6 +77,83 @@ public sealed class OpenApiDocumentOptions
     /// (case-insensitive) is removed from the final <see cref="OpenApiDocument.Paths"/>.
     /// </summary>
     public IReadOnlyList<string>? ExcludePathPrefixes { get; init; }
+
+    /// <summary>
+    /// Optional path to a specific source file (e.g. the entry point).
+    /// Reserved for future use; currently not consumed by the builder.
+    /// </summary>
+    public string? SourcePath { get; init; }
+
+    /// <summary>
+    /// Optional override for the source root directory (the folder containing the
+    /// <c>.csproj</c>). When set, skips the automatic source-root detection.
+    /// Corresponds to the <c>--source-root</c> CLI flag.
+    /// </summary>
+    public string? SourceRoot { get; init; }
+
+    /// <summary>
+    /// Optional name of the contact person or organisation responsible for the API.
+    /// Maps to <c>info.contact.name</c> in the generated document.
+    /// </summary>
+    public string? ContactName { get; init; }
+
+    /// <summary>
+    /// Optional email address of the contact person or organisation.
+    /// Maps to <c>info.contact.email</c> in the generated document.
+    /// No format validation is performed — any string is accepted by OpenAPI.
+    /// </summary>
+    public string? ContactEmail { get; init; }
+
+    /// <summary>
+    /// Optional URL pointing to the contact information page.
+    /// Must be a valid absolute URI; if the value cannot be parsed the URL
+    /// is silently omitted and a warning is written to <c>stderr</c>.
+    /// Maps to <c>info.contact.url</c> in the generated document.
+    /// </summary>
+    public string? ContactUrl { get; init; }
+
+    /// <summary>
+    /// Optional SPDX license name (e.g. <c>"MIT"</c>, <c>"Apache 2.0"</c>).
+    /// Required when <see cref="LicenseUrl"/> is also set; if omitted but
+    /// <see cref="LicenseUrl"/> is present the license block is skipped entirely.
+    /// Maps to <c>info.license.name</c>.
+    /// </summary>
+    public string? LicenseName { get; init; }
+
+    /// <summary>
+    /// Optional URL pointing to the full license text.
+    /// Must be a valid absolute URI; if the value cannot be parsed the URL
+    /// is silently omitted and a warning is written to <c>stderr</c>.
+    /// Ignored when <see cref="LicenseName"/> is not set.
+    /// Maps to <c>info.license.url</c>.
+    /// </summary>
+    public string? LicenseUrl { get; init; }
+
+    /// <summary>
+    /// Optional URL to the Terms of Service for the API.
+    /// Must be a valid absolute URI; if the value cannot be parsed the field
+    /// is silently omitted and a warning is written to <c>stderr</c>.
+    /// Maps to <c>info.termsOfService</c>.
+    /// </summary>
+    public string? TermsOfService { get; init; }
+
+    /// <summary>
+    /// Optional list of server base URLs to include in the <c>servers</c> array.
+    /// Blank or whitespace-only entries are filtered out automatically.
+    /// Maps to <c>servers[].url</c> in the generated document.
+    /// </summary>
+    public IReadOnlyList<string>? Servers { get; init; }
+
+    /// <summary>
+    /// Controls how a path base detected via <c>app.UsePathBase()</c> in the entry-point
+    /// source is emitted into the document:
+    /// <list type="bullet">
+    ///   <item><see cref="PathBaseEmission.PathPrefix"/> (default) — prepend to every path key.</item>
+    ///   <item><see cref="PathBaseEmission.ServersEntry"/> — add as a relative server URL.</item>
+    /// </list>
+    /// Has no effect when no <c>UsePathBase</c> call with a literal argument is found.
+    /// </summary>
+    public PathBaseEmission PathBaseEmission { get; init; } = PathBaseEmission.PathPrefix;
 }
 
 /// <summary>
@@ -91,6 +193,21 @@ public sealed class OpenApiDocumentBuilder
 
         using var loader = new AssemblyLoader(options.AssemblyPath);
 
+        // ── Source analysis (best-effort, never throws) ──────────────────────
+        var sourceContext = TryBuildSourceAnalysisContext(options, loader);
+
+        // ── Security extraction (Roslyn, best-effort, before operation loop) ──
+        var securityResult = SecuritySchemeExtractor.Extract(sourceContext);
+
+        // ── JSON options extraction (Roslyn, best-effort) ────────────────────
+        var jsonOptions = JsonOptionsExtractor.Extract(sourceContext);
+
+        // ── Resolve effective naming policy ───────────────────────────────────
+        // Precedence: Roslyn > explicit NamingPolicy option > default CamelCase
+        var effectiveNamingPolicy = jsonOptions.PropertyNamingPolicy
+            ?? options.NamingPolicy
+            ?? JsonNamingPolicy.CamelCase;
+
         // Resolve XML path: use the explicitly provided path, or auto-detect alongside the DLL.
         var xmlPath = options.XmlPath
             ?? Path.ChangeExtension(options.AssemblyPath, ".xml");
@@ -99,8 +216,12 @@ public sealed class OpenApiDocumentBuilder
         var docResolver = new DocumentationResolver(xmlParser);
         var schemaGenerator = new SchemaGenerator(new SchemaOptions
         {
-            CamelCasePropertyNames = options.CamelCasePropertyNames,
-            EnumAsString = options.EnumAsString,
+            NamingPolicy             = effectiveNamingPolicy,
+            EnumAsString             = options.EnumAsString,
+            DictionaryKeyPolicy      = jsonOptions.DictionaryKeyPolicy ?? effectiveNamingPolicy,
+            DefaultIgnoreCondition   = jsonOptions.DefaultIgnoreCondition,
+            NumberHandling           = jsonOptions.NumberHandling,
+            GlobalConverterTypeNames = jsonOptions.GlobalConverterTypeNames,
         });
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
@@ -108,18 +229,90 @@ public sealed class OpenApiDocumentBuilder
         var actions = ActionDiscovery.DiscoverActions(controllers);
 
         // ── Step 2: Initialise document skeleton ────────────────────────────
+        var info = new OpenApiInfo
+        {
+            Title = options.Title,
+            Version = options.Version,
+            Description = options.Description,
+        };
+
+        // Contact
+        if (options.ContactName != null || options.ContactEmail != null || options.ContactUrl != null)
+        {
+            Uri? contactUri = null;
+            if (options.ContactUrl != null)
+            {
+                if (Uri.TryCreate(options.ContactUrl, UriKind.Absolute, out var parsed))
+                    contactUri = parsed;
+                else
+                    Console.Error.WriteLine(
+                        $"Warning: --contact-url '{options.ContactUrl}' is not a valid absolute URI and will be ignored.");
+            }
+
+            info.Contact = new OpenApiContact
+            {
+                Name  = options.ContactName,
+                Email = options.ContactEmail,
+                Url   = contactUri,
+            };
+        }
+
+        // License
+        if (options.LicenseName != null)
+        {
+            Uri? licenseUri = null;
+            if (options.LicenseUrl != null)
+            {
+                if (Uri.TryCreate(options.LicenseUrl, UriKind.Absolute, out var parsed))
+                    licenseUri = parsed;
+                else
+                    Console.Error.WriteLine(
+                        $"Warning: --license-url '{options.LicenseUrl}' is not a valid absolute URI and will be ignored.");
+            }
+
+            info.License = new OpenApiLicense
+            {
+                Name = options.LicenseName,
+                Url  = licenseUri,
+            };
+        }
+        // LicenseUrl without LicenseName: ignore the license block entirely (OpenAPI requires Name).
+
+        // Terms of Service
+        if (options.TermsOfService != null)
+        {
+            if (Uri.TryCreate(options.TermsOfService, UriKind.Absolute, out var tosUri))
+                info.TermsOfService = tosUri;
+            else
+                Console.Error.WriteLine(
+                    $"Warning: --terms-of-service '{options.TermsOfService}' is not a valid absolute URI and will be ignored.");
+        }
+
         var document = new OpenApiDocument
         {
-            Info = new OpenApiInfo
-            {
-                Title = options.Title,
-                Version = options.Version,
-                Description = options.Description,
-            },
+            Info  = info,
             Paths = new OpenApiPaths(),
         };
 
+        // Servers
+        var validServers = options.Servers?
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        if (validServers is { Count: > 0 })
+        {
+            document.Servers = validServers
+                .Select(url => new OpenApiServer { Url = url })
+                .ToList<OpenApiServer>();
+        }
+
         // ── Step 3: Build paths and operations ──────────────────────────────
+        // Also collect (action, actionAttrs, controllerAttrs, operation) tuples for post-processing.
+        var builtOperations = new List<(ActionInfo Action,
+            IList<System.Reflection.CustomAttributeData> ActionAttrs,
+            IList<System.Reflection.CustomAttributeData> ControllerAttrs,
+            OpenApiOperation Operation)>();
+
         foreach (var action in actions)
         {
             var path = RouteBuilder.BuildPath(
@@ -156,9 +349,17 @@ public sealed class OpenApiDocumentBuilder
 
             try
             {
-                var operation = BuildOperation(action, docResolver, schemaGenerator);
+                // Pre-fetch attribute lists once per action — avoids 8+ redundant
+                // GetCustomAttributesData() parses in individual extractors.
+                var actionAttrs     = action.Method.GetCustomAttributesData();
+                var controllerAttrs = action.Controller.Type.GetCustomAttributesData();
+
+                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult);
+                ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
+                ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
                 pathItem.Operations[httpMethod] = operation;
+                builtOperations.Add((action, actionAttrs, controllerAttrs, operation));
             }
             catch (Exception ex) when (ex is FileNotFoundException
                                         or FileLoadException
@@ -207,7 +408,7 @@ public sealed class OpenApiDocumentBuilder
                         foreach (var p in schemaType.GetProperties(
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
                         {
-                            var serialized = ResolvePropertyName(p, options.CamelCasePropertyNames);
+                            var serialized = ResolvePropertyName(p, effectiveNamingPolicy);
                             // First property with this name wins (matches CollectProperties derived-first ordering).
                             propMap.TryAdd(serialized, p);
                         }
@@ -243,6 +444,30 @@ public sealed class OpenApiDocumentBuilder
             });
         }
 
+        // ── Step 6: PathBase ─────────────────────────────────────────────────
+        var pathBase = PathBaseExtractor.ExtractPathBase(sourceContext);
+        if (!string.IsNullOrEmpty(pathBase))
+            ApplyPathBase(document, pathBase, options.PathBaseEmission);
+
+        // ── Step 7: Security schemes ─────────────────────────────────────────
+        ApplySecuritySchemes(document, securityResult);
+
+        // ── Step 8: ProblemDetails ──────────────────────────────────────────
+        if (ProblemDetailsDetector.IsRegistered(sourceContext))
+            ApplyProblemDetails(document);
+
+        // ── Step 9: Global response headers ─────────────────────────────────
+        var responseHeaders = ResponseHeaderExtractor.Extract(sourceContext);
+        ApplyGlobalResponseHeaders(document, responseHeaders);
+
+        // ── Step 10: Global media types ──────────────────────────────────────
+        var globalMediaTypes = GlobalMediaTypesExtractor.Extract(sourceContext);
+        ApplyGlobalMediaTypes(builtOperations, globalMediaTypes);
+
+        // ── Step 11: Document-level tags metadata (descriptions + externalDocs) ─
+        var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
+        ApplyDocumentTagsMetadata(document, docTagsResult);
+
         return document;
     }
 
@@ -256,8 +481,11 @@ public sealed class OpenApiDocumentBuilder
     /// </summary>
     private static OpenApiOperation BuildOperation(
         ActionInfo action,
+        IList<System.Reflection.CustomAttributeData> actionAttrs,
+        IList<System.Reflection.CustomAttributeData> controllerAttrs,
         DocumentationResolver docResolver,
-        SchemaGenerator schemaGenerator)
+        SchemaGenerator schemaGenerator,
+        SecuritySchemeExtractionResult securityResult)
     {
         var docs = docResolver.ResolveOperation(action);
         var parameters = ParameterExtractor.ExtractParameters(action);
@@ -381,7 +609,139 @@ public sealed class OpenApiDocumentBuilder
             operation.Responses[statusKey] = apiResponse;
         }
 
+        // ── Per-operation security ────────────────────────────────────────────
+        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult);
+
         return operation;
+    }
+
+    // =========================================================================
+    // API versioning
+    // =========================================================================
+
+    /// <summary>
+    /// Adds the <c>x-api-version</c> extension to an operation based on
+    /// <c>Asp.Versioning</c> attributes found on the controller or action.
+    /// </summary>
+    /// <remarks>
+    /// Extension format:
+    /// <list type="bullet">
+    ///   <item><c>x-api-version: "neutral"</c> — when <c>[ApiVersionNeutral]</c> is present.</item>
+    ///   <item><c>x-api-version: ["1.0", "2.0"]</c> — JSON array of version strings.</item>
+    ///   <item>Extension absent — when no versioning attributes exist on the endpoint.</item>
+    /// </list>
+    /// </remarks>
+    private static void ApplyApiVersionExtension(
+        OpenApiOperation operation,
+        IList<System.Reflection.CustomAttributeData> actionAttrs,
+        IList<System.Reflection.CustomAttributeData> controllerAttrs)
+    {
+        if (ApiVersionExtractor.IsVersionNeutral(actionAttrs, controllerAttrs))
+        {
+            operation.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+            operation.Extensions["x-api-version"] = new JsonNodeExtension(JsonValue.Create("neutral")!);
+            return;
+        }
+
+        var versions = ApiVersionExtractor.GetSupportedVersions(actionAttrs, controllerAttrs);
+        if (versions.Count == 0)
+            return;
+
+        var jsonArray = new JsonArray(versions.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray());
+        operation.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+        operation.Extensions["x-api-version"] = new JsonNodeExtension(jsonArray);
+    }
+
+    // =========================================================================
+    // Rate limiting and response caching
+    // =========================================================================
+
+    /// <summary>
+    /// Applies rate-limiting and response-caching metadata extracted from
+    /// <c>[EnableRateLimiting]</c>, <c>[DisableRateLimiting]</c>, <c>[ResponseCache]</c>,
+    /// and <c>[OutputCache]</c> attributes to <paramref name="operation"/>.
+    /// </summary>
+    /// <remarks>
+    /// Rate limiting is emitted as an operation extension:
+    /// <list type="bullet">
+    ///   <item><c>x-rate-limit-disabled: true</c> when <c>[DisableRateLimiting]</c> is present.</item>
+    ///   <item><c>x-rate-limit-policy: "policyName"</c> for active <c>[EnableRateLimiting]</c>.</item>
+    /// </list>
+    /// Response caching is emitted as a <c>Cache-Control</c> header on 2xx responses (status codes
+    /// 200–299). The header description is built from the caching parameters (duration, no-store, etc.).
+    /// Existing <c>Cache-Control</c> headers are not overwritten (first-wins semantics).
+    /// </remarks>
+    private static void ApplyRateLimitingAndCaching(
+        OpenApiOperation operation,
+        IList<System.Reflection.CustomAttributeData> actionAttrs,
+        IList<System.Reflection.CustomAttributeData> controllerAttrs)
+    {
+        // ── Rate limiting ────────────────────────────────────────────────────
+        var rateLimit = RateLimitingExtractor.Extract(actionAttrs, controllerAttrs);
+        if (rateLimit != null)
+        {
+            operation.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+            if (rateLimit.IsDisabled)
+                operation.Extensions["x-rate-limit-disabled"] = new JsonNodeExtension(JsonValue.Create(true)!);
+            else
+                operation.Extensions["x-rate-limit-policy"] = new JsonNodeExtension(JsonValue.Create(rateLimit.PolicyName)!);
+        }
+
+        // ── Response caching ─────────────────────────────────────────────────
+        var cache = ResponseCachingExtractor.Extract(actionAttrs, controllerAttrs);
+        if (cache == null || operation.Responses == null)
+            return;
+
+        var cacheControlDescription = BuildCacheControlDescription(cache);
+
+        foreach (var (statusKey, responseInterface) in operation.Responses)
+        {
+            // OpenAPI wildcard response keys ("default", "2XX") are intentionally skipped here.
+            // ResponseExtractor currently emits only integer status codes — this filter is defensive.
+            if (!int.TryParse(statusKey, out var statusCode) || statusCode < 200 || statusCode >= 300)
+                continue;
+
+            if (responseInterface is not OpenApiResponse openApiResponse)
+                continue;
+
+            openApiResponse.Headers ??= new Dictionary<string, IOpenApiHeader>(
+                StringComparer.OrdinalIgnoreCase);
+
+            if (!openApiResponse.Headers.ContainsKey("Cache-Control"))
+            {
+                openApiResponse.Headers["Cache-Control"] = new OpenApiHeader
+                {
+                    Description = cacheControlDescription,
+                    Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a human-readable <c>Cache-Control</c> description string from
+    /// the extracted caching metadata.
+    /// </summary>
+    private static string BuildCacheControlDescription(ResponseCacheInfo info)
+    {
+        var parts = new List<string>();
+
+        if (info.NoStore)
+            parts.Add("no-store");
+
+        if (info.Location == "Client")
+            parts.Add("private");
+
+        if (info.DurationSeconds is { } duration)
+            parts.Add($"max-age={duration}");
+
+        if (info.Location == "None")
+            parts.Add("no-cache");
+
+        if (parts.Count == 0)
+            return "Cache-Control";
+
+        return $"Cache-Control: {string.Join(", ", parts)}";
     }
 
     // =========================================================================
@@ -419,7 +779,7 @@ public sealed class OpenApiDocumentBuilder
         _   => "Response",
     };
 
-    private static string ResolvePropertyName(System.Reflection.PropertyInfo prop, bool camelCase)
+    private static string ResolvePropertyName(System.Reflection.PropertyInfo prop, JsonNamingPolicy policy)
     {
         // Check [JsonPropertyName] first
         var jsonPropAttr = AttributeHelper.GetAttribute(prop, AttributeHelper.Names.JsonPropertyName);
@@ -430,9 +790,444 @@ public sealed class OpenApiDocumentBuilder
                 return name;
         }
 
-        var propName = prop.Name;
-        if (camelCase && propName.Length > 0)
-            return char.ToLowerInvariant(propName[0]) + propName[1..];
-        return propName;
+        return Schema.SchemaGenerator.ApplyNamingPolicy(prop.Name, policy);
     }
+
+    // =========================================================================
+    // PathBase emission
+    // =========================================================================
+
+    /// <summary>
+    /// Applies a detected path base to <paramref name="document"/> according to
+    /// <paramref name="emission"/>.
+    /// </summary>
+    internal static void ApplyPathBase(
+        OpenApiDocument document,
+        string pathBase,
+        PathBaseEmission emission)
+    {
+        if (emission == PathBaseEmission.PathPrefix)
+        {
+            PrependPathBase(document, pathBase);
+        }
+        else
+        {
+            AppendServerEntry(document, pathBase);
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds <c>document.Paths</c> with <paramref name="pathBase"/> prepended to
+    /// every path key.
+    /// </summary>
+    private static void PrependPathBase(OpenApiDocument document, string pathBase)
+    {
+        if (document.Paths is null || document.Paths.Count == 0)
+            return;
+
+        var prefixed = new OpenApiPaths();
+        foreach (var (key, value) in document.Paths)
+        {
+            // key always starts with "/" per OpenAPI spec; pathBase also starts with "/"
+            // so the concatenation is correct (e.g. "/api/v1" + "/users" → "/api/v1/users").
+            prefixed[pathBase + key] = value;
+        }
+
+        document.Paths = prefixed;
+    }
+
+    /// <summary>
+    /// Appends a relative server entry for <paramref name="pathBase"/> to
+    /// <c>document.Servers</c>, avoiding duplicates.
+    /// </summary>
+    private static void AppendServerEntry(OpenApiDocument document, string pathBase)
+    {
+        if (document.Servers is not null &&
+            document.Servers.Any(s => string.Equals(s.Url, pathBase, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        document.Servers ??= new List<OpenApiServer>();
+        document.Servers.Add(new OpenApiServer
+        {
+            Url = pathBase,
+            Description = "Path base from UsePathBase()",
+        });
+    }
+
+    // =========================================================================
+    // ProblemDetails injection
+    // =========================================================================
+
+    /// <summary>
+    /// Adds the RFC 7807 <c>ProblemDetails</c> schema to the document's components and
+    /// injects default <c>application/problem+json</c> responses (400, 422, 500) into
+    /// every operation that does not already declare those status codes.
+    /// </summary>
+    internal static void ApplyProblemDetails(OpenApiDocument document)
+    {
+        // 1. Ensure Components and Schemas exist.
+        document.Components ??= new OpenApiComponents();
+        document.Components.Schemas ??= new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+
+        // 2. Register the ProblemDetails schema (skip if already present, e.g. from a DTO).
+        if (!document.Components.Schemas.ContainsKey(ProblemDetailsSchema.SchemaId))
+            document.Components.Schemas[ProblemDetailsSchema.SchemaId] = ProblemDetailsSchema.CreateSchema();
+
+        // 3. Build a $ref pointing to the registered component schema.
+        var schemaRef = new OpenApiSchemaReference(ProblemDetailsSchema.SchemaId, null);
+
+        // 4. Inject default error responses into every operation.
+        if (document.Paths is null)
+            return;
+
+        foreach (var (_, pathItemInterface) in document.Paths)
+        {
+            if (pathItemInterface is not OpenApiPathItem pathItem || pathItem.Operations is null)
+                continue;
+
+            foreach (var (_, operation) in pathItem.Operations)
+                ProblemDetailsResponseInjector.Inject(operation, schemaRef);
+        }
+    }
+
+    // =========================================================================
+    // Security schemes
+    // =========================================================================
+
+    /// <summary>
+    /// Applies security schemes and global security requirements extracted from Roslyn
+    /// source analysis to the document's <c>components/securitySchemes</c> and
+    /// top-level <c>security</c> fields.
+    /// </summary>
+    private static void ApplySecuritySchemes(
+        OpenApiDocument document,
+        SecuritySchemeExtractionResult securityResult)
+    {
+        if (securityResult.Schemes.Count > 0)
+        {
+            document.Components ??= new OpenApiComponents();
+            document.Components.SecuritySchemes ??=
+                new Dictionary<string, IOpenApiSecurityScheme>(StringComparer.Ordinal);
+
+            foreach (var (name, scheme) in securityResult.Schemes)
+                document.Components.SecuritySchemes.TryAdd(name, scheme);
+        }
+
+        if (securityResult.GlobalRequirementSchemeNames.Count > 0)
+        {
+            var requirement = new OpenApiSecurityRequirement();
+            foreach (var schemeName in securityResult.GlobalRequirementSchemeNames)
+            {
+                var reference = new OpenApiSecuritySchemeReference(schemeName, null, null);
+                requirement[reference] = [];
+            }
+
+            document.Security ??= new List<OpenApiSecurityRequirement>();
+            document.Security.Add(requirement);
+        }
+    }
+
+    /// <summary>
+    /// Applies per-operation security based on <c>[Authorize]</c> /
+    /// <c>[AllowAnonymous]</c> attributes on the action and its controller.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item><c>[AllowAnonymous]</c> → <c>security: []</c> (empty list, overrides global requirement).</item>
+    ///   <item><c>[Authorize(AuthenticationSchemes = "Bearer")]</c> → explicit security requirement.</item>
+    ///   <item>No override → nothing set (inherits global security if present).</item>
+    /// </list>
+    /// </remarks>
+    private static void ApplyOperationSecurity(
+        OpenApiOperation operation,
+        IList<System.Reflection.CustomAttributeData> actionAttrs,
+        IList<System.Reflection.CustomAttributeData> controllerAttrs,
+        SecuritySchemeExtractionResult securityResult)
+    {
+        var auth = AuthorizationExtractor.Extract(actionAttrs, controllerAttrs);
+
+        if (auth.IsAnonymous)
+        {
+            // Empty security list overrides any global security requirement.
+            operation.Security = [];
+            return;
+        }
+
+        if (auth.AuthenticationSchemes is { Count: > 0 })
+        {
+            var requirement = new OpenApiSecurityRequirement();
+            foreach (var schemeName in auth.AuthenticationSchemes)
+            {
+                var reference = new OpenApiSecuritySchemeReference(schemeName, null, null);
+                requirement[reference] = [];
+            }
+
+            operation.Security = [requirement];
+        }
+
+        // If only RequiresAuthorization (no explicit schemes), we do nothing —
+        // the operation inherits the global security requirement if one is set.
+        // This avoids emitting a requirement with an unknown scheme name.
+    }
+
+    // =========================================================================
+    // Global response headers
+    // =========================================================================
+
+    /// <summary>
+    /// Adds <paramref name="headerNames"/> as global response headers to every
+    /// response object in <paramref name="document"/>. Existing headers with the
+    /// same name are not overwritten (first-wins semantics).
+    /// </summary>
+    /// <remarks>
+    /// This method is called with header names extracted from middleware
+    /// registrations via <see cref="ResponseHeaderExtractor.Extract"/>. The
+    /// resulting headers have a generic <c>string</c> schema and a description
+    /// indicating their middleware origin.
+    /// </remarks>
+    internal static void ApplyGlobalResponseHeaders(
+        OpenApiDocument document,
+        IReadOnlyList<string> headerNames)
+    {
+        if (headerNames.Count == 0)
+            return;
+
+        if (document.Paths is null)
+            return;
+
+        foreach (var (_, pathItemInterface) in document.Paths)
+        {
+            if (pathItemInterface is not OpenApiPathItem pathItem || pathItem.Operations == null)
+                continue;
+
+            foreach (var (_, operation) in pathItem.Operations)
+            {
+                if (operation.Responses == null)
+                    continue;
+
+                foreach (var (_, responseInterface) in operation.Responses)
+                {
+                    if (responseInterface is not OpenApiResponse openApiResponse)
+                        continue;
+
+                    openApiResponse.Headers ??= new Dictionary<string, IOpenApiHeader>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var headerName in headerNames)
+                    {
+                        if (!openApiResponse.Headers.ContainsKey(headerName))
+                        {
+                            openApiResponse.Headers[headerName] = new OpenApiHeader
+                            {
+                                Description = $"Response header '{headerName}' set by middleware.",
+                                Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Document-level tags metadata
+    // =========================================================================
+
+    /// <summary>
+    /// Enriches <c>document.Tags</c> with descriptions and externalDocs extracted from
+    /// Roslyn source analysis and sets the document-level <c>externalDocs</c> when found.
+    /// </summary>
+    /// <remarks>
+    /// Priority: existing non-null values win. Roslyn data is applied only when the
+    /// corresponding field on the tag is currently null/empty. This preserves
+    /// <c>[SwaggerTag]</c> attribute descriptions and XML-doc comments that were resolved
+    /// earlier in the pipeline.
+    /// </remarks>
+    internal static void ApplyDocumentTagsMetadata(
+        OpenApiDocument document,
+        DocumentTagsExtractionResult docTagsResult)
+    {
+        // Enrich individual tags.
+        if (document.Tags is { Count: > 0 } && docTagsResult.TagsByName.Count > 0)
+        {
+            foreach (var tag in document.Tags)
+            {
+                if (!docTagsResult.TagsByName.TryGetValue(tag.Name ?? string.Empty, out var metadata))
+                    continue;
+
+                // Description: only fill when currently empty.
+                if (string.IsNullOrEmpty(tag.Description) &&
+                    !string.IsNullOrEmpty(metadata.Description))
+                {
+                    tag.Description = metadata.Description;
+                }
+
+                // ExternalDocs: only fill when not already present.
+                if (tag.ExternalDocs == null &&
+                    !string.IsNullOrEmpty(metadata.ExternalDocsUrl) &&
+                    Uri.TryCreate(metadata.ExternalDocsUrl, UriKind.Absolute, out var extUri))
+                {
+                    tag.ExternalDocs = new OpenApiExternalDocs
+                    {
+                        Url = extUri,
+                        Description = metadata.ExternalDocsDescription,
+                    };
+                }
+            }
+        }
+
+        // Document-level externalDocs.
+        if (document.ExternalDocs == null &&
+            !string.IsNullOrEmpty(docTagsResult.ExternalDocsUrl) &&
+            Uri.TryCreate(docTagsResult.ExternalDocsUrl, UriKind.Absolute, out var docExtUri))
+        {
+            document.ExternalDocs = new OpenApiExternalDocs
+            {
+                Url = docExtUri,
+                Description = docTagsResult.ExternalDocsDescription,
+            };
+        }
+    }
+
+    // =========================================================================
+    // Global media types
+    // =========================================================================
+
+    /// <summary>
+    /// Applies global Produces/Consumes content types to all operations that have not
+    /// explicitly overridden them via per-action or per-controller <c>[Produces]</c> /
+    /// <c>[Consumes]</c> attributes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Produces (response):</b> For each response entry whose <c>Content</c> dictionary
+    /// was built using the <c>["application/json"]</c> default (i.e. the action and its
+    /// controller have no <c>[Produces]</c> attribute), the content keys are replaced with
+    /// the global list.  Responses that already use an explicit per-action content-type list
+    /// are left unchanged.  Responses without a body (<c>Content</c> is null or empty) are
+    /// also left unchanged.
+    /// </para>
+    /// <para>
+    /// <b>Consumes (request body):</b> When the request body was built using the hardcoded
+    /// <c>"application/json"</c> key (no per-action/controller <c>[Consumes]</c>), the
+    /// content key is replaced with the global list.
+    /// </para>
+    /// </remarks>
+    private static void ApplyGlobalMediaTypes(
+        IReadOnlyList<(ActionInfo Action,
+            IList<System.Reflection.CustomAttributeData> ActionAttrs,
+            IList<System.Reflection.CustomAttributeData> ControllerAttrs,
+            OpenApiOperation Operation)> builtOperations,
+        GlobalMediaTypesExtractionResult globalMediaTypes)
+    {
+        bool hasGlobalProduces = globalMediaTypes.ProducesContentTypes.Count > 0;
+        bool hasGlobalConsumes = globalMediaTypes.ConsumesContentTypes.Count > 0;
+
+        if (!hasGlobalProduces && !hasGlobalConsumes)
+            return;
+
+        foreach (var (_, actionAttrs, controllerAttrs, operation) in builtOperations)
+        {
+            // ── Produces (responses) ──────────────────────────────────────────
+            if (hasGlobalProduces && operation.Responses != null)
+            {
+                // Only apply if the action/controller has no per-action [Produces].
+                bool hasPerActionProduces =
+                    AttributeHelper.HasAttribute(actionAttrs, AttributeHelper.Names.Produces)
+                    || AttributeHelper.HasAttribute(controllerAttrs, AttributeHelper.Names.Produces);
+
+                if (!hasPerActionProduces)
+                {
+                    foreach (var (_, responseInterface) in operation.Responses)
+                    {
+                        if (responseInterface is not OpenApiResponse response)
+                            continue;
+
+                        // Only process responses that have a body (Content is non-null and non-empty).
+                        if (response.Content is not { Count: > 0 })
+                            continue;
+
+                        // Replace the content entries with the global content types.
+                        // We keep the existing schema from the first entry and create
+                        // a new OpenApiMediaType wrapper per content type — consistent
+                        // with BuildOperation which creates new instances per entry.
+                        var firstSchema = response.Content.Values.First().Schema;
+
+                        response.Content.Clear();
+                        foreach (var ct in globalMediaTypes.ProducesContentTypes)
+                            response.Content[ct] = new OpenApiMediaType { Schema = firstSchema };
+                    }
+                }
+            }
+
+            // ── Consumes (request body) ────────────────────────────────────────
+            if (hasGlobalConsumes && operation.RequestBody?.Content is { Count: > 0 })
+            {
+                // Only apply if the action/controller has no per-action [Consumes].
+                bool hasPerActionConsumes =
+                    AttributeHelper.HasAttribute(actionAttrs, AttributeHelper.Names.Consumes)
+                    || AttributeHelper.HasAttribute(controllerAttrs, AttributeHelper.Names.Consumes);
+
+                if (!hasPerActionConsumes)
+                {
+                    var firstSchema = operation.RequestBody.Content.Values.First().Schema;
+
+                    operation.RequestBody.Content.Clear();
+                    foreach (var ct in globalMediaTypes.ConsumesContentTypes)
+                        operation.RequestBody.Content[ct] = new OpenApiMediaType { Schema = firstSchema };
+                }
+            }
+        }
+    }
+
+
+    // =========================================================================
+    // Source analysis
+    // =========================================================================
+
+    /// <summary>
+    /// Attempts to create a <see cref="SourceAnalysisContext"/> by resolving the source root
+    /// and building a Roslyn compilation. Returns <see cref="SourceAnalysisContext.Empty"/>
+    /// on any failure; never throws.
+    /// </summary>
+    private static SourceAnalysisContext TryBuildSourceAnalysisContext(
+        OpenApiDocumentOptions options,
+        AssemblyLoader loader)
+    {
+        try
+        {
+            // 1. Determine source root: explicit override > auto-detect > give up.
+            string? sourceRoot = options.SourceRoot;
+
+            if (string.IsNullOrWhiteSpace(sourceRoot))
+            {
+                if (!SourceRootResolver.TryResolve(options.AssemblyPath, out sourceRoot, out _))
+                    return SourceAnalysisContext.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
+                return SourceAnalysisContext.Empty;
+
+            // 2. Compile sources via Roslyn.
+            var compilationResult = SourceCompiler.Compile(sourceRoot);
+
+            // 3. Locate entry-point syntax node.
+            var entryPoint = loader.Assembly.EntryPoint;
+            SyntaxNode? entryPointNode = null;
+            if (entryPoint != null)
+            {
+                entryPointNode = EntryPointFinder.Find(entryPoint, compilationResult.Compilation);
+            }
+
+            return new SourceAnalysisContext(compilationResult, entryPointNode);
+        }
+        catch
+        {
+            // Any failure in source analysis must not break the main extraction pipeline.
+            return SourceAnalysisContext.Empty;
+        }
+    }
+
 }

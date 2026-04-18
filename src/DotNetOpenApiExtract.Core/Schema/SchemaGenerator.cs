@@ -22,6 +22,13 @@ public sealed class SchemaGenerator
     private readonly Dictionary<string, Type> _schemaIdToType = new(StringComparer.Ordinal); // schema ID → original Type
     private readonly HashSet<string> _generating = new(StringComparer.Ordinal); // cycle detection
     private readonly SchemaOptions _options;
+    private readonly HashSet<string> _warnedConverters = new(StringComparer.Ordinal); // dedup unknown converter warnings
+
+    // Cache for NullableContextAttribute per declaring type — avoids repeated
+    // GetCustomAttributesData() scans on the same type when processing its properties.
+    // Key: type.FullName ?? type.Name (MetadataLoadContext types are not reliably equality-comparable).
+    // Null value means "attribute not present".
+    private readonly Dictionary<string, byte?> _nullableContextByType = new(StringComparer.Ordinal);
 
     // -------------------------------------------------------------------------
     // Primitive FullName → (type, format) look-up table
@@ -159,9 +166,28 @@ public sealed class SchemaGenerator
         var fullName = type.FullName ?? string.Empty;
         if (PrimitiveMap.TryGetValue(fullName, out var primitive))
         {
+            // Check if a globally-registered converter overrides the default primitive schema.
+            // This handles converters like IsoDateTimeConverter or UnixDateTimeConverter
+            // registered globally via SchemaOptions.GlobalConverterTypeNames.
+            // Enum types are excluded here — they are handled via HasApplicableGlobalEnumConverter.
+            foreach (var converterFullName in _options.GlobalConverterTypeNames)
+            {
+                var converterHint = JsonConverterRegistry.TryGet(converterFullName);
+                if (converterHint != null && JsonConverterRegistry.AppliesToType(converterHint, isEnum: false, type.FullName))
+                    return BuildSchemaFromHint(converterHint, type);
+            }
+
             var schema = new OpenApiSchema { Type = primitive.SchemaType };
             if (primitive.Format != null)
                 schema.Format = primitive.Format;
+
+            // Apply global NumberHandling to numeric types only
+            if (primitive.SchemaType == JsonSchemaType.Integer
+                || primitive.SchemaType == JsonSchemaType.Number)
+            {
+                return ApplyNumberHandling(schema, _options.NumberHandling);
+            }
+
             return schema;
         }
 
@@ -232,14 +258,19 @@ public sealed class SchemaGenerator
     // =========================================================================
 
     /// <summary>
-    /// Generates a schema for an enum type, respecting <see cref="SchemaOptions.EnumAsString"/>
-    /// and the presence of <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> on the type.
+    /// Generates a schema for an enum type, respecting <see cref="SchemaOptions.EnumAsString"/>,
+    /// the presence of <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> on the type,
+    /// and any applicable global converters in <see cref="SchemaOptions.GlobalConverterTypeNames"/>.
     /// </summary>
     private IOpenApiSchema GenerateEnumSchema(Type enumType)
     {
-        bool asString = _options.EnumAsString || HasJsonStringEnumConverter(enumType);
+        bool asString = _options.EnumAsString
+            || GetConverterHintForType(enumType, enumType.GetCustomAttributesData())?.SchemaType == JsonSchemaType.String
+            || HasApplicableGlobalEnumConverter();
 
         var fields = enumType.GetFields(BindingFlags.Public | BindingFlags.Static);
+
+        OpenApiSchema schema;
 
         if (asString)
         {
@@ -247,7 +278,7 @@ public sealed class SchemaGenerator
                 .Select(f => (JsonNode)JsonValue.Create(f.Name)!)
                 .ToList();
 
-            return new OpenApiSchema
+            schema = new OpenApiSchema
             {
                 Type = JsonSchemaType.String,
                 Enum = enumValues,
@@ -260,13 +291,19 @@ public sealed class SchemaGenerator
                 .Select(f => (JsonNode)JsonValue.Create(GetEnumFieldIntValue(f))!)
                 .ToList();
 
-            return new OpenApiSchema
+            schema = new OpenApiSchema
             {
                 Type = JsonSchemaType.Integer,
                 Format = "int32",
                 Enum = enumValues,
             };
         }
+
+        // [Obsolete] on the enum type → deprecated: true
+        if (AttributeHelper.HasAttribute(enumType, AttributeHelper.Names.Obsolete))
+            schema.Deprecated = true;
+
+        return schema;
     }
 
     /// <summary>
@@ -300,40 +337,92 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when the type is decorated with
-    /// <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> or the generic form
-    /// <c>[JsonConverter(typeof(JsonStringEnumConverter&lt;T&gt;))]</c>.
-    /// Uses MetadataLoadContext-safe attribute inspection.
+    /// Returns the <see cref="ConverterSchemaHint"/> for the converter declared on <paramref name="type"/>
+    /// or in <paramref name="attrData"/> via <c>[JsonConverter(typeof(X))]</c>,
+    /// or <see langword="null"/> when no such attribute is present or the converter is unknown.
+    /// Logs a one-time warning per unknown converter.
     /// </summary>
-    private static bool HasJsonStringEnumConverter(Type type)
+    private ConverterSchemaHint? GetConverterHintForType(Type targetType, IList<CustomAttributeData> attrData)
     {
-        var jsonConverterAttr = AttributeHelper.GetAttribute(type,
-            "System.Text.Json.Serialization.JsonConverterAttribute");
-
+        var jsonConverterAttr = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.JsonConverter);
         if (jsonConverterAttr == null)
-            return false;
+            return null;
 
-        // The converter type is passed as the first constructor argument (a Type value).
         if (jsonConverterAttr.ConstructorArguments.Count == 0)
-            return false;
+            return null;
 
         var arg = jsonConverterAttr.ConstructorArguments[0];
+        if (arg.Value is not Type converterType)
+            return null;
 
-        // The argument value is a Type object when [JsonConverter(typeof(...))] is used.
-        if (arg.Value is Type converterType)
+        var converterFullName = converterType.FullName ?? string.Empty;
+        var hint = JsonConverterRegistry.TryGet(converterFullName);
+
+        if (hint == null)
         {
-            var converterFullName = converterType.FullName ?? string.Empty;
+            // Emit a single warning per unique unknown converter to avoid log spam.
+            if (_warnedConverters.Add(converterFullName))
+                Console.Error.WriteLine(
+                    $"[DotNetOpenApiExtract] Unknown [JsonConverter]: {converterFullName} — schema unchanged.");
+            return null;
+        }
 
-            // Non-generic form: System.Text.Json.Serialization.JsonStringEnumConverter
-            if (converterFullName.StartsWith(
-                "System.Text.Json.Serialization.JsonStringEnumConverter",
-                StringComparison.Ordinal))
-            {
+        // Verify that the hint applies to the target type.
+        if (!JsonConverterRegistry.AppliesToType(hint, targetType.IsEnum, targetType.FullName))
+            return null;
+
+        return hint;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when at least one globally registered converter
+    /// (from <see cref="SchemaOptions.GlobalConverterTypeNames"/>) applies to enum types.
+    /// </summary>
+    private bool HasApplicableGlobalEnumConverter()
+    {
+        foreach (var name in _options.GlobalConverterTypeNames)
+        {
+            var hint = JsonConverterRegistry.TryGet(name);
+            if (hint == null) continue;
+            if (JsonConverterRegistry.AppliesToType(hint, isEnum: true, targetTypeFullName: null))
                 return true;
-            }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Builds an <see cref="OpenApiSchema"/> from a <see cref="ConverterSchemaHint"/>.
+    /// For enum types with a string-type hint, enum field names are preserved as string values.
+    /// For other types, a simple schema with the specified type/format/description is returned.
+    /// </summary>
+    private static IOpenApiSchema BuildSchemaFromHint(ConverterSchemaHint hint, Type targetType)
+    {
+        // For string enum override: produce enum values as names (string schema with enum).
+        if (hint.SchemaType == JsonSchemaType.String && targetType.IsEnum)
+        {
+            var fields = targetType.GetFields(BindingFlags.Public | BindingFlags.Static);
+            var enumValues = fields
+                .Select(f => (JsonNode)JsonValue.Create(f.Name)!)
+                .ToList();
+
+            var enumSchema = new OpenApiSchema
+            {
+                Type = JsonSchemaType.String,
+                Enum = enumValues,
+            };
+            if (!string.IsNullOrEmpty(hint.Description))
+                enumSchema.Description = hint.Description;
+            return enumSchema;
+        }
+
+        // For all other types (DateTime → IsoDateTimeConverter, etc.): plain scalar schema.
+        var schema = new OpenApiSchema { Type = hint.SchemaType };
+        if (!string.IsNullOrEmpty(hint.Format))
+            schema.Format = hint.Format;
+        if (!string.IsNullOrEmpty(hint.Description))
+            schema.Description = hint.Description;
+        return schema;
     }
 
     // =========================================================================
@@ -384,6 +473,15 @@ public sealed class SchemaGenerator
 
                 // Generate the property schema.
                 var propSchema = GenerateSchema(propType);
+
+                // Apply property-level [JsonConverter] override.
+                // This handles cases such as [JsonConverter(typeof(JsonStringEnumConverter))]
+                // placed on a property whose enum type does not carry the converter itself.
+                var propConverterHint = GetConverterHintForType(propType, propAttrData);
+                if (propConverterHint != null)
+                {
+                    propSchema = BuildSchemaFromHint(propConverterHint, propType);
+                }
 
                 // Apply nullable flag for reference type properties (matches Swashbuckle behavior).
                 // Swashbuckle marks all reference type properties as nullable unless NRT
@@ -543,8 +641,8 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Applies type-level attributes (e.g. <c>[JsonUnmappedMemberHandling]</c>) to the
-    /// object schema generated for <paramref name="type"/>.
+    /// Applies type-level attributes (e.g. <c>[JsonUnmappedMemberHandling]</c>,
+    /// <c>[Obsolete]</c>) to the object schema generated for <paramref name="type"/>.
     /// </summary>
     private static void ApplyTypeAttributes(OpenApiSchema schema, Type type)
     {
@@ -558,6 +656,10 @@ public sealed class SchemaGenerator
             if (val == 1)
                 schema.AdditionalPropertiesAllowed = false;
         }
+
+        // [Obsolete] on the DTO class → deprecated: true on the object schema
+        if (AttributeHelper.HasAttribute(type, AttributeHelper.Names.Obsolete))
+            schema.Deprecated = true;
     }
 
     /// <summary>
@@ -649,8 +751,8 @@ public sealed class SchemaGenerator
 
     /// <summary>
     /// Resolves the serialized name for a property.
-    /// Uses <c>[JsonPropertyName]</c> if present; otherwise applies camelCase when
-    /// <see cref="SchemaOptions.CamelCasePropertyNames"/> is enabled.
+    /// Uses <c>[JsonPropertyName]</c> if present; otherwise applies the configured
+    /// <see cref="SchemaOptions.NamingPolicy"/>.
     /// Accepts pre-fetched attribute data to avoid repeated GetCustomAttributesData() calls.
     /// </summary>
     private string ResolvePropertyName(IList<CustomAttributeData> attrData, string fallback)
@@ -663,7 +765,7 @@ public sealed class SchemaGenerator
                 return name;
         }
 
-        return _options.CamelCasePropertyNames ? ToCamelCase(fallback) : fallback;
+        return ApplyNamingPolicy(fallback, _options.NamingPolicy);
     }
 
     /// <summary>
@@ -673,9 +775,12 @@ public sealed class SchemaGenerator
     /// Non-nullable value types (e.g. <c>int</c>, <c>bool</c>) are NOT automatically
     /// required — they always have a default value in .NET and Swashbuckle does not
     /// mark them required either.
+    /// When <see cref="SchemaOptions.DefaultIgnoreCondition"/> is
+    /// <see cref="JsonIgnoreCondition.WhenWritingNull"/>, nullable properties are
+    /// never required (they are omitted when null).
     /// Accepts pre-fetched attribute data to avoid repeated GetCustomAttributesData() calls.
     /// </summary>
-    private static bool IsPropertyRequired(IList<CustomAttributeData> attrData, Type propType, PropertyInfo prop)
+    private bool IsPropertyRequired(IList<CustomAttributeData> attrData, Type propType, PropertyInfo prop)
     {
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Required))
             return true;
@@ -686,10 +791,26 @@ public sealed class SchemaGenerator
         // Value types (int, bool, enums, structs) are NOT auto-required.
         // Swashbuckle only marks [Required]-annotated or NRT non-nullable reference types.
         if (propType.IsValueType)
+        {
+            // Nullable<T> value types: if WhenWritingNull, they are not required
+            if (IsNullableValueType(propType)
+                && _options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull)
+            {
+                return false;
+            }
+
             return false;
+        }
 
         // Reference types: use NRT nullability analysis.
-        return !IsNullableReferenceProperty(attrData, prop);
+        var isNullable = IsNullableReferenceProperty(attrData, prop);
+
+        // When DefaultIgnoreCondition == WhenWritingNull, nullable properties are NOT required
+        // because they are omitted from serialization when null.
+        if (isNullable && _options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull)
+            return false;
+
+        return !isNullable;
     }
 
     // =========================================================================
@@ -705,7 +826,7 @@ public sealed class SchemaGenerator
     /// or conservatively when no annotation is present.
     /// Accepts pre-fetched attribute data to avoid repeated GetCustomAttributesData() calls.
     /// </summary>
-    private static bool IsNullableReferenceProperty(IList<CustomAttributeData> attrData, PropertyInfo prop)
+    private bool IsNullableReferenceProperty(IList<CustomAttributeData> attrData, PropertyInfo prop)
     {
         // NullableAttribute on the property getter return type
         var nullableAttr = AttributeHelper.GetAttribute(attrData, NullableAttributeFullName);
@@ -734,15 +855,22 @@ public sealed class SchemaGenerator
         return true;
     }
 
-    private static byte? GetNullableContext(Type? type)
+    private byte? GetNullableContext(Type? type)
     {
         if (type == null) return null;
+        var key = type.FullName ?? type.Name;
+        if (_nullableContextByType.TryGetValue(key, out var cached))
+            return cached;
+
         var attr = type.GetCustomAttributesData()
             .FirstOrDefault(a => a.AttributeType.FullName == NullableContextAttributeFullName);
+        byte? value = null;
         if (attr != null && attr.ConstructorArguments.Count == 1
             && attr.ConstructorArguments[0].Value is byte b)
-            return b;
-        return null;
+            value = b;
+
+        _nullableContextByType[key] = value;
+        return value;
     }
 
     private static byte? GetAssemblyNullableContext(Assembly? assembly)
@@ -903,12 +1031,102 @@ public sealed class SchemaGenerator
     }
 
     // =========================================================================
+    // NumberHandling schema modification
+    // =========================================================================
+
+    /// <summary>
+    /// Wraps a numeric schema to reflect global <see cref="JsonNumberHandling"/> settings.
+    /// <list type="bullet">
+    ///   <item>
+    ///     <see cref="JsonNumberHandling.WriteAsString"/> — the schema type becomes <c>string</c>
+    ///     with the original format preserved.
+    ///   </item>
+    ///   <item>
+    ///     <see cref="JsonNumberHandling.AllowReadingFromString"/> — wraps in
+    ///     <c>anyOf: [{original}, {type: string, pattern: "^-?\\d+(\\.\\d+)?$"}]</c>
+    ///     to express that the field can be read from either a number or a string.
+    ///     This shape is valid for both OpenAPI 3.0 and 3.1.
+    ///   </item>
+    /// </list>
+    /// Returns the schema unchanged when <paramref name="handling"/> is
+    /// <see cref="JsonNumberHandling.Strict"/> (0) or null.
+    /// </summary>
+    /// <remarks>
+    /// When both <c>WriteAsString</c> and <c>AllowReadingFromString</c> are set simultaneously,
+    /// <c>WriteAsString</c> takes precedence: the schema becomes <c>{type: string, format: &lt;original&gt;}</c>.
+    /// Rationale: the wire format is string in both directions, so no <c>anyOf</c> union is needed.
+    /// </remarks>
+    private static IOpenApiSchema ApplyNumberHandling(IOpenApiSchema schema, JsonNumberHandling? handling)
+    {
+        if (handling == null || handling.Value == JsonNumberHandling.Strict)
+            return schema;
+
+        if (schema is not OpenApiSchema concrete)
+            return schema; // cannot modify $ref schemas inline
+
+        // WriteAsString: the number is written (and read) as a JSON string.
+        if ((handling.Value & JsonNumberHandling.WriteAsString) != 0)
+        {
+            var stringSchema = new OpenApiSchema
+            {
+                Type   = JsonSchemaType.String,
+                Format = concrete.Format,
+            };
+            return stringSchema;
+        }
+
+        // AllowReadingFromString: the number can be read from either a JSON number or a JSON string.
+        // We express this as anyOf: [{number schema}, {string + pattern}]
+        // which is compatible with both OpenAPI 3.0 and 3.1.
+        if ((handling.Value & JsonNumberHandling.AllowReadingFromString) != 0)
+        {
+            return new OpenApiSchema
+            {
+                AnyOf = new List<IOpenApiSchema>
+                {
+                    concrete,
+                    new OpenApiSchema
+                    {
+                        Type    = JsonSchemaType.String,
+                        Pattern = @"^-?\d+(\.\d+)?$",
+                    },
+                },
+            };
+        }
+
+        return schema;
+    }
+
+    // =========================================================================
     // Utility
     // =========================================================================
 
     /// <summary>
+    /// Applies the given naming policy to a PascalCase C# property name.
+    /// When the property has a <c>[JsonPropertyName]</c> attribute, that takes
+    /// priority and this method is never called.
+    /// </summary>
+    internal static string ApplyNamingPolicy(string name, JsonNamingPolicy policy)
+    {
+        if (string.IsNullOrEmpty(name))
+            return name;
+
+        return policy switch
+        {
+            JsonNamingPolicy.Preserve      => name,
+            JsonNamingPolicy.CamelCase     => ToCamelCase(name),
+            JsonNamingPolicy.SnakeCaseLower=> ToSnakeCase(name, upperCase: false),
+            JsonNamingPolicy.SnakeCaseUpper=> ToSnakeCase(name, upperCase: true),
+            JsonNamingPolicy.KebabCaseLower=> ToKebabCase(name, upperCase: false),
+            JsonNamingPolicy.KebabCaseUpper=> ToKebabCase(name, upperCase: true),
+            _                              => name,
+        };
+    }
+
+    /// <summary>
     /// Converts a PascalCase or camelCase identifier to camelCase.
-    /// Leaves already-camelCase strings unchanged.
+    /// Only lowercases the first character; the rest of the string is preserved as-is.
+    /// This matches the behavior of <c>JsonNamingPolicy.CamelCase</c> in System.Text.Json.
     /// </summary>
     private static string ToCamelCase(string name)
     {
@@ -920,6 +1138,74 @@ public sealed class SchemaGenerator
 
         return char.ToLowerInvariant(name[0]) + name[1..];
     }
+
+    /// <summary>
+    /// Converts a PascalCase identifier to snake_case.
+    /// Inserts a separator between a lowercase letter followed by an uppercase letter,
+    /// and between a run of uppercase letters followed by a lowercase letter (acronyms).
+    /// Examples:
+    ///   <c>PascalCase</c>    → <c>pascal_case</c>
+    ///   <c>XMLHttpRequest</c>→ <c>xml_http_request</c>
+    ///   <c>HTTPSEnabled</c>  → <c>https_enabled</c>
+    /// </summary>
+    private static string ToSnakeCase(string name, bool upperCase)
+    {
+        if (string.IsNullOrEmpty(name))
+            return name;
+
+        var sb = new System.Text.StringBuilder(name.Length + 4);
+
+        for (int i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+
+            if (i > 0 && char.IsUpper(c))
+            {
+                bool prevLower  = char.IsLower(name[i - 1]);
+                bool nextLower  = i + 1 < name.Length && char.IsLower(name[i + 1]);
+                bool prevUpper  = char.IsUpper(name[i - 1]);
+
+                // Insert separator before transition: lowercase→upper or UPPER→Lower (acronym boundary)
+                if (prevLower || (prevUpper && nextLower))
+                    sb.Append('_');
+            }
+
+            sb.Append(upperCase ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Converts a PascalCase identifier to kebab-case using the same word-splitting
+    /// rules as <see cref="ToSnakeCase"/> but with <c>-</c> as the separator.
+    /// </summary>
+    private static string ToKebabCase(string name, bool upperCase)
+    {
+        if (string.IsNullOrEmpty(name))
+            return name;
+
+        var sb = new System.Text.StringBuilder(name.Length + 4);
+
+        for (int i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+
+            if (i > 0 && char.IsUpper(c))
+            {
+                bool prevLower  = char.IsLower(name[i - 1]);
+                bool nextLower  = i + 1 < name.Length && char.IsLower(name[i + 1]);
+                bool prevUpper  = char.IsUpper(name[i - 1]);
+
+                if (prevLower || (prevUpper && nextLower))
+                    sb.Append('-');
+            }
+
+            sb.Append(upperCase ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c));
+        }
+
+        return sb.ToString();
+    }
 }
 
 /// <summary>
@@ -928,10 +1214,10 @@ public sealed class SchemaGenerator
 public sealed class SchemaOptions
 {
     /// <summary>
-    /// Use camelCase for property names (default: <see langword="true"/>).
-    /// Mirrors the default ASP.NET Core <c>JsonSerializerOptions.PropertyNamingPolicy</c>.
+    /// The naming policy to apply to property names.
+    /// Defaults to <see cref="JsonNamingPolicy.CamelCase"/> to match the ASP.NET Core default.
     /// </summary>
-    public bool CamelCasePropertyNames { get; init; } = true;
+    public JsonNamingPolicy NamingPolicy { get; init; } = JsonNamingPolicy.CamelCase;
 
     /// <summary>
     /// Serialize enums as strings (default: <see langword="false"/>).
@@ -939,4 +1225,29 @@ public sealed class SchemaOptions
     /// Per-type <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> overrides this setting.
     /// </summary>
     public bool EnumAsString { get; init; } = false;
+
+    /// <summary>
+    /// The naming policy applied to dictionary key names.
+    /// When null, falls back to <see cref="NamingPolicy"/>.
+    /// </summary>
+    public JsonNamingPolicy? DictionaryKeyPolicy { get; init; }
+
+    /// <summary>
+    /// Controls when properties are omitted from the serialized output globally.
+    /// When <see cref="JsonIgnoreCondition.WhenWritingNull"/>, nullable properties are
+    /// excluded from the <c>required</c> array.
+    /// </summary>
+    public JsonIgnoreCondition? DefaultIgnoreCondition { get; init; }
+
+    /// <summary>
+    /// Controls how numbers are read and written globally.
+    /// Affects the generated schema type for numeric properties.
+    /// </summary>
+    public JsonNumberHandling? NumberHandling { get; init; }
+
+    /// <summary>
+    /// Globally registered converter type names. Used by the T6 registry to apply
+    /// converter-specific schema transformations.
+    /// </summary>
+    public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
 }

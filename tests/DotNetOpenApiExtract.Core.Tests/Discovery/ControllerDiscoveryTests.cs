@@ -83,8 +83,15 @@ public class ControllerDiscoveryTests : IDisposable
     [Fact]
     public void DiscoverControllers_ReturnsExpectedCount()
     {
-        // Users, Health, Orders, Products, Files — the five that should be discovered
-        _controllers.Should().HaveCount(5);
+        // Users, Health, Orders, Products, Files, Deprecated, ObsoleteDto (7)
+        // + Versioned, Status, VersioningUnion, VersioningDedup, VersioningActionNeutral,
+        //   VersioningIntConstructor (6 versioning test controllers added for T10)
+        // + VersioningStatusSuffix, VersioningDoubleStatusSuffix (2 status-suffix controllers added for W1)
+        // + VersioningBareDouble, VersioningNeutralOverridesVersion (2 audit gap fixtures)
+        // + Secure (1 security test controller added for T3)
+        // + JsonConverter (1 converter schema test controller added for T6)
+        // + RateLimiting, Caching (2 rate-limiting/caching controllers added for T13)
+        _controllers.Should().HaveCount(21);
     }
 
     // -------------------------------------------------------------------------

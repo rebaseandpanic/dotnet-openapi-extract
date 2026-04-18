@@ -99,7 +99,7 @@ Document info:
 
 Behavior:
   --xml <path>            Path to XML file (default: next to DLL, same path with .xml extension)
-  --camel-case            Property names in camelCase (default: true)
+  --naming-policy <camelCase|snake_case_lower|...>  Property naming policy (default: camelCase)
   --enum-as-string        Enums as strings (default: false)
   --openapi-version <3.0|3.1|3.2>  OpenAPI version (default: 3.0)
 ```

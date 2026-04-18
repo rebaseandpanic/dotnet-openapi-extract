@@ -43,10 +43,9 @@ var xmlOption = new Option<string?>("--xml")
     Description = "XML documentation file path (default: auto-detected next to the DLL)",
 };
 
-var camelCaseOption = new Option<bool>("--camel-case")
+var namingPolicyOption = new Option<string?>("--naming-policy")
 {
-    Description = "Use camelCase property names in generated schemas",
-    DefaultValueFactory = _ => true,
+    Description = "JSON property naming policy: preserve, camelCase (default), snake_case_lower, snake_case_upper, kebab-case-lower, kebab-case-upper",
 };
 
 var enumAsStringOption = new Option<bool>("--enum-as-string")
@@ -67,6 +66,61 @@ var excludePathsOption = new Option<string[]>("--exclude-path")
     AllowMultipleArgumentsPerToken = false,
 };
 
+var sourceOption = new Option<string?>("--source")
+{
+    Description = "Path to a specific source file (e.g. entry point). Reserved for future use.",
+};
+
+var sourceRootOption = new Option<string?>("--source-root")
+{
+    Description = "Override the auto-detected source root directory (the folder containing .csproj). " +
+                  "Use when the project layout does not follow the standard bin/ output convention.",
+};
+
+var contactNameOption = new Option<string?>("--contact-name")
+{
+    Description = "Name of the contact person or organisation (written to info.contact.name)",
+};
+
+var contactEmailOption = new Option<string?>("--contact-email")
+{
+    Description = "Email address of the API contact (written to info.contact.email)",
+};
+
+var contactUrlOption = new Option<string?>("--contact-url")
+{
+    Description = "URL of the contact information page — must be an absolute URI (info.contact.url)",
+};
+
+var licenseNameOption = new Option<string?>("--license-name")
+{
+    Description = "SPDX license name, e.g. MIT or Apache-2.0 (written to info.license.name)",
+};
+
+var licenseUrlOption = new Option<string?>("--license-url")
+{
+    Description = "URL pointing to the full license text — must be an absolute URI (info.license.url)",
+};
+
+var termsOfServiceOption = new Option<string?>("--terms-of-service")
+{
+    Description = "URL to the Terms of Service for the API — must be an absolute URI (info.termsOfService)",
+};
+
+var serversOption = new Option<string[]>("--server")
+{
+    Description = "Server base URL to include in the servers array (can be specified multiple times)",
+    AllowMultipleArgumentsPerToken = false,
+};
+
+var pathBaseEmissionOption = new Option<string>("--path-base-emission")
+{
+    Description = "How to emit the path base detected via app.UsePathBase(): " +
+                  "'prefix' (default) prepends to every path, " +
+                  "'servers' adds a relative servers[] entry",
+    DefaultValueFactory = _ => "prefix",
+};
+
 // ── Root command ──────────────────────────────────────────────────────────────
 
 var rootCommand = new RootCommand(
@@ -85,10 +139,20 @@ rootCommand.Options.Add(titleOption);
 rootCommand.Options.Add(versionOption);
 rootCommand.Options.Add(descriptionOption);
 rootCommand.Options.Add(xmlOption);
-rootCommand.Options.Add(camelCaseOption);
+rootCommand.Options.Add(namingPolicyOption);
 rootCommand.Options.Add(enumAsStringOption);
 rootCommand.Options.Add(openapiVersionOption);
 rootCommand.Options.Add(excludePathsOption);
+rootCommand.Options.Add(sourceOption);
+rootCommand.Options.Add(sourceRootOption);
+rootCommand.Options.Add(contactNameOption);
+rootCommand.Options.Add(contactEmailOption);
+rootCommand.Options.Add(contactUrlOption);
+rootCommand.Options.Add(licenseNameOption);
+rootCommand.Options.Add(licenseUrlOption);
+rootCommand.Options.Add(termsOfServiceOption);
+rootCommand.Options.Add(serversOption);
+rootCommand.Options.Add(pathBaseEmissionOption);
 
 rootCommand.SetAction(async (parseResult, cancellationToken) =>
 {
@@ -99,10 +163,46 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var version      = parseResult.GetValue(versionOption)!;
     var description  = parseResult.GetValue(descriptionOption);
     var xml          = parseResult.GetValue(xmlOption);
-    var camelCase    = parseResult.GetValue(camelCaseOption);
+    var namingPolicy = parseResult.GetValue(namingPolicyOption);
     var enumAsStr    = parseResult.GetValue(enumAsStringOption);
     var openapiVer   = parseResult.GetValue(openapiVersionOption)!;
     var excludePaths = parseResult.GetValue(excludePathsOption);
+    var source       = parseResult.GetValue(sourceOption);
+    var sourceRoot   = parseResult.GetValue(sourceRootOption);
+    var contactName  = parseResult.GetValue(contactNameOption);
+    var contactEmail = parseResult.GetValue(contactEmailOption);
+    var contactUrl   = parseResult.GetValue(contactUrlOption);
+    var licenseName  = parseResult.GetValue(licenseNameOption);
+    var licenseUrl   = parseResult.GetValue(licenseUrlOption);
+    var termsOfSvc   = parseResult.GetValue(termsOfServiceOption);
+    var servers           = parseResult.GetValue(serversOption);
+    var pathBaseEmission  = parseResult.GetValue(pathBaseEmissionOption)!;
+
+    // ── Resolve naming policy ─────────────────────────────────────────────────
+    JsonNamingPolicy? resolvedNamingPolicy = null;
+
+    if (!string.IsNullOrEmpty(namingPolicy))
+    {
+        resolvedNamingPolicy = namingPolicy!.ToLowerInvariant() switch
+        {
+            "preserve"         => JsonNamingPolicy.Preserve,
+            "camelcase"        => JsonNamingPolicy.CamelCase,
+            "snake_case_lower" => JsonNamingPolicy.SnakeCaseLower,
+            "snake_case_upper" => JsonNamingPolicy.SnakeCaseUpper,
+            "kebab-case-lower" => JsonNamingPolicy.KebabCaseLower,
+            "kebab-case-upper" => JsonNamingPolicy.KebabCaseUpper,
+            _                  => (JsonNamingPolicy?)null,
+        };
+
+        if (resolvedNamingPolicy == null)
+        {
+            Console.Error.WriteLine(
+                $"Error: Unknown --naming-policy '{namingPolicy}'. " +
+                "Use: preserve, camelCase, snake_case_lower, snake_case_upper, kebab-case-lower, kebab-case-upper");
+            return 1;
+        }
+    }
+    // If not specified, resolvedNamingPolicy stays null → defaults to CamelCase in builder
 
     // ── Validate assembly path ────────────────────────────────────────────────
     if (!assembly.Exists)
@@ -127,19 +227,42 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         return 1;
     }
 
+    // ── Validate path-base-emission ───────────────────────────────────────────
+    if (!pathBaseEmission.Equals("prefix", StringComparison.OrdinalIgnoreCase)
+        && !pathBaseEmission.Equals("servers", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.Error.WriteLine(
+            $"Error: Unknown --path-base-emission value '{pathBaseEmission}'. Use 'prefix' or 'servers'.");
+        return 1;
+    }
+
+    var pathBaseEmissionMode = pathBaseEmission.Equals("servers", StringComparison.OrdinalIgnoreCase)
+        ? PathBaseEmission.ServersEntry
+        : PathBaseEmission.PathPrefix;
+
     try
     {
         // ── Build document ────────────────────────────────────────────────────
         var options = new OpenApiDocumentOptions
         {
-            AssemblyPath           = assembly.FullName,
-            XmlPath                = xml,
-            Title                  = title ?? Path.GetFileNameWithoutExtension(assembly.Name),
-            Version                = version,
-            Description            = description,
-            CamelCasePropertyNames = camelCase,
-            EnumAsString           = enumAsStr,
-            ExcludePathPrefixes    = excludePaths is { Length: > 0 } ? excludePaths : null,
+            AssemblyPath        = assembly.FullName,
+            XmlPath             = xml,
+            Title               = title ?? Path.GetFileNameWithoutExtension(assembly.Name),
+            Version             = version,
+            Description         = description,
+            NamingPolicy        = resolvedNamingPolicy,
+            EnumAsString        = enumAsStr,
+            ExcludePathPrefixes = excludePaths is { Length: > 0 } ? excludePaths : null,
+            SourcePath          = source,
+            SourceRoot          = sourceRoot,
+            ContactName         = contactName,
+            ContactEmail        = contactEmail,
+            ContactUrl          = contactUrl,
+            LicenseName         = licenseName,
+            LicenseUrl          = licenseUrl,
+            TermsOfService      = termsOfSvc,
+            Servers             = servers is { Length: > 0 } ? servers : null,
+            PathBaseEmission    = pathBaseEmissionMode,
         };
 
         var document = OpenApiDocumentBuilder.Build(options);

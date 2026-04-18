@@ -84,7 +84,7 @@ public sealed class DocumentationResolver
     ///   <item>Description: [SwaggerOperation] → [EndpointDescription] → XML &lt;remarks&gt;</item>
     ///   <item>OperationId: [SwaggerOperation] → HTTP attribute Name named arg</item>
     ///   <item>Tags: [SwaggerOperation] → [Tags] → controller name</item>
-    ///   <item>Deprecated: presence of [Obsolete] on the method</item>
+    ///   <item>Deprecated: presence of [Obsolete] on the method or on the controller class</item>
     ///   <item>ParameterDescriptions: attribute-sourced descriptions merged with XML &lt;param&gt;</item>
     ///   <item>ResponseDescriptions: attribute-sourced descriptions merged with XML &lt;response&gt;</item>
     /// </list>
@@ -176,7 +176,9 @@ public sealed class DocumentationResolver
             tags = GetOrCreateControllerDefaultTag(action.Controller.Name);
 
         // --- Deprecated ---
-        bool deprecated = AttributeHelper.HasAttribute(method, AttributeHelper.Names.Obsolete);
+        // [Obsolete] on the action method OR on the controller class makes the operation deprecated.
+        bool deprecated = AttributeHelper.HasAttribute(method, AttributeHelper.Names.Obsolete)
+                       || AttributeHelper.HasAttribute(action.Controller.Type, AttributeHelper.Names.Obsolete);
 
         // --- ParameterDescriptions ---
         // Merge: attribute-sourced description (already in ActionParameterInfo.Description)

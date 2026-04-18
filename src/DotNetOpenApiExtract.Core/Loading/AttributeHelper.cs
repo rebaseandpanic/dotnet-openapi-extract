@@ -57,6 +57,18 @@ public static class AttributeHelper
     }
 
     /// <summary>
+    /// Get all attribute data matching the full type name, using a pre-fetched attribute list.
+    /// </summary>
+    public static IEnumerable<CustomAttributeData> GetAttributes(
+        IList<CustomAttributeData> attrData,
+        string attributeFullName)
+    {
+        foreach (var a in attrData)
+            if (a.AttributeType.FullName == attributeFullName)
+                yield return a;
+    }
+
+    /// <summary>
     /// Get the first attribute data matching any of the given full type names.
     /// </summary>
     public static CustomAttributeData? GetAttribute(MemberInfo member, params string[] attributeFullNames)
@@ -184,6 +196,29 @@ public static class AttributeHelper
 
         // System.Text.Json.Serialization — advanced
         public const string JsonUnmappedMemberHandling = "System.Text.Json.Serialization.JsonUnmappedMemberHandlingAttribute";
+        public const string JsonConverter = "System.Text.Json.Serialization.JsonConverterAttribute";
+
+        // Asp.Versioning (current namespace)
+        public const string ApiVersion = "Asp.Versioning.ApiVersionAttribute";
+        public const string MapToApiVersion = "Asp.Versioning.MapToApiVersionAttribute";
+        public const string ApiVersionNeutral = "Asp.Versioning.ApiVersionNeutralAttribute";
+
+        // Asp.Versioning (legacy Microsoft.AspNetCore.Mvc.Versioning namespace)
+        public const string ApiVersionLegacy = "Microsoft.AspNetCore.Mvc.ApiVersionAttribute";
+        public const string MapToApiVersionLegacy = "Microsoft.AspNetCore.Mvc.MapToApiVersionAttribute";
+        public const string ApiVersionNeutralLegacy = "Microsoft.AspNetCore.Mvc.ApiVersionNeutralAttribute";
+
+        // ASP.NET Core Authorization
+        public const string Authorize = "Microsoft.AspNetCore.Authorization.AuthorizeAttribute";
+        public const string AllowAnonymous = "Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute";
+
+        // ASP.NET Core Rate Limiting
+        public const string EnableRateLimiting = "Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute";
+        public const string DisableRateLimiting = "Microsoft.AspNetCore.RateLimiting.DisableRateLimitingAttribute";
+
+        // ASP.NET Core Response Caching
+        public const string ResponseCache = "Microsoft.AspNetCore.Mvc.ResponseCacheAttribute";
+        public const string OutputCache = "Microsoft.AspNetCore.OutputCaching.OutputCacheAttribute";
     }
 
     /// <summary>
