@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using Microsoft.OpenApi;
 
@@ -22,6 +24,7 @@ public sealed class SchemaGenerator
     private readonly Dictionary<string, Type> _schemaIdToType = new(StringComparer.Ordinal); // schema ID → original Type
     private readonly HashSet<string> _generating = new(StringComparer.Ordinal); // cycle detection
     private readonly SchemaOptions _options;
+    private readonly DocumentationResolver? _docResolver;
     private readonly HashSet<string> _warnedConverters = new(StringComparer.Ordinal); // dedup unknown converter warnings
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
@@ -114,9 +117,14 @@ public sealed class SchemaGenerator
     /// Initializes a new <see cref="SchemaGenerator"/> with optional configuration.
     /// </summary>
     /// <param name="options">Schema generation options. Uses defaults when <see langword="null"/>.</param>
-    public SchemaGenerator(SchemaOptions? options = null)
+    /// <param name="docResolver">
+    /// Optional documentation resolver. When supplied, enum schemas will include an
+    /// <c>x-enum-descriptions</c> extension populated from XML <c>&lt;summary&gt;</c> tags.
+    /// </param>
+    public SchemaGenerator(SchemaOptions? options = null, DocumentationResolver? docResolver = null)
     {
         _options = options ?? new SchemaOptions();
+        _docResolver = docResolver;
     }
 
     /// <summary>All generated component schemas (for the components/schemas section).</summary>
@@ -302,6 +310,30 @@ public sealed class SchemaGenerator
         // [Obsolete] on the enum type → deprecated: true
         if (AttributeHelper.HasAttribute(enumType, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
+
+        // x-enum-descriptions — attach when doc resolver is available and at least one value
+        // has a non-empty XML <summary>. Array length must match enum[] array length.
+        if (_docResolver != null)
+        {
+            var descriptions = new List<string>(fields.Length);
+            bool anyNonEmpty = false;
+            foreach (var field in fields)
+            {
+                var desc = _docResolver.ResolveEnumValueDescription(enumType, field.Name);
+                descriptions.Add(desc);
+                if (!string.IsNullOrEmpty(desc))
+                    anyNonEmpty = true;
+            }
+
+            if (anyNonEmpty)
+            {
+                schema.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+                var arr = new JsonArray();
+                foreach (var d in descriptions)
+                    arr.Add(JsonValue.Create(d));
+                schema.Extensions["x-enum-descriptions"] = new JsonNodeExtension(arr);
+            }
+        }
 
         return schema;
     }

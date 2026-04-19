@@ -300,6 +300,21 @@ public sealed class DocumentationResolver
     }
 
     /// <summary>
+    /// Resolve the XML doc <c>&lt;summary&gt;</c> for a single enum member value.
+    /// </summary>
+    /// <param name="enumType">The enum type that declares the member.</param>
+    /// <param name="memberName">The name of the enum member (e.g. <c>"Active"</c>).</param>
+    /// <returns>
+    /// The trimmed summary text, or an empty string when no XML doc is present for the member.
+    /// </returns>
+    public string ResolveEnumValueDescription(Type enumType, string memberName)
+    {
+        ArgumentNullException.ThrowIfNull(enumType);
+        ArgumentNullException.ThrowIfNull(memberName);
+        return _xmlParser.GetFieldDoc(enumType, memberName)?.Summary ?? string.Empty;
+    }
+
+    /// <summary>
     /// Resolve tag description for a controller.
     /// </summary>
     /// <remarks>

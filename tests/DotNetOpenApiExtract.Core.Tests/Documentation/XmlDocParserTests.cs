@@ -311,6 +311,36 @@ public class XmlDocParserTests : IDisposable
         entry!.Summary.Should().Be("Banned account");
     }
 
+    [Fact]
+    public void GetFieldDoc_ConnectionState_NoSummary_ReturnsNull()
+    {
+        // ConnectionState values have no XML <summary> — GetFieldDoc should return null
+        var connectionStateType = _loader.Assembly.GetType("SampleApi.Models.ConnectionState")!;
+        var entry = _parser.GetFieldDoc(connectionStateType, "Connected");
+
+        entry.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetFieldDoc_TrafficLight_DocumentedValue_HasSummary()
+    {
+        var trafficLightType = _loader.Assembly.GetType("SampleApi.Models.TrafficLight")!;
+        var entry = _parser.GetFieldDoc(trafficLightType, "Red");
+
+        entry.Should().NotBeNull();
+        entry!.Summary.Should().Be("Stop — vehicles must halt.");
+    }
+
+    [Fact]
+    public void GetFieldDoc_TrafficLight_UndocumentedValue_ReturnsNull()
+    {
+        // Yellow has no XML <summary>
+        var trafficLightType = _loader.Assembly.GetType("SampleApi.Models.TrafficLight")!;
+        var entry = _parser.GetFieldDoc(trafficLightType, "Yellow");
+
+        entry.Should().BeNull();
+    }
+
     // =========================================================================
     // Edge cases
     // =========================================================================

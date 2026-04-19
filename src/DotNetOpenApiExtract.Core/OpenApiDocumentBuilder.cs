@@ -6,6 +6,7 @@ using DotNetOpenApiExtract.Core.Extraction;
 using DotNetOpenApiExtract.Core.Schema;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
+using DotNetOpenApiExtract.Core.Validation;
 using Microsoft.CodeAnalysis;
 
 // Alias to resolve ambiguity: our ParameterLocation vs Microsoft.OpenApi.ParameterLocation
@@ -187,12 +188,84 @@ public sealed class OpenApiDocumentBuilder
     /// Thrown when the assembly specified by <see cref="OpenApiDocumentOptions.AssemblyPath"/>
     /// does not exist on disk.
     /// </exception>
+    /// <summary>
+    /// Internal build result used by both <see cref="Build"/> and <see cref="BuildWithValidation"/>.
+    /// </summary>
+    private sealed record BuildCoreResult(
+        OpenApiDocument Document,
+        IReadOnlyList<ControllerInfo> Controllers,
+        IReadOnlyList<ActionInfo> Actions,
+        SchemaGenerator SchemaGenerator,
+        SourceAnalysisContext SourceContext);
+
+    /// <summary>
+    /// Builds a complete OpenAPI document and runs validation.
+    /// Calls the same pipeline as <see cref="Build"/>, then applies <see cref="OpenApiValidator.Validate"/>.
+    /// </summary>
+    /// <param name="options">Build options.</param>
+    /// <param name="validationContext">Validation options. CLR bindings are populated automatically.</param>
+    /// <param name="validationResult">Receives the validation result after building.</param>
+    /// <returns>The fully-populated <see cref="OpenApiDocument"/>.</returns>
+    public static OpenApiDocument BuildWithValidation(
+        OpenApiDocumentOptions options,
+        ValidationContext validationContext,
+        out ValidationResult validationResult)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(validationContext);
+
+        using var loader = new AssemblyLoader(options.AssemblyPath);
+        var core = BuildCore(options, loader);
+
+        // ── Build CLR bindings for validation ────────────────────────────────
+        // ActionByOperationKey: "METHOD /path" → (Controller, Action)
+        var actionByKey = new Dictionary<string, (ControllerInfo, ActionInfo)>(StringComparer.Ordinal);
+        foreach (var action in core.Actions)
+        {
+            var path = RouteBuilder.BuildPath(
+                action.Controller.RouteTemplate,
+                action.RouteTemplate,
+                action.Controller.Type.Name,
+                action.Name);
+            var key = $"{action.HttpMethod} {path}";
+            actionByKey.TryAdd(key, (action.Controller, action));
+        }
+
+        // TypeBySchemaId: schema component ID → CLR Type
+        var typeBySchemaId = new Dictionary<string, Type>(
+            core.SchemaGenerator.SchemaTypes, StringComparer.Ordinal);
+
+        var enrichedContext = new ValidationContext
+        {
+            MinDescriptionLength     = validationContext.MinDescriptionLength,
+            ExcludedPathPrefixes     = validationContext.ExcludedPathPrefixes,
+            SkippedRuleIds           = validationContext.SkippedRuleIds,
+            EnabledRuleIds           = validationContext.EnabledRuleIds,
+            SeverityOverrides        = validationContext.SeverityOverrides,
+            ActionByOperationKey     = actionByKey,
+            TypeBySchemaId           = typeBySchemaId,
+            SourceContext            = core.SourceContext,
+            OpenApiSpecVersion       = validationContext.OpenApiSpecVersion,
+        };
+
+        validationResult = Validation.OpenApiValidator.Validate(core.Document, enrichedContext);
+        return core.Document;
+    }
+
     public static OpenApiDocument Build(OpenApiDocumentOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         using var loader = new AssemblyLoader(options.AssemblyPath);
+        return BuildCore(options, loader).Document;
+    }
 
+    // =========================================================================
+    // Core build pipeline
+    // =========================================================================
+
+    private static BuildCoreResult BuildCore(OpenApiDocumentOptions options, AssemblyLoader loader)
+    {
         // ── Source analysis (best-effort, never throws) ──────────────────────
         var sourceContext = TryBuildSourceAnalysisContext(options, loader);
 
@@ -222,7 +295,7 @@ public sealed class OpenApiDocumentBuilder
             DefaultIgnoreCondition   = jsonOptions.DefaultIgnoreCondition,
             NumberHandling           = jsonOptions.NumberHandling,
             GlobalConverterTypeNames = jsonOptions.GlobalConverterTypeNames,
-        });
+        }, docResolver);
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
         var controllers = ControllerDiscovery.DiscoverControllers(loader.Assembly);
@@ -468,7 +541,7 @@ public sealed class OpenApiDocumentBuilder
         var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
         ApplyDocumentTagsMetadata(document, docTagsResult);
 
-        return document;
+        return new BuildCoreResult(document, controllers, actions, schemaGenerator, sourceContext);
     }
 
     // =========================================================================

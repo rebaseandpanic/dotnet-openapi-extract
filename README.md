@@ -54,6 +54,54 @@ This means you can generate OpenAPI specs:
 | `--terms-of-service <url>` | no | — | `info.termsOfService` |
 | `--server <url>` | no | — | Server URL in `servers[]` (repeatable) |
 
+### Validation flags
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `--validate` | no | off | Enable validation (47 rules, errors block CI via exit 1) |
+| `--skip-rule <id>` | no | — | Disable a rule (repeatable). Unknown IDs print warning to stderr |
+| `--warn-rule <id>` | no | — | Demote error → warning (repeatable) |
+| `--error-rule <id>` | no | — | Promote warning → error (repeatable) |
+| `--enable-rule <id>` | no | — | Enable an off-by-default rule (repeatable) |
+| `--strict` | no | `false` | Treat all warnings as errors (CI-strict mode) |
+| `--min-description-length <N>` | no | `5` | Minimum length for description-rule checks |
+| `--exclude-validation-path <prefix>` | no | — | Path prefixes skipped by `operation.has-error-response` and `operation.success-response` rules only (repeatable) |
+| `--validation-report <path>` | no | — | Write JSON report to file (else printed to stdout) |
+
+## Validation
+
+Running `--validate` checks the extracted spec against **47 completeness rules** — 26 errors + 16 warnings always-on + 5 warnings off-by-default.
+
+| Severity | Count | Exit code | When to use |
+|----------|------:|----------:|-------------|
+| Error | 26 | 1 | OpenAPI-spec MUST violations, broken codegen |
+| Warning | 16 | 0 | Industry best-practice (Spectral / Redocly consensus) |
+| Warning (off-by-default) | 5 | 0 (disabled) | Opt-in via `--enable-rule`: `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
+
+**Typical CI usage:**
+
+```bash
+# Block on errors, ignore warnings
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate
+
+# Strict: block on any violation including warnings
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --strict
+
+# Skip a noisy rule
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule schema.required-consistency
+
+# JSON report for tooling/agents
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --validation-report report.json
+```
+
+**Standalone validation** — validate an existing spec file without extracting:
+
+```bash
+dotnet openapi-extract validate --spec openapi.json --validation-report report.json
+```
+
+All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
+
 ## What It Extracts
 
 - Controllers (`[ApiController]`, `ControllerBase` inheritance)

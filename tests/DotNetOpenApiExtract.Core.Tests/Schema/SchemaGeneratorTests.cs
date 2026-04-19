@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core;
+using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Schema;
 using Microsoft.OpenApi;
@@ -991,5 +993,80 @@ public sealed class SchemaGeneratorTests : IDisposable
         var defaultNumberProp = (OpenApiSchema)schema.Properties!["defaultNumber"];
         defaultNumberProp.Default.Should().NotBeNull();
         defaultNumberProp.Default!.GetValue<int>().Should().Be(42);
+    }
+
+    // =========================================================================
+    // x-enum-descriptions — requires DocumentationResolver
+    // =========================================================================
+
+    private static SchemaGenerator MakeGeneratorWithDocs()
+    {
+        var xmlParser = new XmlDocParser(TestPaths.SampleApiXml);
+        var docResolver = new DocumentationResolver(xmlParser);
+        return new SchemaGenerator(docResolver: docResolver);
+    }
+
+    [Fact]
+    public void GenerateSchema_UserStatus_WithDocResolver_AttachesXEnumDescriptions()
+    {
+        // UserStatus has XML <summary> on all four values
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("UserStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-descriptions");
+        var ext = (JsonNodeExtension)schema.Extensions["x-enum-descriptions"];
+        var arr = ext.Node.AsArray();
+        arr.Count.Should().Be(4); // must match enum[] length
+
+        // All values should be non-empty (UserStatus fully documented)
+        arr.Select(n => n!.GetValue<string>()).Should().AllSatisfy(s => s.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public void GenerateSchema_ConnectionState_WithDocResolver_NoExtension_WhenAllDescriptionsEmpty()
+    {
+        // ConnectionState values have no XML <summary> — extension must NOT be emitted
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("ConnectionState");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        var hasExtension = schema.Extensions != null && schema.Extensions.ContainsKey("x-enum-descriptions");
+        hasExtension.Should().BeFalse(because: "no enum values have XML docs");
+    }
+
+    [Fact]
+    public void GenerateSchema_TrafficLight_WithDocResolver_PartialDescriptions_LengthMatchesEnumCount()
+    {
+        // TrafficLight: Red and Green documented, Yellow not
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("TrafficLight");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-descriptions");
+        var ext = (JsonNodeExtension)schema.Extensions["x-enum-descriptions"];
+        var arr = ext.Node.AsArray();
+
+        // Array length must match enum[] count (3 values: Red, Yellow, Green)
+        arr.Count.Should().Be(3);
+
+        // Red → documented
+        arr[0]!.GetValue<string>().Should().NotBeNullOrEmpty();
+        // Yellow → empty string (no doc)
+        arr[1]!.GetValue<string>().Should().BeEmpty();
+        // Green → documented
+        arr[2]!.GetValue<string>().Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void GenerateSchema_UserStatus_WithoutDocResolver_NoExtension()
+    {
+        // Generator without docResolver must never emit x-enum-descriptions
+        var generator = new SchemaGenerator();
+        var type = GetType("UserStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        var hasExtension = schema.Extensions != null && schema.Extensions.ContainsKey("x-enum-descriptions");
+        hasExtension.Should().BeFalse(because: "no doc resolver was provided");
     }
 }

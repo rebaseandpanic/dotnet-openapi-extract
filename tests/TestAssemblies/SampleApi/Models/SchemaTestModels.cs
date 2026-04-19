@@ -316,3 +316,22 @@ public enum ObsoleteEnum
     /// <summary>Blue value.</summary>
     Blue,
 }
+
+/// <summary>Enum with no XML-doc summaries on its values — used to verify that x-enum-descriptions is NOT emitted.</summary>
+public enum ConnectionState
+{
+    Disconnected,
+    Connecting,
+    Connected,
+    Disconnecting,
+}
+
+/// <summary>Enum with partial XML-doc summaries — only some values are documented.</summary>
+public enum TrafficLight
+{
+    /// <summary>Stop — vehicles must halt.</summary>
+    Red,
+    Yellow,
+    /// <summary>Go — vehicles may proceed.</summary>
+    Green,
+}

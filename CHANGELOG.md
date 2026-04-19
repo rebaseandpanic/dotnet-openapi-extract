@@ -2,6 +2,22 @@
 
 All notable changes to this project.
 
+## [0.3.0] - 2026-04-19
+
+- [FEATURE] OpenAPI spec validation engine with **47 completeness rules** — operation summary/id/description/tags, parameter/response/schema consistency, security, enum descriptions, path templating, response status coverage, and more. Run with `--validate` to check extracted specs. Errors (26 rules by default) block CI via exit 1; warnings (16 rules) are reported non-blocking; 5 rules are off-by-default and require explicit `--enable-rule`.
+- [FEATURE] Standalone `validate` subcommand — lint pre-existing OpenAPI JSON/YAML files without extracting from a DLL. `dotnet openapi-extract validate --spec openapi.json`. Supports all validation flags.
+- [FEATURE] Two-level severity system (Error / Warning) with per-rule overrides — `--strict` (promote all warnings to errors for CI), `--warn-rule <id>` (demote error → warning), `--error-rule <id>` (promote warning → error), `--skip-rule <id>` (disable), `--enable-rule <id>` (turn on off-by-default rule).
+- [FEATURE] JSON validation report (`--validation-report <path>`) with structured violations — each violation carries severity, rule ID, JSON pointer, and source location (class / method / property name plus Roslyn-resolved file path and line number when source-root is available), for agent-driven auto-fix.
+- [FEATURE] Enum value XML documentation extraction — `<summary>` on each enum value is emitted as `x-enum-descriptions` extension on the schema (array aligned with `enum` values).
+- [FEATURE] OpenAPI version awareness — `spec.no-ref-siblings` rule skips on OAS 3.1/3.2 where JSON Schema Draft 2020-12 allows `$ref` siblings; `--openapi-version` flag propagates through validation.
+- [UX] CLI warns to stderr when `--skip-rule` / `--warn-rule` / `--error-rule` / `--enable-rule` receives an unknown rule ID (previously silent, allowing typos to go unnoticed).
+- [UX] CLI warns to stderr when explicitly-provided `--xml` file does not exist (previously silent degradation).
+- [UX] `--help` output for `--validate` and `validate` subcommand lists all 47 rule IDs with their default severity — self-documenting for agents.
+- [BUGFIX] Property-level violation locations now correctly point to the property line (not the enclosing class line) when the OpenAPI schema uses camelCase keys and C# uses PascalCase — case-insensitive fallback in `ViolationLocationResolver`.
+- [ARCHITECTURE] **BREAKING:** `--min-description-length` default lowered from 20 to 5. CI pipelines relying on the old value should pass `--min-description-length 20` explicitly.
+- [ARCHITECTURE] **BREAKING:** `--exclude-validation-path` no longer has hardcoded `/healthz`, `/ready`, `/metrics` defaults — pass them explicitly if desired. Enables use by projects with different ops-path conventions.
+- [ARCHITECTURE] **BREAKING:** Validation exit code logic now based on Error-severity violations only. Pure warnings exit 0. Use `--strict` to restore old "fail on any violation" behavior.
+
 ## [0.2.0] - 2026-04-18
 
 - [FEATURE] Extract security schemes from `Program.cs` via Roslyn — `AddSecurityDefinition`, `AddJwtBearer`, `AddSecurityRequirement` (including lambda-factory form). Per-endpoint security from `[Authorize]` / `[AllowAnonymous]` attributes.
