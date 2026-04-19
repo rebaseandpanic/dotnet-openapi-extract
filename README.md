@@ -58,25 +58,27 @@ This means you can generate OpenAPI specs:
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `--validate` | no | off | Enable validation (47 rules, errors block CI via exit 1) |
+| `--validate` | no | off | Enable validation (52 rules, errors block CI via exit 1) |
 | `--skip-rule <id>` | no | — | Disable a rule (repeatable). Unknown IDs print warning to stderr |
 | `--warn-rule <id>` | no | — | Demote error → warning (repeatable) |
 | `--error-rule <id>` | no | — | Promote warning → error (repeatable) |
 | `--enable-rule <id>` | no | — | Enable an off-by-default rule (repeatable) |
 | `--strict` | no | `false` | Treat all warnings as errors (CI-strict mode) |
-| `--min-description-length <N>` | no | `5` | Minimum length for description-rule checks |
-| `--exclude-validation-path <prefix>` | no | — | Path prefixes skipped by `operation.has-error-response` and `operation.success-response` rules only (repeatable) |
+| `--min-description-length <N>` | no | `5` | Minimum length for description-rule checks (global default) |
+| `--rule-min-length <id>:<N>` | no | — | Per-rule override for min-description-length (repeatable). Example: `--rule-min-length enum.value-description:3` |
+| `--require-response-code <method>:<code>` | no | — | Required response code for a method filter (repeatable). Activates `operation.has-required-response-codes` rule. Method: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS` or groups `mutating`/`safe`/`*` |
+| `--exclude-validation-path <prefix>` | no | — | Path prefixes skipped by `operation.has-error-response`, `operation.success-response`, `operation.has-required-response-codes` (repeatable) |
 | `--validation-report <path>` | no | — | Write JSON report to file (else printed to stdout) |
 
 ## Validation
 
-Running `--validate` checks the extracted spec against **47 completeness rules** — 26 errors + 16 warnings always-on + 5 warnings off-by-default.
+Running `--validate` checks the extracted spec against **52 completeness rules** — 27 errors + 16 warnings always-on + 9 warnings off-by-default.
 
 | Severity | Count | Exit code | When to use |
 |----------|------:|----------:|-------------|
-| Error | 26 | 1 | OpenAPI-spec MUST violations, broken codegen |
+| Error | 27 | 1 | OpenAPI-spec MUST violations, broken codegen |
 | Warning | 16 | 0 | Industry best-practice (Spectral / Redocly consensus) |
-| Warning (off-by-default) | 5 | 0 (disabled) | Opt-in via `--enable-rule`: `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
+| Warning (off-by-default) | 9 | 0 (disabled) | Opt-in via `--enable-rule`. Includes: `operation.has-required-response-codes`, `operation.operation-id-pascal-case`, `schema.additional-properties-explicit`, `response.content-type-json-default`, `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
 
 **Typical CI usage:**
 
@@ -89,6 +91,17 @@ dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --strict
 
 # Skip a noisy rule
 dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule schema.required-consistency
+
+# Enforce 422 on mutating endpoints (your org convention)
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
+  --enable-rule operation.has-required-response-codes \
+  --require-response-code mutating:422
+
+# Different min-length per rule
+dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
+  --min-description-length 10 \
+  --rule-min-length enum.value-description:3 \
+  --rule-min-length operation.description:30
 
 # JSON report for tooling/agents
 dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --validation-report report.json

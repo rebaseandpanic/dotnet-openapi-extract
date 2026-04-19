@@ -16,15 +16,16 @@ public sealed class SpecInfoDescriptionRule : IValidationRule
     {
         var desc = document.Info?.Description;
         var actual = desc?.Length ?? 0;
+        var minLen = context.GetMinDescriptionLength(Id);
 
-        if (string.IsNullOrWhiteSpace(desc) || actual < context.MinDescriptionLength)
+        if (string.IsNullOrWhiteSpace(desc) || actual < minLen)
         {
             yield return new ValidationViolation(
                 Id,
                 DefaultSeverity,
                 JsonPointerHelper.ForInfo(),
                 null,
-                $"Document info.description is missing or shorter than {context.MinDescriptionLength} characters (actual: {actual}).");
+                $"Document info.description is missing or shorter than {minLen} characters (actual: {actual}).");
         }
     }
 }

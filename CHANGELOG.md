@@ -2,6 +2,17 @@
 
 All notable changes to this project.
 
+## [0.4.0] - 2026-04-19
+
+- [FEATURE] Configurable required response codes per HTTP method — new rule `operation.has-required-response-codes` (off by default) + `--require-response-code <method>:<code>` CLI flag (repeatable). Method filters: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`, groups `mutating` (POST/PUT/PATCH/DELETE) and `safe` (GET/HEAD/OPTIONS), or `*` for any. Enforces org conventions like "all mutating endpoints must declare 422 for business errors" via `--require-response-code mutating:422`.
+- [FEATURE] New rule `operation.request-body-description` (Warning, on by default) — every operation with a request body must describe it. Respects per-rule min-description-length.
+- [FEATURE] New rule `operation.operation-id-pascal-case` (off by default) — enforces PascalCase for operation IDs (`GetUser`, not `getUser` or `get_user`). Complements existing `operation.operation-id-url-safe`.
+- [FEATURE] New rule `schema.additional-properties-explicit` (off by default) — for teams wanting strict API contracts, flags named component schemas where `additionalProperties` is not set explicitly. Skips schemas inside `allOf`/`anyOf`/`oneOf` composition.
+- [FEATURE] New rule `response.content-type-json-default` (off by default) — for JSON-only APIs, flags responses that don't list `application/json` in content-types.
+- [FEATURE] Per-rule minimum description length override — new `--rule-min-length <rule-id>:<N>` CLI flag (repeatable). Lets teams require substantive operation descriptions while accepting terse enum value descriptions: `--min-description-length 10 --rule-min-length enum.value-description:3 --rule-min-length operation.description:30`.
+- [FEATURE] Enhanced `enum.value-description` rule — now respects `--min-description-length` and per-rule override (was: only checked for empty string). Empty values continue to produce the existing "missing description" message; too-short non-empty values produce a new "shorter than N characters" message.
+- 52 validation rules total (up from 47): 27 errors, 16 always-on warnings, 9 off-by-default warnings. The 4 newly added off-by-default rules (R48, R50, R51, R52) target org-convention and strict-contract scenarios.
+
 ## [0.3.0] - 2026-04-19
 
 - [FEATURE] OpenAPI spec validation engine with **47 completeness rules** — operation summary/id/description/tags, parameter/response/schema consistency, security, enum descriptions, path templating, response status coverage, and more. Run with `--validate` to check extracted specs. Errors (26 rules by default) block CI via exit 1; warnings (16 rules) are reported non-blocking; 5 rules are off-by-default and require explicit `--enable-rule`.

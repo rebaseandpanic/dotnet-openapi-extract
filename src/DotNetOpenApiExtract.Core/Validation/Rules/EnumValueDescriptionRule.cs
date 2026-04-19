@@ -65,18 +65,23 @@ public sealed class EnumValueDescriptionRule : IValidationRule
                 continue;
             }
 
-            // Check each entry is non-empty
+            // Check each entry is non-empty and meets minimum description length
+            var minLen = context.GetMinDescriptionLength(Id);
             for (int i = 0; i < descriptions.Length; i++)
             {
-                if (string.IsNullOrWhiteSpace(descriptions[i]))
+                var entryDesc = descriptions[i];
+                if (string.IsNullOrWhiteSpace(entryDesc) || entryDesc.Length < minLen)
                 {
                     var enumValueStr = GetStringValue(s.Enum[i]) ?? $"[{i}]";
+                    var actualLen = entryDesc?.Length ?? 0;
                     yield return new ValidationViolation(
                         Id,
                         DefaultSeverity,
                         JsonPointerHelper.ForSchema(schemaId),
                         resolver.ForSchema(schemaId),
-                        $"Enum schema '{schemaId}' value '{enumValueStr}' (index {i}) has no description in '{ExtensionKey}'.");
+                        string.IsNullOrWhiteSpace(entryDesc)
+                            ? $"Enum schema '{schemaId}' value '{enumValueStr}' (index {i}) has no description in '{ExtensionKey}'."
+                            : $"Enum schema '{schemaId}' value '{enumValueStr}' (index {i}) description is shorter than {minLen} characters (actual: {actualLen}).");
                 }
             }
         }

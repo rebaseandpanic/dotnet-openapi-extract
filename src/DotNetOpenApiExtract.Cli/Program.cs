@@ -80,6 +80,24 @@ var validationReportOption = new Option<string?>("--validation-report")
     Description = "Write JSON validation report to this file path (if omitted, report is printed to stdout)",
 };
 
+var requireResponseCodeOption = new Option<string[]>("--require-response-code")
+{
+    Description = "Required response codes for specific HTTP methods. Format: METHOD:CODE. Method can be: " +
+                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating (POST/PUT/PATCH/DELETE), " +
+                  "safe (GET/HEAD/OPTIONS), or * for any. Repeatable. Activates " +
+                  "operation.has-required-response-codes rule (requires --enable-rule). " +
+                  "Example: --require-response-code mutating:422 --require-response-code *:401",
+    AllowMultipleArgumentsPerToken = false,
+};
+
+var ruleMinLengthOption = new Option<string[]>("--rule-min-length")
+{
+    Description = "Override --min-description-length for a specific rule. Format: RULE-ID:N. Repeatable. " +
+                  "Applies to rules that check description length. " +
+                  "Example: --rule-min-length enum.value-description:5 --rule-min-length operation.description:30",
+    AllowMultipleArgumentsPerToken = false,
+};
+
 // ── Standard extraction options ────────────────────────────────────────────────
 
 var assemblyOption = new Option<FileInfo>("--assembly")
@@ -243,6 +261,8 @@ rootCommand.Options.Add(strictOption);
 rootCommand.Options.Add(warnRuleOption);
 rootCommand.Options.Add(errorRuleOption);
 rootCommand.Options.Add(enableRuleOption);
+rootCommand.Options.Add(requireResponseCodeOption);
+rootCommand.Options.Add(ruleMinLengthOption);
 
 rootCommand.SetAction(async (parseResult, cancellationToken) =>
 {
@@ -276,6 +296,8 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var warnRules         = parseResult.GetValue(warnRuleOption);
     var errorRules        = parseResult.GetValue(errorRuleOption);
     var enableRules       = parseResult.GetValue(enableRuleOption);
+    var requireRespCodes  = parseResult.GetValue(requireResponseCodeOption);
+    var ruleMinLengths    = parseResult.GetValue(ruleMinLengthOption);
 
     // ── Warn if explicitly provided --xml path does not exist ────────────────
     if (xml != null && !File.Exists(xml))
@@ -290,6 +312,12 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     WarnUnknownRuleIds(warnRules,   "--warn-rule");
     WarnUnknownRuleIds(errorRules,  "--error-rule");
     WarnUnknownRuleIds(enableRules, "--enable-rule");
+
+    // ── Parse --require-response-code entries ─────────────────────────────────
+    var parsedRequiredCodes = ParseRequireResponseCodes(requireRespCodes);
+
+    // ── Parse --rule-min-length entries ───────────────────────────────────────
+    var parsedRuleMinLengths = ParseRuleMinLengths(ruleMinLengths);
 
     // ── Resolve naming policy ─────────────────────────────────────────────────
     JsonNamingPolicy? resolvedNamingPolicy = null;
@@ -410,6 +438,8 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
                     : (IReadOnlySet<string>)new HashSet<string>(),
                 SeverityOverrides = severityOverrides,
                 OpenApiSpecVersion = specVersionForValidation,
+                RequiredResponseCodes = parsedRequiredCodes.Count > 0 ? parsedRequiredCodes : null,
+                MinDescriptionLengthPerRule = parsedRuleMinLengths.Count > 0 ? parsedRuleMinLengths : null,
             };
 
             document = OpenApiDocumentBuilder.BuildWithValidation(options, validationContext, out var result);
@@ -557,6 +587,24 @@ var validateSubReportOption = new Option<string?>("--validation-report")
     Description = "Write JSON validation report to this file path (if omitted, report is printed to stdout)",
 };
 
+var validateSubRequireResponseCodeOption = new Option<string[]>("--require-response-code")
+{
+    Description = "Required response codes for specific HTTP methods. Format: METHOD:CODE. Method can be: " +
+                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating (POST/PUT/PATCH/DELETE), " +
+                  "safe (GET/HEAD/OPTIONS), or * for any. Repeatable. Activates " +
+                  "operation.has-required-response-codes rule (requires --enable-rule). " +
+                  "Example: --require-response-code mutating:422 --require-response-code *:401",
+    AllowMultipleArgumentsPerToken = false,
+};
+
+var validateSubRuleMinLengthOption = new Option<string[]>("--rule-min-length")
+{
+    Description = "Override --min-description-length for a specific rule. Format: RULE-ID:N. Repeatable. " +
+                  "Applies to rules that check description length. " +
+                  "Example: --rule-min-length enum.value-description:5 --rule-min-length operation.description:30",
+    AllowMultipleArgumentsPerToken = false,
+};
+
 var validateCommand = new Command("validate",
     $"Validate an existing OpenAPI spec file against {CoreValidator.AllRuleIds.Count} completeness rules. " +
     $"Off-by-default rules (require --enable-rule): {string.Join(", ", CoreValidator.DefaultOffRuleIds)}. " +
@@ -571,6 +619,8 @@ validateCommand.Options.Add(validateSubStrictOption);
 validateCommand.Options.Add(validateSubWarnRuleOption);
 validateCommand.Options.Add(validateSubErrorRuleOption);
 validateCommand.Options.Add(validateSubEnableRuleOption);
+validateCommand.Options.Add(validateSubRequireResponseCodeOption);
+validateCommand.Options.Add(validateSubRuleMinLengthOption);
 
 validateCommand.SetAction(async (parseResult, cancellationToken) =>
 {
@@ -583,12 +633,20 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
     var warnRules         = parseResult.GetValue(validateSubWarnRuleOption);
     var errorRules        = parseResult.GetValue(validateSubErrorRuleOption);
     var enableRules       = parseResult.GetValue(validateSubEnableRuleOption);
+    var requireRespCodes  = parseResult.GetValue(validateSubRequireResponseCodeOption);
+    var ruleMinLengths    = parseResult.GetValue(validateSubRuleMinLengthOption);
 
     // ── Warn on unrecognized rule IDs ─────────────────────────────────────────
     WarnUnknownRuleIds(skipRules,   "--skip-rule");
     WarnUnknownRuleIds(warnRules,   "--warn-rule");
     WarnUnknownRuleIds(errorRules,  "--error-rule");
     WarnUnknownRuleIds(enableRules, "--enable-rule");
+
+    // ── Parse --require-response-code entries ─────────────────────────────────
+    var parsedRequiredCodes = ParseRequireResponseCodes(requireRespCodes);
+
+    // ── Parse --rule-min-length entries ───────────────────────────────────────
+    var parsedRuleMinLengths = ParseRuleMinLengths(ruleMinLengths);
 
     if (!specFile.Exists)
     {
@@ -652,6 +710,8 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         TypeBySchemaId       = null,
         SourceContext        = null,
         OpenApiSpecVersion   = loadedSpecVersion,
+        RequiredResponseCodes = parsedRequiredCodes.Count > 0 ? parsedRequiredCodes : null,
+        MinDescriptionLengthPerRule = parsedRuleMinLengths.Count > 0 ? parsedRuleMinLengths : null,
     };
 
     var result = CoreValidator.Validate(document, validationContext);
@@ -735,4 +795,98 @@ static void WarnUnknownRuleIds(string[]? ruleIds, string flagName)
     var unknown = CoreValidator.FindUnknownRuleIds(ruleIds);
     foreach (var id in unknown)
         Console.Error.WriteLine($"Warning: {flagName} '{id}' is not a valid rule ID.");
+}
+
+// ── Helper: parse --require-response-code entries ─────────────────────────────
+/// <summary>
+/// Parses <c>METHOD:CODE</c> entries from the <c>--require-response-code</c> flag.
+/// Writes warnings to stderr for invalid entries and skips them.
+/// </summary>
+static List<(string MethodFilter, int Code)> ParseRequireResponseCodes(string[]? entries)
+{
+    var result = new List<(string MethodFilter, int Code)>();
+    if (entries is not { Length: > 0 }) return result;
+
+    foreach (var entry in entries)
+    {
+        var colonIndex = entry.IndexOf(':', StringComparison.Ordinal);
+        if (colonIndex < 0)
+        {
+            Console.Error.WriteLine(
+                $"Warning: --require-response-code '{entry}' is invalid (expected METHOD:CODE format). Skipping.");
+            continue;
+        }
+
+        var methodPart = entry[..colonIndex].Trim();
+        var codePart   = entry[(colonIndex + 1)..].Trim();
+
+        // Validate method filter
+        if (!DotNetOpenApiExtract.Core.Validation.Rules.OperationHasRequiredResponseCodesRule.IsValidMethodFilter(methodPart))
+        {
+            Console.Error.WriteLine(
+                $"Warning: --require-response-code '{entry}' has unknown method filter '{methodPart}'. " +
+                "Valid values: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating, safe, *. Skipping.");
+            continue;
+        }
+
+        // Validate status code
+        if (!int.TryParse(codePart, out var code) || code < 100 || code > 599)
+        {
+            Console.Error.WriteLine(
+                $"Warning: --require-response-code '{entry}' has invalid status code '{codePart}' " +
+                "(expected integer 100-599). Skipping.");
+            continue;
+        }
+
+        result.Add((methodPart, code));
+    }
+
+    return result;
+}
+
+// ── Helper: parse --rule-min-length entries ───────────────────────────────────
+/// <summary>
+/// Parses <c>RULE-ID:N</c> entries from the <c>--rule-min-length</c> flag.
+/// Writes warnings to stderr for invalid entries and skips them.
+/// </summary>
+static Dictionary<string, int> ParseRuleMinLengths(string[]? entries)
+{
+    var result = new Dictionary<string, int>(StringComparer.Ordinal);
+    if (entries is not { Length: > 0 }) return result;
+
+    foreach (var entry in entries)
+    {
+        var colonIndex = entry.LastIndexOf(':');
+        if (colonIndex < 0)
+        {
+            Console.Error.WriteLine(
+                $"Warning: --rule-min-length '{entry}' is invalid (expected RULE-ID:N format). Skipping.");
+            continue;
+        }
+
+        var ruleId = entry[..colonIndex].Trim();
+        var nPart  = entry[(colonIndex + 1)..].Trim();
+
+        // Validate rule ID
+        var unknownIds = CoreValidator.FindUnknownRuleIds(new[] { ruleId });
+        if (unknownIds.Count > 0)
+        {
+            Console.Error.WriteLine(
+                $"Warning: --rule-min-length '{entry}' references unknown rule ID '{ruleId}'. Skipping.");
+            continue;
+        }
+
+        // Validate N (non-negative integer)
+        if (!int.TryParse(nPart, out var n) || n < 0)
+        {
+            Console.Error.WriteLine(
+                $"Warning: --rule-min-length '{entry}' has invalid length '{nPart}' " +
+                "(expected non-negative integer). Skipping.");
+            continue;
+        }
+
+        result[ruleId] = n;
+    }
+
+    return result;
 }

@@ -25,7 +25,8 @@ public sealed class OperationDescriptionRule : IValidationRule
             {
                 var desc = operation.Description;
                 var actual = desc?.Length ?? 0;
-                if (string.IsNullOrWhiteSpace(desc) || actual < context.MinDescriptionLength)
+                var minLen = context.GetMinDescriptionLength(Id);
+                if (string.IsNullOrWhiteSpace(desc) || actual < minLen)
                 {
                     var key = $"{method.ToString().ToUpperInvariant()} {path}";
                     yield return new ValidationViolation(
@@ -33,7 +34,7 @@ public sealed class OperationDescriptionRule : IValidationRule
                         DefaultSeverity,
                         JsonPointerHelper.ForOperation(path, method.ToString()),
                         resolver.ForOperation(key),
-                        $"Operation description is missing or shorter than {context.MinDescriptionLength} characters (actual: {actual}).");
+                        $"Operation description is missing or shorter than {minLen} characters (actual: {actual}).");
                 }
             }
         }

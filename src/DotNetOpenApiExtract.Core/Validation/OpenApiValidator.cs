@@ -9,10 +9,11 @@ namespace DotNetOpenApiExtract.Core.Validation;
 public sealed class OpenApiValidator
 {
     /// <summary>
-    /// All 47 built-in validation rules in canonical order.
+    /// All 52 built-in validation rules in canonical order.
     /// Group A: spec-MUST violations (error severity).
     /// Group B: structural completeness (warning severity).
     /// Group C: developer experience (warning severity, off by default — see <see cref="DefaultOffRuleIds"/>).
+    /// Group D: Wave 9 rules (mixed severity, some off by default — see <see cref="DefaultOffRuleIds"/>).
     /// </summary>
     public static IReadOnlyList<IValidationRule> AllRules { get; } = new IValidationRule[]
     {
@@ -83,10 +84,17 @@ public sealed class OpenApiValidator
         new ComponentNoUnusedRule(),
         new SpecNoEvalInMarkdownRule(),
         new SpecNoScriptTagsInMarkdownRule(),
+
+        // ── Group D — Wave 9 rules ─────────────────────────────────────────────
+        new OperationHasRequiredResponseCodesRule(), // R48, off by default, error
+        new OperationRequestBodyDescriptionRule(),   // R49, warning, on by default
+        new OperationOperationIdPascalCaseRule(),    // R50, off by default, warning
+        new SchemaAdditionalPropertiesExplicitRule(), // R51, off by default, warning
+        new ResponseContentTypeJsonDefaultRule(),    // R52, off by default, warning
     };
 
     /// <summary>
-    /// The IDs of all 47 built-in rules, in canonical order.
+    /// The IDs of all 52 built-in rules, in canonical order.
     /// </summary>
     public static IReadOnlyList<string> AllRuleIds => AllRules.Select(r => r.Id).ToList();
 
@@ -103,17 +111,23 @@ public sealed class OpenApiValidator
     }
 
     /// <summary>
-    /// Rule IDs that are <b>off by default</b> (Group C — developer experience rules).
+    /// Rule IDs that are <b>off by default</b> (Group C and selected Group D rules).
     /// These rules run only when explicitly enabled via <see cref="ValidationContext.EnabledRuleIds"/>
     /// or the <c>--enable-rule</c> CLI flag. They are not affected by <c>--strict</c>.
     /// </summary>
     public static IReadOnlyList<string> DefaultOffRuleIds { get; } = new[]
     {
+        // Group C
         "spec.servers-defined",
         "tag.description",
         "component.no-unused",
         "spec.no-eval-in-markdown",
         "spec.no-script-tags-in-markdown",
+        // Group D (off by default)
+        "operation.has-required-response-codes",
+        "operation.operation-id-pascal-case",
+        "schema.additional-properties-explicit",
+        "response.content-type-json-default",
     };
 
     /// <summary>

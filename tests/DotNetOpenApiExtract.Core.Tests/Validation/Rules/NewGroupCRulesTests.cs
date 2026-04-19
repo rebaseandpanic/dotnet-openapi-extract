@@ -254,21 +254,28 @@ public sealed class NewGroupCRulesTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void DefaultOffRuleIds_ContainsExactlyFiveGroupCRules()
+    public void DefaultOffRuleIds_ContainsGroupCRules()
     {
-        CoreValidator.DefaultOffRuleIds.Should().HaveCount(5);
+        // Group C rules (5) + Group D off-by-default rules (4) = 9 total
+        CoreValidator.DefaultOffRuleIds.Should().HaveCount(9,
+            because: "Wave 9 adds 4 more off-by-default rules (R48, R50, R51, R52)");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.servers-defined");
         CoreValidator.DefaultOffRuleIds.Should().Contain("tag.description");
         CoreValidator.DefaultOffRuleIds.Should().Contain("component.no-unused");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.no-eval-in-markdown");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.no-script-tags-in-markdown");
+        // Wave 9 additions
+        CoreValidator.DefaultOffRuleIds.Should().Contain("operation.has-required-response-codes");
+        CoreValidator.DefaultOffRuleIds.Should().Contain("operation.operation-id-pascal-case");
+        CoreValidator.DefaultOffRuleIds.Should().Contain("schema.additional-properties-explicit");
+        CoreValidator.DefaultOffRuleIds.Should().Contain("response.content-type-json-default");
     }
 
     [Fact]
-    public void AllRules_Count_Is47()
+    public void AllRules_Count_Is52()
     {
-        CoreValidator.AllRules.Should().HaveCount(47,
-            because: "Wave 7b adds 23 rules to the original 24, for a total of 47");
+        CoreValidator.AllRules.Should().HaveCount(52,
+            because: "Wave 9 adds 5 rules to the 47 from Wave 7b, for a total of 52");
     }
 
     [Fact]

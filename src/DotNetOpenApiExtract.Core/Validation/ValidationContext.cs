@@ -76,4 +76,35 @@ public sealed class ValidationContext
     /// <c>--skip-rule</c> if they know they are targeting 3.1+.
     /// </summary>
     public OpenApiSpecVersion? OpenApiSpecVersion { get; init; }
+
+    /// <summary>
+    /// Required HTTP response codes per HTTP method filter, used by the
+    /// <c>operation.has-required-response-codes</c> rule (R48).
+    /// Each entry specifies a method filter (e.g. <c>"POST"</c>, <c>"mutating"</c>, <c>"*"</c>)
+    /// and a required HTTP status code (e.g. 422, 401).
+    /// When null or empty, R48 emits no violations.
+    /// </summary>
+    public IReadOnlyList<(string MethodFilter, int Code)>? RequiredResponseCodes { get; init; }
+
+    /// <summary>
+    /// Per-rule overrides for the minimum description length.
+    /// When a rule ID is present, that value is used instead of <see cref="MinDescriptionLength"/>.
+    /// Corresponds to the <c>--rule-min-length</c> CLI flag.
+    /// <para>Null or empty = use <see cref="MinDescriptionLength"/> for all rules.</para>
+    /// </summary>
+    public IReadOnlyDictionary<string, int>? MinDescriptionLengthPerRule { get; init; }
+
+    /// <summary>
+    /// Returns the effective minimum description length for the given rule.
+    /// If <paramref name="ruleId"/> has an entry in <see cref="MinDescriptionLengthPerRule"/>,
+    /// that value is returned; otherwise, <see cref="MinDescriptionLength"/> is returned.
+    /// </summary>
+    /// <param name="ruleId">The rule ID to look up.</param>
+    public int GetMinDescriptionLength(string ruleId)
+    {
+        if (MinDescriptionLengthPerRule != null &&
+            MinDescriptionLengthPerRule.TryGetValue(ruleId, out var perRuleValue))
+            return perRuleValue;
+        return MinDescriptionLength;
+    }
 }
