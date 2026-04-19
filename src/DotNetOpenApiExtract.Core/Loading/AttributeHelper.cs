@@ -176,6 +176,7 @@ public static class AttributeHelper
 
         // System
         public const string Obsolete = "System.ObsoleteAttribute";
+        public const string RequiredMember = "System.Runtime.CompilerServices.RequiredMemberAttribute";
 
         // Model binding
         public const string BindNever = "Microsoft.AspNetCore.Mvc.ModelBinding.BindNeverAttribute";

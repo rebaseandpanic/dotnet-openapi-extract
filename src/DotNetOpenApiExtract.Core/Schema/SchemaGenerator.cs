@@ -811,18 +811,25 @@ public sealed class SchemaGenerator
 
     /// <summary>
     /// Returns <see langword="true"/> when the property must be included in the schema's
-    /// <c>required</c> array. Matches Swashbuckle behavior: only <c>[Required]</c>,
-    /// <c>[JsonRequired]</c>, and non-nullable reference types (NRT) are required.
-    /// Non-nullable value types (e.g. <c>int</c>, <c>bool</c>) are NOT automatically
-    /// required — they always have a default value in .NET and Swashbuckle does not
-    /// mark them required either.
+    /// <c>required</c> array. Signals considered: <c>[Required]</c>, <c>[JsonRequired]</c>,
+    /// the C# 11+ <c>required</c> modifier (<c>RequiredMemberAttribute</c>), and non-nullable
+    /// reference types (NRT).
+    /// The <c>required</c> modifier is an explicit developer contract and makes the property
+    /// required unconditionally, including for value types — diverging from Swashbuckle, which
+    /// does not mark value types required. Non-nullable value types without the <c>required</c>
+    /// modifier are NOT auto-required (they always have a default value in .NET).
     /// When <see cref="SchemaOptions.DefaultIgnoreCondition"/> is
-    /// <see cref="JsonIgnoreCondition.WhenWritingNull"/>, nullable properties are
-    /// never required (they are omitted when null).
+    /// <see cref="JsonIgnoreCondition.WhenWritingNull"/>, nullable properties without an
+    /// explicit required marker are not required (they are omitted when null).
     /// Accepts pre-fetched attribute data to avoid repeated GetCustomAttributesData() calls.
     /// </summary>
     private bool IsPropertyRequired(IList<CustomAttributeData> attrData, Type propType, PropertyInfo prop)
     {
+        // C# 11+ `required` modifier emits RequiredMemberAttribute — treat as required unconditionally,
+        // including for value types (unlike NRT inference, `required` is an explicit developer signal).
+        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.RequiredMember))
+            return true;
+
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Required))
             return true;
 

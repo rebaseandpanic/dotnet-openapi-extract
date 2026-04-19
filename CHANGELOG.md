@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [0.6.0] - 2026-04-19
+
+- [FEATURE] C# 11+ `required` modifier is now recognized as a required-property signal. Properties declared with `public required T Prop { get; set; }` emit `RequiredMemberAttribute` at compile time; the extractor reads this attribute alongside `[Required]` and `[JsonRequired]` and adds the property to the schema's `required[]` array. Applies to reference and value types alike — the `required` modifier explicitly signals intent, so unlike nullable-reference-type inference this is unconditional.
+
 ## [0.5.0] - 2026-04-19
 
 - [FEATURE] BCL JSON container types (`JsonElement`, `JsonNode`, `JsonDocument`, `JsonObject`, `JsonArray`, `JsonValue`, `JToken`, `JObject`, `JArray`, `JValue`, `JRaw`, `ExpandoObject`) now emit as **inline** schemas with the correct shape instead of registering useless empty named schemas in `components/schemas`. Scalar/document types → `{}` (any JSON), object-like → `{type: object, additionalProperties: {}}`, array-like → `{type: array, items: {}}`. Each gets a default description ("Arbitrary JSON value/object/array") which can be overridden by a property-level `[Description]`. New public `BclJsonTypeRegistry` follows the same extensibility shape as `JsonConverterRegistry`.

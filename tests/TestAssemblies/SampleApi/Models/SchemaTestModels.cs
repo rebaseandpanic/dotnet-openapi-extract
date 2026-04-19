@@ -337,6 +337,37 @@ public enum TrafficLight
 }
 
 /// <summary>
+/// Model exercising C# 11+ required modifier (RequiredMemberAttribute)
+/// to ensure it maps to OpenAPI required[] alongside [Required].
+/// </summary>
+public class RequiredModifierModel
+{
+    /// <summary>Must be provided — via required modifier.</summary>
+    public required string ViaModifier { get; set; }
+
+    /// <summary>Must be provided — via required modifier, value type.</summary>
+    public required int CountViaModifier { get; set; }
+
+    /// <summary>Must be provided — via [Required] attribute.</summary>
+    [Required]
+    public string ViaAttribute { get; set; } = "";
+
+    /// <summary>Must be provided — both modifier and attribute.</summary>
+    [Required]
+    public required string ViaBoth { get; set; }
+
+    /// <summary>Optional — no required markers.</summary>
+    public string? Optional { get; set; }
+
+    /// <summary>Nullable reference + required modifier — NRT says optional, modifier says required.</summary>
+    public required string? NullableRefViaModifier { get; set; }
+
+    /// <summary>required + [JsonIgnore] — skipped entirely, consistent with [JsonIgnore] + [Required].</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public required string JsonIgnoredViaModifier { get; set; }
+}
+
+/// <summary>
 /// Model used to verify that a property-level [Description] attribute wins over
 /// the description injected by the JsonConverterRegistry converter hint.
 /// Regression target for the BREAKING change: previously the converter hint

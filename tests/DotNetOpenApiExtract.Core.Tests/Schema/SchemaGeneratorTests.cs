@@ -601,6 +601,158 @@ public sealed class SchemaGeneratorTests : IDisposable
     }
 
     // =========================================================================
+    // C# 11+ required modifier (RequiredMemberAttribute) — RequiredModifierModel
+    // =========================================================================
+
+    [Fact]
+    public void GenerateSchema_RequiredModifier_MakesPropertyRequired()
+    {
+        // `public required string ViaModifier` — no [Required] attribute,
+        // only RequiredMemberAttribute emitted by the C# compiler.
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("viaModifier");
+    }
+
+    [Fact]
+    public void GenerateSchema_RequiredModifierOnValueType_MakesPropertyRequired()
+    {
+        // `public required int CountViaModifier` — value types are NOT auto-required
+        // by NRT inference, but the `required` modifier is an explicit signal and must
+        // unconditionally place the property in the required[] array.
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("countViaModifier");
+    }
+
+    [Fact]
+    public void GenerateSchema_RequiredAttributeOnly_MakesPropertyRequired()
+    {
+        // Regression: existing [Required] attribute path must still work after
+        // the RequiredMemberAttribute check was added.
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("viaAttribute");
+    }
+
+    [Fact]
+    public void GenerateSchema_BothRequiredModifierAndAttribute_MakesPropertyRequired()
+    {
+        // `[Required] public required string ViaBoth` — both signals present.
+        // Must appear in required[] exactly once (no double-adding, no crash).
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("viaBoth");
+
+        // Verify no duplication
+        var viaBothCount = schema.Required!.Count(r => r == "viaBoth");
+        viaBothCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void GenerateSchema_NoRequiredMarkers_PropertyNotRequired()
+    {
+        // `public string? Optional` — nullable with no [Required] or required modifier.
+        // Must NOT appear in required[].
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        // Either Required is null/empty or does not contain "optional"
+        if (schema.Required != null)
+            schema.Required.Should().NotContain("optional");
+    }
+
+    [Fact]
+    public void GenerateSchema_RequiredModifierModel_RequiredArrayHasExactCount()
+    {
+        // RequiredModifierModel has exactly 5 required properties:
+        //   viaModifier (required modifier), countViaModifier (required modifier, value type),
+        //   viaAttribute ([Required]), viaBoth (both), nullableRefViaModifier (required modifier, nullable ref)
+        // optional is NOT required.
+        // jsonIgnoredViaModifier is excluded by [JsonIgnore] so it does NOT appear in required[].
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public void GenerateSchema_NullableRefWithRequiredModifier_MakesPropertyRequired()
+    {
+        // M1: `public required string? NullableRefViaModifier` — nullable reference, required modifier.
+        // NRT would NOT make this required (it's nullable); RequiredMemberAttribute MUST override.
+        // This is the test that genuinely exercises the new RequiredMemberAttribute branch for
+        // reference types — the pre-existing NRT path would fail to include it.
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("nullableRefViaModifier");
+        schema.Properties.Should().NotBeNull();
+        schema.Properties!.Keys.Should().Contain("nullableRefViaModifier");
+    }
+
+    [Fact]
+    public void GenerateSchema_JsonIgnoredWithRequiredModifier_PropertyAbsentFromSchemaAndRequired()
+    {
+        // M2: `[JsonIgnore] public required string JsonIgnoredViaModifier` — JsonIgnore fires before
+        // IsPropertyRequired, so the property must be absent from both Properties and Required.
+        // Pins the "no contradiction" contract: JsonIgnore wins over required modifier.
+        var generator = new SchemaGenerator();
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Properties.Should().NotBeNull();
+        schema.Properties!.Keys.Should().NotContain("jsonIgnoredViaModifier");
+        schema.Properties.Keys.Should().NotContain("JsonIgnoredViaModifier");
+        if (schema.Required != null)
+            schema.Required.Should().NotContain("jsonIgnoredViaModifier");
+    }
+
+    [Fact]
+    public void GenerateSchema_NullableRefWithRequiredModifier_WhenWritingNullOption_StillRequired()
+    {
+        // M3: With DefaultIgnoreCondition = WhenWritingNull, the NRT path skips nullable references
+        // (they would normally not appear in required[]). The `required` modifier's RequiredMemberAttribute
+        // check fires first (early return true), so the property must still appear in required[].
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        });
+        var type = GetType("RequiredModifierModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["RequiredModifierModel"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("nullableRefViaModifier",
+            because: "RequiredMemberAttribute early-return wins over WhenWritingNull suppression");
+    }
+
+    // =========================================================================
     // Generic with multiple type args — PaginatedResult<UserDto, PaginationMeta>
     // =========================================================================
 
