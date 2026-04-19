@@ -170,6 +170,14 @@ public sealed class SchemaGenerator
             return MakeNullable(GenerateSchema(inner));
         }
 
+        // --- 3b. BCL JSON container types (JsonElement, JsonNode, JObject, etc.) ---
+        // Must be checked before PrimitiveMap and generic-collection branches because
+        // JsonObject implements IDictionary<string,JsonNode?> and JsonArray implements
+        // IList<JsonNode?> — the collection branch would pick them up incorrectly.
+        var bclTemplate = BclJsonTypeRegistry.TryGet(type.FullName ?? string.Empty);
+        if (bclTemplate != null)
+            return BclJsonTypeRegistry.CreateSchema(bclTemplate);
+
         // --- 4. Primitive types ---
         var fullName = type.FullName ?? string.Empty;
         if (PrimitiveMap.TryGetValue(fullName, out var primitive))
@@ -663,9 +671,10 @@ public sealed class SchemaGenerator
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
 
-        // [Description("text")] → description (fallback; do not override an existing description)
+        // [Description("text")] → description (always wins; overrides any default set by a converter
+        // hint or the BCL registry, because a property-level annotation is a direct user statement).
         var desc = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Description);
-        if (desc != null && string.IsNullOrEmpty(schema.Description))
+        if (desc != null)
         {
             var text = AttributeHelper.GetConstructorArgument<string>(desc, 0);
             if (!string.IsNullOrEmpty(text)) schema.Description = text;
@@ -1046,7 +1055,10 @@ public sealed class SchemaGenerator
     {
         if (schema is OpenApiSchema concrete)
         {
-            concrete.Type = (concrete.Type ?? JsonSchemaType.String) | JsonSchemaType.Null;
+            // Truly-any schema ({}) already permits null; don't invent a type.
+            // Only add Null to the type flags when a concrete type is already set.
+            if (concrete.Type.HasValue)
+                concrete.Type = concrete.Type.Value | JsonSchemaType.Null;
             return concrete;
         }
 

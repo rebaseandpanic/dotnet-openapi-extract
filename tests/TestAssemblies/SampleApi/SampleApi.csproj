@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="10.1.5" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
 </Project>

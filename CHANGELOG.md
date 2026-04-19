@@ -2,6 +2,12 @@
 
 All notable changes to this project.
 
+## [0.5.0] - 2026-04-19
+
+- [FEATURE] BCL JSON container types (`JsonElement`, `JsonNode`, `JsonDocument`, `JsonObject`, `JsonArray`, `JsonValue`, `JToken`, `JObject`, `JArray`, `JValue`, `JRaw`, `ExpandoObject`) now emit as **inline** schemas with the correct shape instead of registering useless empty named schemas in `components/schemas`. Scalar/document types → `{}` (any JSON), object-like → `{type: object, additionalProperties: {}}`, array-like → `{type: array, items: {}}`. Each gets a default description ("Arbitrary JSON value/object/array") which can be overridden by a property-level `[Description]`. New public `BclJsonTypeRegistry` follows the same extensibility shape as `JsonConverterRegistry`.
+- [BUGFIX] `MakeNullable` on a truly-any schema (no `Type`) no longer invents `JsonSchemaType.String` — leaves the type unset so the `{}` continues to accept any JSON value including null.
+- [ARCHITECTURE] **BREAKING:** Property-level `[Description]` now unconditionally overrides any default description set by a converter hint or the BCL registry. Previously a converter-hint description (e.g. `UnixDateTimeConverter` → "Unix timestamp (seconds)") would win over an explicit `[Description]` on the property.
+
 ## [0.4.0] - 2026-04-19
 
 - [FEATURE] Configurable required response codes per HTTP method — new rule `operation.has-required-response-codes` (off by default) + `--require-response-code <method>:<code>` CLI flag (repeatable). Method filters: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`, groups `mutating` (POST/PUT/PATCH/DELETE) and `safe` (GET/HEAD/OPTIONS), or `*` for any. Enforces org conventions like "all mutating endpoints must declare 422 for business errors" via `--require-response-code mutating:422`.

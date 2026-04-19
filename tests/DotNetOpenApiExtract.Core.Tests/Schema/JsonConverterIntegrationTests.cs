@@ -215,4 +215,39 @@ public sealed class JsonConverterIntegrationTests : IDisposable
         schema.Type.Should().Be(JsonSchemaType.Integer);
         schema.Format.Should().Be("int64");
     }
+
+    // =========================================================================
+    // W2 — Regression: property-level [Description] wins over converter-hint description
+    //
+    // CHANGELOG marks this as [ARCHITECTURE] **BREAKING:** — previously the
+    // converter-hint description ("Unix timestamp (seconds)") was applied last and
+    // silently overwrote any [Description] attribute.  Now [Description] wins.
+    // =========================================================================
+
+    [Fact]
+    public void PropertyLevel_Description_WinsOverConverterHintDescription()
+    {
+        // DescriptionOverridesConverterHintModel.CreatedUnix has both:
+        //   [JsonConverter(typeof(UnixDateTimeConverter))]  → hint: "Unix timestamp (seconds)"
+        //   [Description("Custom description wins over converter hint")]
+        //
+        // After the BREAKING fix, the [Description] value must survive in the emitted schema.
+        var generator = new SchemaGenerator();
+        var dtoType = GetType("DescriptionOverridesConverterHintModel");
+        generator.GenerateSchema(dtoType);
+
+        var dtoSchema = generator.Schemas["DescriptionOverridesConverterHintModel"];
+        dtoSchema.Properties.Should().NotBeNull();
+        dtoSchema.Properties!.Should().ContainKey("createdUnix");
+
+        var propSchema = (OpenApiSchema)dtoSchema.Properties["createdUnix"];
+
+        // Converter hint still governs the type/format shape.
+        propSchema.Type.Should().Be(JsonSchemaType.Integer, "UnixDateTimeConverter maps DateTime → integer");
+        propSchema.Format.Should().Be("int64");
+
+        // Description must come from [Description], NOT from the converter-hint default.
+        propSchema.Description.Should().Be("Custom description wins over converter hint",
+            because: "property-level [Description] must override the JsonConverterRegistry hint description");
+    }
 }

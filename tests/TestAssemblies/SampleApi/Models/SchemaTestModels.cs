@@ -335,3 +335,17 @@ public enum TrafficLight
     /// <summary>Go — vehicles may proceed.</summary>
     Green,
 }
+
+/// <summary>
+/// Model used to verify that a property-level [Description] attribute wins over
+/// the description injected by the JsonConverterRegistry converter hint.
+/// Regression target for the BREAKING change: previously the converter hint
+/// description won; now [Description] takes precedence.
+/// </summary>
+public class DescriptionOverridesConverterHintModel
+{
+    /// <summary>Unix timestamp — description must come from [Description], not the converter hint.</summary>
+    [JsonConverter(typeof(Newtonsoft.Json.Converters.UnixDateTimeConverter))]
+    [Description("Custom description wins over converter hint")]
+    public DateTime CreatedUnix { get; set; }
+}
