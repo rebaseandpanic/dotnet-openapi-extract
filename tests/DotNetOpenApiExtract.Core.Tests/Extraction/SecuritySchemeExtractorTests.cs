@@ -323,7 +323,7 @@ public class SecuritySchemeExtractorTests
     }
 
     /// <summary>
-    /// 5.2.1 — Lambda-factory with FQN type names (as produced by VpnCoreApi).
+    /// 5.2.1 — Lambda-factory with FQN type names (as observed in real production Program.cs files).
     /// Both OpenApiSecurityRequirement and OpenApiSecuritySchemeReference are fully qualified.
     /// </summary>
     [Fact]

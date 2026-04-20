@@ -159,7 +159,7 @@ public class SecurityIntegrationTests
     {
         using var tempDir = new TempDirectory();
 
-        // Exact VpnCoreApi-style pattern: FQN types, lambda-factory, two schemes.
+        // Real-world production pattern: FQN types, lambda-factory, two schemes.
         File.WriteAllText(
             Path.Combine(tempDir.Path, "Program.cs"),
             """
