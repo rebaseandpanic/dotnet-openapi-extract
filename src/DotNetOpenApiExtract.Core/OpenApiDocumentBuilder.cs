@@ -155,6 +155,23 @@ public sealed class OpenApiDocumentOptions
     /// Has no effect when no <c>UsePathBase</c> call with a literal argument is found.
     /// </summary>
     public PathBaseEmission PathBaseEmission { get; init; } = PathBaseEmission.PathPrefix;
+
+    /// <summary>
+    /// When <see langword="true"/> (default), enum schemas automatically get a markdown-formatted
+    /// <c>description</c> that combines the type-level XML summary with a bullet list of
+    /// per-value descriptions. When <see langword="false"/>, the description is left as-is
+    /// (type-level summary applied by the builder, no per-value bullet list).
+    /// Corresponds to the <c>--no-enum-auto-description</c> CLI flag (which disables the feature).
+    /// </summary>
+    public bool EnumAutoDescription { get; init; } = true;
+
+    /// <summary>
+    /// When <see langword="true"/> (default), emits a <c>x-enum-varnames</c> extension on
+    /// enum schemas parallel to the <c>enum[]</c> array. When <see langword="false"/>, the
+    /// extension is omitted.
+    /// Corresponds to the <c>--no-enum-varnames</c> CLI flag (which disables the feature).
+    /// </summary>
+    public bool EnumVarnames { get; init; } = true;
 }
 
 /// <summary>
@@ -295,6 +312,8 @@ public sealed class OpenApiDocumentBuilder
             DefaultIgnoreCondition   = jsonOptions.DefaultIgnoreCondition,
             NumberHandling           = jsonOptions.NumberHandling,
             GlobalConverterTypeNames = jsonOptions.GlobalConverterTypeNames,
+            EnumAutoDescription      = options.EnumAutoDescription,
+            EnumVarnames             = options.EnumVarnames,
         }, docResolver);
 
         // ── Step 1: Discovery ───────────────────────────────────────────────

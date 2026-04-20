@@ -300,18 +300,45 @@ public sealed class DocumentationResolver
     }
 
     /// <summary>
-    /// Resolve the XML doc <c>&lt;summary&gt;</c> for a single enum member value.
+    /// Resolve the description for a single enum member value.
     /// </summary>
+    /// <remarks>
+    /// Fallback chain:
+    /// <list type="bullet">
+    ///   <item>XML <c>&lt;summary&gt;</c> on the enum field</item>
+    ///   <item><c>[Description("...")]</c> attribute on the enum field</item>
+    /// </list>
+    /// </remarks>
     /// <param name="enumType">The enum type that declares the member.</param>
     /// <param name="memberName">The name of the enum member (e.g. <c>"Active"</c>).</param>
     /// <returns>
-    /// The trimmed summary text, or an empty string when no XML doc is present for the member.
+    /// The trimmed description text, or an empty string when neither XML doc nor
+    /// <c>[Description]</c> is present for the member.
     /// </returns>
     public string ResolveEnumValueDescription(Type enumType, string memberName)
     {
         ArgumentNullException.ThrowIfNull(enumType);
         ArgumentNullException.ThrowIfNull(memberName);
-        return _xmlParser.GetFieldDoc(enumType, memberName)?.Summary ?? string.Empty;
+
+        // Priority 1: XML <summary> on the enum field
+        var xmlSummary = _xmlParser.GetFieldDoc(enumType, memberName)?.Summary;
+        if (!string.IsNullOrEmpty(xmlSummary))
+            return xmlSummary;
+
+        // Priority 2: [Description("...")] on the enum field
+        var field = enumType.GetField(memberName, BindingFlags.Public | BindingFlags.Static);
+        if (field != null)
+        {
+            var descAttr = AttributeHelper.GetAttribute(field, AttributeHelper.Names.Description);
+            if (descAttr != null)
+            {
+                var text = AttributeHelper.GetConstructorArgument<string>(descAttr, 0);
+                if (!string.IsNullOrEmpty(text))
+                    return text;
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>

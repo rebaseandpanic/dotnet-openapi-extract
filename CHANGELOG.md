@@ -2,6 +2,14 @@
 
 All notable changes to this project.
 
+## [0.7.0] - 2026-04-20
+
+- [FEATURE] Auto-glue markdown description on enum schemas — when per-value XML `<summary>` docs are present, the extractor now composes a human-readable markdown bullet list (`* \`0\` — Draft: Order created but not submitted`) and writes it to `schema.description`. Works in viewers that ignore the `x-enum-descriptions` extension (e.g. older Swagger UI). When a type-level `<summary>` is also present it is used as the intro paragraph; otherwise the bullet list stands alone. Partially-documented enums skip bullets for undocumented values. Respects `JsonConverter` hints — if a converter already set a description, auto-glue is skipped.
+- [FEATURE] New `x-enum-varnames` extension on every enum schema, emitting the C# member names parallel to the `enum[]` array. Critical for SDK generators (openapi-generator, NSwag) to produce typed constants (`OrderStatus.Draft`) instead of magic numbers. Emitted unconditionally when at least one field exists — independent of whether per-value docs are present.
+- [FEATURE] `[Description("...")]` attribute fallback for enum value documentation. `DocumentationResolver.ResolveEnumValueDescription` now checks `System.ComponentModel.DescriptionAttribute` on the enum field when XML `<summary>` is absent, matching the fallback chain already documented for type-level descriptions. Both auto-glue and `x-enum-descriptions` benefit from the fallback.
+- [FEATURE] New CLI flag `--no-enum-auto-description` — disables the markdown auto-glue. `x-enum-descriptions` and `x-enum-varnames` still emit; `schema.description` is left unpopulated (unless set by a `JsonConverter` hint). For teams that rely on extension-aware viewers and prefer the raw extension data without markdown duplication.
+- [FEATURE] New CLI flag `--no-enum-varnames` — disables the `x-enum-varnames` extension. Use when a downstream tool mis-parses the extension or when a stricter OAS subset is required.
+
 ## [0.6.0] - 2026-04-19
 
 - [FEATURE] C# 11+ `required` modifier is now recognized as a required-property signal. Properties declared with `public required T Prop { get; set; }` emit `RequiredMemberAttribute` at compile time; the extractor reads this attribute alongside `[Required]` and `[JsonRequired]` and adds the property to the schema's `required[]` array. Applies to reference and value types alike — the `required` modifier explicitly signals intent, so unlike nullable-reference-type inference this is unconditional.

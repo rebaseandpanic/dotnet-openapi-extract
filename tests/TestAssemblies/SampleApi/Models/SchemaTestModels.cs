@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 
 namespace SampleApi.Models;
 
@@ -317,7 +316,7 @@ public enum ObsoleteEnum
     Blue,
 }
 
-/// <summary>Enum with no XML-doc summaries on its values — used to verify that x-enum-descriptions is NOT emitted.</summary>
+/// <summary>Enum with no XML-doc summaries on its values — verifies that <c>x-enum-descriptions</c> is NOT emitted but <c>x-enum-varnames</c> IS emitted.</summary>
 public enum ConnectionState
 {
     Disconnected,
@@ -379,4 +378,62 @@ public class DescriptionOverridesConverterHintModel
     [JsonConverter(typeof(Newtonsoft.Json.Converters.UnixDateTimeConverter))]
     [Description("Custom description wins over converter hint")]
     public DateTime CreatedUnix { get; set; }
+}
+
+// =========================================================================
+// Enum fixtures for x-enum-varnames, auto-description, and [Description] fallback tests
+// =========================================================================
+
+/// <summary>Order status enumeration.</summary>
+public enum OrderStatus
+{
+    /// <summary>Order created but not submitted</summary>
+    Draft,
+    /// <summary>Awaiting payment</summary>
+    Pending,
+    /// <summary>Payment received, processing</summary>
+    Processing,
+    /// <summary>Order shipped</summary>
+    Shipped,
+}
+
+/// <summary>Payment method type.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum PaymentMethod
+{
+    /// <summary>Credit or debit card</summary>
+    Card,
+    /// <summary>Bank transfer</summary>
+    BankTransfer,
+    /// <summary>Cash on delivery</summary>
+    Cash,
+}
+
+/// <summary>Severity level using [Description] attributes instead of XML docs.</summary>
+public enum SeverityLevel
+{
+    [Description("Informational message, no action required")]
+    Info,
+    [Description("Potential issue, review recommended")]
+    Warning,
+    [Description("Critical failure, immediate action required")]
+    Critical,
+}
+
+/// <summary>Mixed documentation: some values use XML docs, others use [Description].</summary>
+public enum MixedDocEnum
+{
+    /// <summary>Active and running</summary>
+    Active,
+    [Description("Temporarily paused")]
+    Paused,
+    Stopped,
+}
+
+/// <summary>Enum with no documentation on any value — varnames still emitted, descriptions not.</summary>
+public enum UndocumentedEnum
+{
+    Alpha,
+    Beta,
+    Gamma,
 }

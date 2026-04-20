@@ -1,6 +1,4 @@
-using System.Text.Json.Nodes;
 using AwesomeAssertions;
-using DotNetOpenApiExtract.Core;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Schema;
@@ -1220,5 +1218,231 @@ public sealed class SchemaGeneratorTests : IDisposable
 
         var hasExtension = schema.Extensions != null && schema.Extensions.ContainsKey("x-enum-descriptions");
         hasExtension.Should().BeFalse(because: "no doc resolver was provided");
+    }
+
+    // =========================================================================
+    // x-enum-varnames
+    // =========================================================================
+
+    [Fact]
+    public void GenerateSchema_IntEnum_EmitsVarnames_WithDocResolver()
+    {
+        // OrderStatus is a fully-documented integer enum with 4 values.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("OrderStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-varnames");
+        var ext = (JsonNodeExtension)schema.Extensions["x-enum-varnames"];
+        var arr = ext.Node.AsArray();
+
+        // Must match enum[] length (4 values).
+        arr.Count.Should().Be(4);
+
+        // Values must be the field names in declaration order.
+        arr[0]!.GetValue<string>().Should().Be("Draft");
+        arr[1]!.GetValue<string>().Should().Be("Pending");
+        arr[2]!.GetValue<string>().Should().Be("Processing");
+        arr[3]!.GetValue<string>().Should().Be("Shipped");
+    }
+
+    [Fact]
+    public void GenerateSchema_StringEnum_EmitsVarnames_SameAsEnumValues()
+    {
+        // PaymentMethod is a string enum (JsonStringEnumConverter). Varnames must equal enum[].
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("PaymentMethod");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-varnames");
+        var varnames = ((JsonNodeExtension)schema.Extensions["x-enum-varnames"]).Node.AsArray();
+        var enumValues = schema.Enum!;
+
+        varnames.Count.Should().Be(enumValues.Count);
+
+        for (int i = 0; i < varnames.Count; i++)
+        {
+            var varname = varnames[i]!.GetValue<string>();
+            var enumVal = enumValues[i].GetValue<string>();
+            varname.Should().Be(enumVal, because: "for string enums varnames must equal enum values");
+        }
+    }
+
+    [Fact]
+    public void GenerateSchema_UndocumentedEnum_EmitsVarnamesButNotDescriptions()
+    {
+        // UndocumentedEnum has no docs at all — varnames emitted, descriptions not.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("UndocumentedEnum");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-varnames");
+        schema.Extensions.Should().NotContainKey("x-enum-descriptions",
+            because: "no values are documented");
+    }
+
+    [Fact]
+    public void GenerateSchema_Enum_WithNoEnumVarnamesOption_NoVarnamesExtension()
+    {
+        // When EnumVarnames = false, x-enum-varnames must not be emitted.
+        var generator = new SchemaGenerator(
+            new SchemaOptions { EnumVarnames = false },
+            docResolver: null);
+        var type = GetType("OrderStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        var hasVarnames = schema.Extensions != null && schema.Extensions.ContainsKey("x-enum-varnames");
+        hasVarnames.Should().BeFalse(because: "EnumVarnames option is false");
+    }
+
+    [Fact]
+    public void GenerateSchema_Enum_WithDocResolver_VarnamesAlwaysEmittedEvenWithoutDescriptions()
+    {
+        // x-enum-varnames must be emitted regardless of whether any values are documented.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("ConnectionState");  // no XML docs on values
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-varnames");
+        // But x-enum-descriptions must NOT be emitted
+        schema.Extensions.Should().NotContainKey("x-enum-descriptions");
+    }
+
+    // =========================================================================
+    // Auto-glue markdown description
+    // =========================================================================
+
+    [Fact]
+    public void GenerateSchema_FullyDocumentedEnum_AutoGlue_IncludesTypeDescriptionAndBullets()
+    {
+        // OrderStatus has type-level summary + per-value XML docs on all 4 values.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("OrderStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Description.Should().NotBeNullOrEmpty();
+
+        // Must start with the type-level summary.
+        schema.Description!.Should().StartWith("Order status enumeration.");
+
+        // Must contain bullet entries for each value.
+        schema.Description.Should().Contain("* `0` — Draft:");
+        schema.Description.Should().Contain("* `1` — Pending:");
+        schema.Description.Should().Contain("* `2` — Processing:");
+        schema.Description.Should().Contain("* `3` — Shipped:");
+    }
+
+    [Fact]
+    public void GenerateSchema_StringEnum_AutoGlue_UsesMemberNameAsValue()
+    {
+        // PaymentMethod is a string enum — bullet values should be the member name.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("PaymentMethod");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Description.Should().NotBeNullOrEmpty();
+
+        // Bullet values must be string member names, not integers.
+        schema.Description!.Should().Contain("* `Card` — Card:");
+        schema.Description.Should().Contain("* `BankTransfer` — BankTransfer:");
+        schema.Description.Should().Contain("* `Cash` — Cash:");
+    }
+
+    [Fact]
+    public void GenerateSchema_MixedDocEnum_AutoGlue_PartialFillSkipsUndocumentedBullets()
+    {
+        // MixedDocEnum has a type summary + two documented values (Active, Paused)
+        // + one undocumented value (Stopped). Verifies partial-fill: intro appears,
+        // only documented values get bullets.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("MixedDocEnum");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Description.Should().NotBeNullOrEmpty();
+        schema.Description!.Should().StartWith("Mixed documentation:");
+        schema.Description.Should().Contain("* `0` — Active:");
+        schema.Description.Should().Contain("* `1` — Paused:");
+        schema.Description.Should().NotContain("* `2` — Stopped:");
+    }
+
+    [Fact]
+    public void GenerateSchema_UndocumentedEnum_AutoGlue_NotEmitted()
+    {
+        // UndocumentedEnum has no docs — description should be null (no auto-glue).
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("UndocumentedEnum");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Description.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public void GenerateSchema_NoEnumAutoDescription_DisableFlag_NoMarkdown()
+    {
+        // --no-enum-auto-description equivalent: EnumAutoDescription = false.
+        // x-enum-descriptions should still be emitted (feature is independent).
+        var generator = new SchemaGenerator(
+            new SchemaOptions { EnumAutoDescription = false },
+            docResolver: MakeDocResolver());
+        var type = GetType("OrderStatus");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        // No auto-glue description.
+        schema.Description.Should().BeNullOrEmpty();
+
+        // x-enum-descriptions still present (fully documented enum).
+        schema.Extensions.Should().ContainKey("x-enum-descriptions");
+    }
+
+    // =========================================================================
+    // [Description] fallback for enum values
+    // =========================================================================
+
+    [Fact]
+    public void GenerateSchema_SeverityLevel_DescriptionAttributeFallback_ValueDocResolvedFromAttribute()
+    {
+        // SeverityLevel values have no XML docs but carry [Description] attributes.
+        // The resolver should fall back to [Description] and populate x-enum-descriptions.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("SeverityLevel");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-descriptions");
+        var arr = ((JsonNodeExtension)schema.Extensions["x-enum-descriptions"]).Node.AsArray();
+
+        arr.Count.Should().Be(3);
+        arr[0]!.GetValue<string>().Should().Contain("Informational");
+        arr[1]!.GetValue<string>().Should().Contain("Potential issue");
+        arr[2]!.GetValue<string>().Should().Contain("Critical failure");
+    }
+
+    [Fact]
+    public void GenerateSchema_MixedDocEnum_XmlAndDescriptionFallback_BothResolve()
+    {
+        // MixedDocEnum: Active has XML, Paused has [Description], Stopped has neither.
+        var generator = MakeGeneratorWithDocs();
+        var type = GetType("MixedDocEnum");
+        var schema = (OpenApiSchema)generator.GenerateSchema(type);
+
+        schema.Extensions.Should().ContainKey("x-enum-descriptions");
+        var arr = ((JsonNodeExtension)schema.Extensions["x-enum-descriptions"]).Node.AsArray();
+
+        arr.Count.Should().Be(3);
+        // Active — from XML
+        arr[0]!.GetValue<string>().Should().Contain("Active and running");
+        // Paused — from [Description]
+        arr[1]!.GetValue<string>().Should().Contain("Temporarily paused");
+        // Stopped — undocumented, empty string
+        arr[2]!.GetValue<string>().Should().BeEmpty();
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private static DocumentationResolver MakeDocResolver()
+    {
+        var xmlParser = new XmlDocParser(TestPaths.SampleApiXml);
+        return new DocumentationResolver(xmlParser);
     }
 }

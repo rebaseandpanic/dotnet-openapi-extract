@@ -43,6 +43,8 @@ This means you can generate OpenAPI specs:
 | `--source-root <dir>` | no | auto-detect | Project root for Roslyn analysis of `Program.cs` |
 | `--naming-policy <policy>` | no | `camelCase` | `camelCase`, `snake_case_lower`, `snake_case_upper`, `kebab-case-lower`, `kebab-case-upper`, `preserve` |
 | `--enum-as-string` | no | `false` | Serialize enums as strings |
+| `--no-enum-auto-description` | no | off | Disable the auto-glue markdown description (type summary + per-value bullet list) on enum schemas. With this flag, `schema.description` on enums is not populated (unless set by a `JsonConverter` hint). `x-enum-descriptions` and `x-enum-varnames` still emit. |
+| `--no-enum-varnames` | no | off | Disable the `x-enum-varnames` extension on enum schemas |
 | `--path-base-emission <mode>` | no | `prefix` | How to emit `UsePathBase`: `prefix` (prepend to paths) or `servers` (add to `servers[]`) |
 | `--openapi-version <3.0\|3.1\|3.2>` | no | `3.0` | OpenAPI specification version |
 | `--exclude-path <prefix>` | no | — | Exclude paths by prefix (repeatable) |
@@ -122,6 +124,8 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 - Parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, `[FromForm]`) with `[ApiController]` inference
 - Responses (`[ProducesResponseType]`, `[SwaggerResponse]`) with return type inference
 - Schemas from DTO classes — primitives, nullable, collections, dictionaries, enums, generics, inheritance, self-referencing types
+- Enum extensions: `x-enum-varnames` (always, matches `enum[]` length), `x-enum-descriptions` (when any value is documented), markdown auto-glue `description` combining type summary + per-value bullet list
+- Enum value description sources: XML `<summary>` (primary) with `[Description]` attribute fallback
 - Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, etc.)
 - JSON attributes (`[JsonPropertyName]`, `[JsonIgnore]`, `[JsonRequired]`)
 - Swagger annotations (`[SwaggerOperation]`, `[SwaggerParameter]`, `[SwaggerTag]`, `[SwaggerSchema]`)

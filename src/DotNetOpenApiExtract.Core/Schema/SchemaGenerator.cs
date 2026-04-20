@@ -1,6 +1,6 @@
 using System.Reflection;
+using System.Text;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using Microsoft.OpenApi;
@@ -277,6 +277,8 @@ public sealed class SchemaGenerator
     /// Generates a schema for an enum type, respecting <see cref="SchemaOptions.EnumAsString"/>,
     /// the presence of <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> on the type,
     /// and any applicable global converters in <see cref="SchemaOptions.GlobalConverterTypeNames"/>.
+    /// Also emits <c>x-enum-descriptions</c>, <c>x-enum-varnames</c>, and a markdown
+    /// auto-description when the doc resolver is available and options permit.
     /// </summary>
     private IOpenApiSchema GenerateEnumSchema(Type enumType)
     {
@@ -319,31 +321,128 @@ public sealed class SchemaGenerator
         if (AttributeHelper.HasAttribute(enumType, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
 
-        // x-enum-descriptions — attach when doc resolver is available and at least one value
-        // has a non-empty XML <summary>. Array length must match enum[] array length.
-        if (_docResolver != null)
-        {
-            var descriptions = new List<string>(fields.Length);
-            bool anyNonEmpty = false;
-            foreach (var field in fields)
-            {
-                var desc = _docResolver.ResolveEnumValueDescription(enumType, field.Name);
-                descriptions.Add(desc);
-                if (!string.IsNullOrEmpty(desc))
-                    anyNonEmpty = true;
-            }
-
-            if (anyNonEmpty)
-            {
-                schema.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
-                var arr = new JsonArray();
-                foreach (var d in descriptions)
-                    arr.Add(JsonValue.Create(d));
-                schema.Extensions["x-enum-descriptions"] = new JsonNodeExtension(arr);
-            }
-        }
+        // Collect per-value descriptions and emit extensions + auto-description.
+        ApplyEnumExtensions(schema, enumType, fields, asString);
 
         return schema;
+    }
+
+    /// <summary>
+    /// Emits <c>x-enum-descriptions</c>, <c>x-enum-varnames</c>, and optionally a
+    /// markdown auto-glue <c>description</c> on the enum schema.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <c>x-enum-varnames</c>: always emitted when <see cref="SchemaOptions.EnumVarnames"/> is
+    ///     <see langword="true"/> and at least one field exists. Array length matches <c>enum[]</c>.
+    ///   </item>
+    ///   <item>
+    ///     <c>x-enum-descriptions</c>: emitted only when at least one value has a non-empty
+    ///     description (XML or <c>[Description]</c>). Array length matches <c>enum[]</c>; empty
+    ///     string is used for undocumented values.
+    ///   </item>
+    ///   <item>
+    ///     Auto-glue description: built only when <see cref="SchemaOptions.EnumAutoDescription"/> is
+    ///     <see langword="true"/>, at least one value is documented, and <c>schema.Description</c>
+    ///     was not set by a converter hint.
+    ///   </item>
+    /// </list>
+    /// </remarks>
+    private void ApplyEnumExtensions(
+        OpenApiSchema schema,
+        Type enumType,
+        FieldInfo[] fields,
+        bool asString)
+    {
+        // x-enum-varnames — unconditional when enabled and fields exist.
+        if (_options.EnumVarnames && fields.Length > 0)
+        {
+            schema.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+            var varnamesArr = new JsonArray();
+            foreach (var f in fields)
+                varnamesArr.Add(JsonValue.Create(f.Name));
+            schema.Extensions["x-enum-varnames"] = new JsonNodeExtension(varnamesArr);
+        }
+
+        // x-enum-descriptions and auto-glue require a doc resolver.
+        if (_docResolver == null)
+            return;
+
+        // Collect per-value descriptions.
+        var descriptions = new List<string>(fields.Length);
+        bool anyNonEmpty = false;
+        foreach (var field in fields)
+        {
+            var desc = _docResolver.ResolveEnumValueDescription(enumType, field.Name);
+            descriptions.Add(desc);
+            if (!string.IsNullOrEmpty(desc))
+                anyNonEmpty = true;
+        }
+
+        // x-enum-descriptions: only when at least one value is documented.
+        if (anyNonEmpty)
+        {
+            schema.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
+            var arr = new JsonArray();
+            foreach (var d in descriptions)
+                arr.Add(JsonValue.Create(d));
+            schema.Extensions["x-enum-descriptions"] = new JsonNodeExtension(arr);
+        }
+
+        // Auto-glue markdown description.
+        // Skip if the feature is disabled, no values are documented, or the description
+        // was already set by a converter hint (non-null/non-empty schema.Description).
+        if (!_options.EnumAutoDescription || !anyNonEmpty)
+            return;
+
+        // If a converter hint already wrote a description, preserve it — the hint wins.
+        if (!string.IsNullOrEmpty(schema.Description))
+            return;
+
+        // Build the bullet list (only for documented values).
+        var sb = new StringBuilder();
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var desc = descriptions[i];
+            if (string.IsNullOrEmpty(desc))
+                continue;
+
+            // Determine the value representation for the bullet.
+            string valueRepresentation;
+            if (asString)
+            {
+                valueRepresentation = fields[i].Name;
+            }
+            else
+            {
+                valueRepresentation = GetEnumFieldIntValue(fields[i]).ToString();
+            }
+
+            if (sb.Length > 0)
+                sb.Append('\n');
+            sb.Append($"* `{valueRepresentation}` — {fields[i].Name}: {desc}");
+        }
+
+        // Retrieve the type-level summary to use as the intro.
+        // Note: this is called here rather than relying on the document builder step
+        // because we need it synchronously during schema construction.
+        var typeSummary = _docResolver.ResolveTypeDescription(enumType);
+
+        string finalDescription;
+        if (!string.IsNullOrEmpty(typeSummary))
+        {
+            // Full format: intro + blank line + bullets
+            finalDescription = typeSummary + "\n\n" + sb;
+        }
+        else
+        {
+            // Bullet list only — no intro
+            finalDescription = sb.ToString();
+        }
+
+        if (!string.IsNullOrEmpty(finalDescription))
+            schema.Description = finalDescription;
     }
 
     /// <summary>
@@ -969,7 +1068,7 @@ public sealed class SchemaGenerator
         var args = type.GetGenericArguments();
 
         // Build arg name portion without LINQ closure allocation.
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         for (int i = 0; i < args.Length; i++)
         {
             if (i > 0) sb.Append("And");
@@ -1301,4 +1400,21 @@ public sealed class SchemaOptions
     /// converter-specific schema transformations.
     /// </summary>
     public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
+
+    /// <summary>
+    /// When <see langword="true"/> (default), the generator builds a markdown-formatted
+    /// <c>description</c> on enum schemas that combines the type-level XML summary with a
+    /// bullet list of per-value descriptions sourced from XML <c>&lt;summary&gt;</c> or
+    /// <c>[Description]</c> fallback. Requires a <see cref="DocumentationResolver"/> to be
+    /// supplied to <see cref="SchemaGenerator"/>. When <see langword="false"/>, the description
+    /// is left as-is (old behavior: type-level summary only, applied by the document builder).
+    /// </summary>
+    public bool EnumAutoDescription { get; init; } = true;
+
+    /// <summary>
+    /// When <see langword="true"/> (default), emits a <c>x-enum-varnames</c> extension
+    /// parallel to the <c>enum[]</c> array. Array length always matches <c>enum[]</c>.
+    /// When <see langword="false"/>, the extension is omitted.
+    /// </summary>
+    public bool EnumVarnames { get; init; } = true;
 }

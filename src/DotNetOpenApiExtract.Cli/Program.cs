@@ -219,6 +219,20 @@ var pathBaseEmissionOption = new Option<string>("--path-base-emission")
     DefaultValueFactory = _ => "prefix",
 };
 
+var noEnumAutoDescriptionOption = new Option<bool>("--no-enum-auto-description")
+{
+    Description = "Disable automatic markdown description on enum schemas. " +
+                  "When set, schema.description gets only the type-level summary (old behavior). " +
+                  "x-enum-descriptions is still emitted when values are documented.",
+    DefaultValueFactory = _ => false,
+};
+
+var noEnumVarnamesOption = new Option<bool>("--no-enum-varnames")
+{
+    Description = "Disable the x-enum-varnames extension on enum schemas.",
+    DefaultValueFactory = _ => false,
+};
+
 // ── Root command ──────────────────────────────────────────────────────────────
 
 var rootCommand = new RootCommand(
@@ -251,6 +265,8 @@ rootCommand.Options.Add(licenseUrlOption);
 rootCommand.Options.Add(termsOfServiceOption);
 rootCommand.Options.Add(serversOption);
 rootCommand.Options.Add(pathBaseEmissionOption);
+rootCommand.Options.Add(noEnumAutoDescriptionOption);
+rootCommand.Options.Add(noEnumVarnamesOption);
 // Validation options
 rootCommand.Options.Add(validateOption);
 rootCommand.Options.Add(skipRuleOption);
@@ -285,9 +301,11 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var licenseName  = parseResult.GetValue(licenseNameOption);
     var licenseUrl   = parseResult.GetValue(licenseUrlOption);
     var termsOfSvc   = parseResult.GetValue(termsOfServiceOption);
-    var servers           = parseResult.GetValue(serversOption);
-    var pathBaseEmission  = parseResult.GetValue(pathBaseEmissionOption)!;
-    var doValidate        = parseResult.GetValue(validateOption);
+    var servers                 = parseResult.GetValue(serversOption);
+    var pathBaseEmission        = parseResult.GetValue(pathBaseEmissionOption)!;
+    var noEnumAutoDescription   = parseResult.GetValue(noEnumAutoDescriptionOption);
+    var noEnumVarnames          = parseResult.GetValue(noEnumVarnamesOption);
+    var doValidate              = parseResult.GetValue(validateOption);
     var skipRules         = parseResult.GetValue(skipRuleOption);
     var minDescLen        = parseResult.GetValue(minDescLengthOption);
     var excludeValPaths   = parseResult.GetValue(excludeValidationPathOption);
@@ -404,6 +422,8 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             TermsOfService      = termsOfSvc,
             Servers             = servers is { Length: > 0 } ? servers : null,
             PathBaseEmission    = pathBaseEmissionMode,
+            EnumAutoDescription = !noEnumAutoDescription,
+            EnumVarnames        = !noEnumVarnames,
         };
 
         OpenApiDocument document;
