@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [0.9.0] - 2026-04-22
+
+- [BUGFIX] Validation rule `schema.property-constraints` no longer produces false-positive errors on `List<T>` / array-typed properties decorated with `[MinLength]` / `[MaxLength]`. The extractor correctly emits `minItems` / `maxItems` on array schemas per OpenAPI spec, but the rule was always checking `minLength` / `maxLength` regardless of schema type — any array property with these attributes would block CI with a bogus "schema lacks 'maxLength'" error. The rule now dispatches by schema type: array → `maxItems` / `minItems`, otherwise → `maxLength` / `minLength`. `[StringLength]` is unchanged (string-only by contract). Violation messages also standardized — short attribute form (`[MaxLength]`, `[MinLength]`) matching existing `[Range]` / `[RegularExpression]` wording.
+
 ## [0.8.0] - 2026-04-22
 
 - [BUGFIX] `[SwaggerRequestBody]` on `[FromBody]` parameters is now respected — both the positional `[SwaggerRequestBody("...")]` and named-argument `[SwaggerRequestBody(Description = "...")]` forms populate `operation.requestBody.description`. Previously only `[SwaggerParameter]` and `[Description]` were read, so the canonical Swashbuckle attribute for body descriptions was silently ignored.

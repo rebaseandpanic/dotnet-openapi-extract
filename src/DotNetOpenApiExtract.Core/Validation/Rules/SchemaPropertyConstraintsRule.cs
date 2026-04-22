@@ -4,9 +4,11 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 
 /// <summary>
 /// Rule: <c>schema.property-constraints</c>
-/// If a CLR property carries <c>[StringLength]</c>, <c>[Range]</c>, or <c>[RegularExpression]</c>
-/// validation attributes, the corresponding schema constraints (<c>maxLength</c>, <c>minimum</c>,
-/// <c>maximum</c>, <c>pattern</c>) must be present.
+/// If a CLR property carries <c>[StringLength]</c>, <c>[MaxLength]</c>, <c>[MinLength]</c>,
+/// <c>[Range]</c>, or <c>[RegularExpression]</c> validation attributes, the corresponding
+/// schema constraints must be present. For string properties: <c>maxLength</c> / <c>minLength</c>.
+/// For array properties (<c>List&lt;T&gt;</c>, <c>T[]</c>, etc.): <c>maxItems</c> / <c>minItems</c>.
+/// <c>[StringLength]</c> always maps to <c>maxLength</c> regardless of schema type.
 /// <para>
 /// Skipped in standalone mode (no CLR bindings available).
 /// </para>
@@ -51,8 +53,9 @@ public sealed class SchemaPropertyConstraintsRule : IValidationRule
                     var fullName = attr.AttributeType.FullName;
                     if (fullName == null) continue;
 
-                    if (fullName == StringLengthAttr || fullName == MaxLengthAttr)
+                    if (fullName == StringLengthAttr)
                     {
+                        // [StringLength] is string-only by contract — always maps to maxLength.
                         if (prop.MaxLength == null)
                         {
                             yield return new ValidationViolation(
@@ -63,16 +66,60 @@ public sealed class SchemaPropertyConstraintsRule : IValidationRule
                                 $"Property '{propName}' in '{schemaId}' has [{attr.AttributeType.Name}] but schema lacks 'maxLength'.");
                         }
                     }
+                    else if (fullName == MaxLengthAttr)
+                    {
+                        // [MaxLength] on an array property (List<T>, T[], etc.) maps to maxItems.
+                        if (prop.Type.HasValue && prop.Type.Value.HasFlag(JsonSchemaType.Array))
+                        {
+                            if (prop.MaxItems == null)
+                            {
+                                yield return new ValidationViolation(
+                                    Id,
+                                    DefaultSeverity,
+                                    JsonPointerHelper.ForSchemaProperty(schemaId, propName),
+                                    resolver.ForSchemaProperty(schemaId, propName),
+                                    $"Property '{propName}' in '{schemaId}' has [MaxLength] but schema lacks 'maxItems'.");
+                            }
+                        }
+                        else
+                        {
+                            if (prop.MaxLength == null)
+                            {
+                                yield return new ValidationViolation(
+                                    Id,
+                                    DefaultSeverity,
+                                    JsonPointerHelper.ForSchemaProperty(schemaId, propName),
+                                    resolver.ForSchemaProperty(schemaId, propName),
+                                    $"Property '{propName}' in '{schemaId}' has [MaxLength] but schema lacks 'maxLength'.");
+                            }
+                        }
+                    }
                     else if (fullName == MinLengthAttr)
                     {
-                        if (prop.MinLength == null)
+                        // [MinLength] on an array property (List<T>, T[], etc.) maps to minItems.
+                        if (prop.Type.HasValue && prop.Type.Value.HasFlag(JsonSchemaType.Array))
                         {
-                            yield return new ValidationViolation(
-                                Id,
-                                DefaultSeverity,
-                                JsonPointerHelper.ForSchemaProperty(schemaId, propName),
-                                resolver.ForSchemaProperty(schemaId, propName),
-                                $"Property '{propName}' in '{schemaId}' has [{attr.AttributeType.Name}] but schema lacks 'minLength'.");
+                            if (prop.MinItems == null)
+                            {
+                                yield return new ValidationViolation(
+                                    Id,
+                                    DefaultSeverity,
+                                    JsonPointerHelper.ForSchemaProperty(schemaId, propName),
+                                    resolver.ForSchemaProperty(schemaId, propName),
+                                    $"Property '{propName}' in '{schemaId}' has [MinLength] but schema lacks 'minItems'.");
+                            }
+                        }
+                        else
+                        {
+                            if (prop.MinLength == null)
+                            {
+                                yield return new ValidationViolation(
+                                    Id,
+                                    DefaultSeverity,
+                                    JsonPointerHelper.ForSchemaProperty(schemaId, propName),
+                                    resolver.ForSchemaProperty(schemaId, propName),
+                                    $"Property '{propName}' in '{schemaId}' has [MinLength] but schema lacks 'minLength'.");
+                            }
                         }
                     }
                     else if (fullName == RangeAttr)

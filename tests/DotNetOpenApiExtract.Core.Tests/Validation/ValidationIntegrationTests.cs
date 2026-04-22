@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using DotNetOpenApiExtract.Core;
 using DotNetOpenApiExtract.Core.Validation;
 using Microsoft.OpenApi;
 using Xunit;
@@ -136,7 +135,79 @@ public sealed class ValidationIntegrationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 5. CLR bindings — location class and method populated
+    // 5. Regression: array properties with [MaxLength]/[MinLength] must NOT
+    //    produce a false-positive schema.property-constraints violation claiming
+    //    that 'maxLength' / 'minLength' is missing.  Before the fix the rule
+    //    always checked MaxLength/MinLength regardless of schema type, so
+    //    List<string> Items ([MaxLength(10)]) and List<string> RequiredItems
+    //    ([MinLength(2)]) in ValidationModel / ExtendedValidationModel
+    //    triggered bogus errors.
+    //
+    //    Properties are emitted camelCased by default, so the JSON pointer
+    //    segments are 'items' and 'requiredItems' (lowercase initial).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Pointer fragments emitted by JsonPointerHelper.ForSchemaProperty.
+    private const string ValidationModelItemsPointer = "/components/schemas/ValidationModel/properties/items";
+    private const string ExtendedValidationModelRequiredItemsPointer =
+        "/components/schemas/ExtendedValidationModel/properties/requiredItems";
+
+    [Fact]
+    public void BuildWithValidation_ArrayPropertyWithMaxLength_NoFalsePositiveConstraintViolation()
+    {
+        var options = new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.SampleApiDll,
+            XmlPath      = TestPaths.SampleApiXml,
+        };
+
+        var validationContext = new ValidationContext();
+        OpenApiDocumentBuilder.BuildWithValidation(options, validationContext, out var result);
+
+        // ValidationModel.Items is List<string> annotated with [MaxLength(10)].
+        // The extractor correctly emits maxItems on the schema; the rule must not then
+        // also complain that maxLength is missing (that would be a false positive).
+        var falsePositiveViolations = result.Violations
+            .Where(v => v.RuleId == "schema.property-constraints"
+                     && v.JsonPointer.Contains(ValidationModelItemsPointer, StringComparison.Ordinal)
+                     && v.Message.Contains("maxLength"))
+            .ToList();
+
+        falsePositiveViolations.Should().BeEmpty(
+            because: "array properties annotated with [MaxLength] must be checked against " +
+                     "maxItems (not maxLength); before the fix this incorrectly reported " +
+                     "a missing 'maxLength' on List<string> Items");
+    }
+
+    [Fact]
+    public void BuildWithValidation_ArrayPropertyWithMinLength_NoFalsePositiveConstraintViolation()
+    {
+        var options = new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.SampleApiDll,
+            XmlPath      = TestPaths.SampleApiXml,
+        };
+
+        var validationContext = new ValidationContext();
+        OpenApiDocumentBuilder.BuildWithValidation(options, validationContext, out var result);
+
+        // ExtendedValidationModel.RequiredItems is List<string> annotated with [MinLength(2)].
+        // The extractor correctly emits minItems; the rule must not claim minLength is missing.
+        var falsePositiveViolations = result.Violations
+            .Where(v => v.RuleId == "schema.property-constraints"
+                     && v.JsonPointer.Contains(ExtendedValidationModelRequiredItemsPointer, StringComparison.Ordinal)
+                     && v.Message.Contains("minLength"))
+            .ToList();
+
+        falsePositiveViolations.Should().BeEmpty(
+            because: "array properties annotated with [MinLength] must be checked against " +
+                     "minItems (not minLength); before the fix this incorrectly reported " +
+                     "a missing 'minLength' on List<string> RequiredItems");
+    }
+
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 6. CLR bindings — location class and method populated
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]

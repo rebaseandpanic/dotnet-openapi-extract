@@ -272,9 +272,10 @@ public class ActionDiscoveryTests : IDisposable
         // JsonConverter: JsonConverter=1 — 1
         // RateLimiting (T13): RateLimiting=4 — 4 (added GetDisableWins for Disable+Enable precedence test)
         // Caching (T13): Caching=6 — 6 (added GetNoStoreWithDuration, GetLocationNone)
-        // Total: 47
+        // ValidationModel: Echo + EchoExtended — 2 (surface ValidationModel/ExtendedValidationModel schemas)
+        // Total: 49
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(47);
+        allActions.Should().HaveCount(49);
     }
 
     // -------------------------------------------------------------------------
