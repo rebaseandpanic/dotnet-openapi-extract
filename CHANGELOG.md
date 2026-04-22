@@ -2,6 +2,13 @@
 
 All notable changes to this project.
 
+## [0.8.0] - 2026-04-22
+
+- [BUGFIX] `[SwaggerRequestBody]` on `[FromBody]` parameters is now respected — both the positional `[SwaggerRequestBody("...")]` and named-argument `[SwaggerRequestBody(Description = "...")]` forms populate `operation.requestBody.description`. Previously only `[SwaggerParameter]` and `[Description]` were read, so the canonical Swashbuckle attribute for body descriptions was silently ignored.
+- [BUGFIX] Property descriptions declared on an open generic type (e.g. `<summary>` on `ApiResponse<T>.Success`) now propagate to every closed specialization schema (`UserDtoApiResponse`, `UserDtoListApiResponse`, etc.). C# emits XML doc entries under the open-generic key (`P:Namespace.ApiResponse\`1.Success`); the extractor now falls back to `GetGenericTypeDefinition().FullName` when a closed-type lookup misses. Applies consistently to type, property, and field documentation resolution.
+- [BUGFIX] Method-parameter defaults now surface as `schema.default` in the OpenAPI spec. Both `[DefaultValue(1)]` and inline C# defaults (`int page = 1`) are written, with attribute taking precedence when both are present. Switch covers `bool`, `string`, and every BCL numeric type (`int`, `long`, `float`, `double`, `decimal`, `uint`, `short`, `ushort`, `ulong`, `sbyte`, `byte`). `OpenApiSchemaReference` values are guarded and skipped silently.
+- [ARCHITECTURE] A parameter decorated with `[DefaultValue]` (even without an inline `= value`) is now inferred as `required: false`. This removes the previous contradiction of emitting `required: true` alongside `default: N`, matching OpenAPI semantics that consumers may omit any parameter carrying a default.
+
 ## [0.7.0] - 2026-04-20
 
 - [FEATURE] Auto-glue markdown description on enum schemas — when per-value XML `<summary>` docs are present, the extractor now composes a human-readable markdown bullet list (`* \`0\` — Draft: Order created but not submitted`) and writes it to `schema.description`. Works in viewers that ignore the `x-enum-descriptions` extension (e.g. older Swagger UI). When a type-level `<summary>` is also present it is used as the intro paragraph; otherwise the bullet list stands alone. Partially-documented enums skip bullets for undocumented values. Respects `JsonConverter` hints — if a converter already set a description, auto-glue is skipped.

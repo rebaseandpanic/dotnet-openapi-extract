@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 using SampleApi.Models;
@@ -82,7 +83,7 @@ public class UsersController : ControllerBase
         OperationId = "CreateUser"
     )]
     public ActionResult<ApiResponse<UserDto>> CreateUser(
-        [FromBody] CreateUserRequest request)
+        [FromBody, SwaggerRequestBody("User creation payload")] CreateUserRequest request)
     {
         throw new NotImplementedException();
     }
@@ -103,6 +104,41 @@ public class UsersController : ControllerBase
     )]
     public ActionResult DeleteUser(
         [FromRoute, SwaggerParameter("User unique identifier")] Guid id)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Update user (named-arg SwaggerRequestBody fixture)
+    /// </summary>
+    [HttpPut("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [SwaggerOperation(OperationId = "UpdateUser")]
+    public ActionResult UpdateUser(
+        [FromRoute] Guid id,
+        [FromBody, SwaggerRequestBody(Description = "User update payload (named-arg form)")] CreateUserRequest request)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Search users by name
+    /// </summary>
+    /// <remarks>
+    /// Exercises [DefaultValue] attribute path for query parameter default values.
+    /// </remarks>
+    /// <response code="200">Matching users</response>
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(ApiResponse<List<UserDto>>), StatusCodes.Status200OK)]
+    [SwaggerOperation(
+        Summary = "Search users by name",
+        Description = "Returns users whose name matches the given query string.",
+        OperationId = "SearchUsers"
+    )]
+    public ActionResult<ApiResponse<List<UserDto>>> SearchUsers(
+        [FromQuery, SwaggerParameter("Name search term")] string? query,
+        [FromQuery, DefaultValue(1), SwaggerParameter("Page number (1-based)")] int page,
+        [FromQuery, DefaultValue(20), SwaggerParameter("Items per page")] int pageSize)
     {
         throw new NotImplementedException();
     }

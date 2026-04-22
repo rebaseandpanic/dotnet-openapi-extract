@@ -615,6 +615,29 @@ public sealed class OpenApiDocumentBuilder
                 _                           => OpenApiParameterLocation.Query,
             };
 
+            // Write schema.Default when the parameter has a default value.
+            // Guard against OpenApiSchemaReference — only mutable OpenApiSchema supports Default.
+            if (param.DefaultValue is not null && paramSchema is OpenApiSchema mutableParamSchema)
+            {
+                mutableParamSchema.Default = param.DefaultValue switch
+                {
+                    bool b    => JsonValue.Create(b),
+                    int i     => JsonValue.Create(i),
+                    long l    => JsonValue.Create(l),
+                    float f   => JsonValue.Create(f),
+                    double d  => JsonValue.Create(d),
+                    string s  => JsonValue.Create(s),
+                    decimal dec => JsonValue.Create(dec),
+                    uint ui   => JsonValue.Create(ui),
+                    short s16 => JsonValue.Create(s16),
+                    ushort u16 => JsonValue.Create(u16),
+                    ulong u64 => JsonValue.Create(u64),
+                    sbyte sb  => JsonValue.Create(sb),
+                    byte b8   => JsonValue.Create(b8),
+                    _         => JsonValue.Create(param.DefaultValue.ToString()),
+                };
+            }
+
             var openApiParam = new OpenApiParameter
             {
                 Name = param.Name,

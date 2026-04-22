@@ -37,7 +37,7 @@ public sealed class ActionParameterInfo
     /// <summary>Default value, if the parameter has one.</summary>
     public object? DefaultValue { get; init; }
 
-    /// <summary>Description from [SwaggerParameter] or [Description] attribute.</summary>
+    /// <summary>Description from [SwaggerRequestBody], [SwaggerParameter], or [Description] attribute, in that priority order.</summary>
     public string? Description { get; init; }
 
     /// <summary>The original System.Reflection.ParameterInfo for advanced inspection.</summary>
@@ -132,8 +132,14 @@ public static class ParameterExtractor
             bool isRequired = DetermineIsRequired(param, location);
 
             // --- 5. Default value ---
+            // [DefaultValue(x)] attribute takes precedence over the compiler-inferred inline default.
             // MetadataLoadContext types throw on param.DefaultValue; use RawDefaultValue instead.
-            object? defaultValue = param.HasDefaultValue ? param.RawDefaultValue : null;
+            object? defaultValue = null;
+            var defaultValueAttr = AttributeHelper.GetAttribute(param, AttributeHelper.Names.DefaultValue);
+            if (defaultValueAttr != null)
+                defaultValue = AttributeHelper.GetConstructorArgument<object>(defaultValueAttr, 0);
+            else if (param.HasDefaultValue)
+                defaultValue = param.RawDefaultValue;
 
             // --- 6. Description ---
             string? description = ResolveDescription(param);
@@ -276,6 +282,11 @@ public static class ParameterExtractor
         if (param.HasDefaultValue)
             return false;
 
+        // [DefaultValue] attribute also makes the parameter optional — a default
+        // value implies the caller may omit the parameter.
+        if (AttributeHelper.HasAttribute(param, AttributeHelper.Names.DefaultValue))
+            return false;
+
         // Nullable<T> value types are optional.
         if (IsNullableType(param.ParameterType))
             return false;
@@ -289,11 +300,22 @@ public static class ParameterExtractor
     }
 
     /// <summary>
-    /// Reads the parameter description from <c>[SwaggerParameter]</c> (constructor arg 0)
-    /// or, if absent, from <c>[Description]</c> (constructor arg 0).
+    /// Reads the parameter description from <c>[SwaggerRequestBody]</c> (constructor arg 0),
+    /// <c>[SwaggerParameter]</c> (constructor arg 0), or <c>[Description]</c> (constructor arg 0),
+    /// in that priority order.
     /// </summary>
     private static string? ResolveDescription(System.Reflection.ParameterInfo param)
     {
+        var swaggerRequestBody = AttributeHelper.GetAttribute(param, AttributeHelper.Names.SwaggerRequestBody);
+        if (swaggerRequestBody != null)
+        {
+            var desc = AttributeHelper.GetConstructorArgument<string>(swaggerRequestBody, 0);
+            if (string.IsNullOrEmpty(desc))
+                desc = AttributeHelper.GetNamedArgument<string>(swaggerRequestBody, "Description");
+            if (!string.IsNullOrEmpty(desc))
+                return desc;
+        }
+
         var swaggerParam = AttributeHelper.GetAttribute(param, AttributeHelper.Names.SwaggerParameter);
         if (swaggerParam != null)
         {

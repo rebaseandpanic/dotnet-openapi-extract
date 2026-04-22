@@ -73,10 +73,26 @@ public sealed class XmlDocParser
     }
 
     /// <summary>Get docs for a type (class, struct, enum).</summary>
+    /// <remarks>
+    /// For closed generic types (e.g. <c>ApiResponse&lt;UserDto&gt;</c>) the compiler emits
+    /// the XML doc entry under the open generic definition's FullName
+    /// (e.g. <c>T:SampleApi.Models.ApiResponse`1</c>). When the direct lookup by the
+    /// closed type's FullName misses, this method retries with the open generic definition.
+    /// </remarks>
     public XmlDocEntry? GetTypeDoc(Type type)
     {
         var key = $"T:{type.FullName}";
-        return _entries.GetValueOrDefault(key);
+        if (_entries.TryGetValue(key, out var entry))
+            return entry;
+
+        // Fallback for closed generic types: retry with the open generic definition's FullName.
+        if (type.IsGenericType && !type.IsGenericTypeDefinition)
+        {
+            var openKey = $"T:{type.GetGenericTypeDefinition().FullName}";
+            return _entries.GetValueOrDefault(openKey);
+        }
+
+        return null;
     }
 
     /// <summary>Get docs for a method.</summary>
@@ -87,17 +103,46 @@ public sealed class XmlDocParser
     }
 
     /// <summary>Get docs for a property.</summary>
+    /// <remarks>
+    /// For closed generic types (e.g. <c>ApiResponse&lt;UserDto&gt;</c>) the compiler emits
+    /// the XML doc entry under the open generic definition's FullName. When the direct lookup
+    /// misses, this method retries with the open generic definition.
+    /// </remarks>
     public XmlDocEntry? GetPropertyDoc(Type declaringType, string propertyName)
     {
         var key = $"P:{declaringType.FullName}.{propertyName}";
-        return _entries.GetValueOrDefault(key);
+        if (_entries.TryGetValue(key, out var entry))
+            return entry;
+
+        // Fallback for closed generic types.
+        if (declaringType.IsGenericType && !declaringType.IsGenericTypeDefinition)
+        {
+            var openKey = $"P:{declaringType.GetGenericTypeDefinition().FullName}.{propertyName}";
+            return _entries.GetValueOrDefault(openKey);
+        }
+
+        return null;
     }
 
     /// <summary>Get docs for an enum field.</summary>
+    /// <remarks>
+    /// For closed generic types, retries with the open generic definition's FullName when
+    /// the direct lookup misses (same pattern as <see cref="GetPropertyDoc"/>).
+    /// </remarks>
     public XmlDocEntry? GetFieldDoc(Type declaringType, string fieldName)
     {
         var key = $"F:{declaringType.FullName}.{fieldName}";
-        return _entries.GetValueOrDefault(key);
+        if (_entries.TryGetValue(key, out var entry))
+            return entry;
+
+        // Fallback for closed generic types.
+        if (declaringType.IsGenericType && !declaringType.IsGenericTypeDefinition)
+        {
+            var openKey = $"F:{declaringType.GetGenericTypeDefinition().FullName}.{fieldName}";
+            return _entries.GetValueOrDefault(openKey);
+        }
+
+        return null;
     }
 
     private static string BuildMethodKey(MethodInfo method)

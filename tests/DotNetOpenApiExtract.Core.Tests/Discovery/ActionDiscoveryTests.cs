@@ -39,10 +39,10 @@ public class ActionDiscoveryTests : IDisposable
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void UsersController_HasFourActions()
+    public void UsersController_HasSixActions()
     {
-        // GetUsers, GetUser, CreateUser, DeleteUser
-        _usersActions.Should().HaveCount(4);
+        // GetUsers, GetUser, CreateUser, DeleteUser, UpdateUser, SearchUsers
+        _usersActions.Should().HaveCount(6);
     }
 
     // -------------------------------------------------------------------------
@@ -263,7 +263,7 @@ public class ActionDiscoveryTests : IDisposable
     [Fact]
     public void AllControllers_TotalActionCountIsCorrect()
     {
-        // Non-versioning: Users=4, Health=1, Orders=3, Products=4, Files=5, Deprecated=2, ObsoleteDto=1 — 20
+        // Non-versioning: Users=6, Health=1, Orders=3, Products=4, Files=5, Deprecated=2, ObsoleteDto=1 — 22
         // Versioning (actions each): Versioned=2, Status=1, VersioningUnion=1, VersioningDedup=1,
         //                            VersioningActionNeutral=1, VersioningIntConstructor=1,
         //                            VersioningStatusSuffix=1, VersioningDoubleStatusSuffix=1 — 9
@@ -272,9 +272,9 @@ public class ActionDiscoveryTests : IDisposable
         // JsonConverter: JsonConverter=1 — 1
         // RateLimiting (T13): RateLimiting=4 — 4 (added GetDisableWins for Disable+Enable precedence test)
         // Caching (T13): Caching=6 — 6 (added GetNoStoreWithDuration, GetLocationNone)
-        // Total: 45
+        // Total: 47
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(45);
+        allActions.Should().HaveCount(47);
     }
 
     // -------------------------------------------------------------------------
