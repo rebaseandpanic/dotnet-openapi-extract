@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using DotNetOpenApiExtract.Core;
 using Microsoft.OpenApi;
 using Xunit;
 
@@ -56,14 +55,20 @@ public class InfoAndServersTests
     }
 
     [Fact]
-    public void Info_Contact_NoneSet_NoContactInDocument()
+    public void Info_Contact_NoneSet_AssemblyCompanyUsedAsContactName()
     {
+        // SampleApi.csproj declares <Company>Acme Corp</Company> — when no CLI contact
+        // fields are set, the builder auto-populates contact.name from [AssemblyCompany].
         var doc = Build(new OpenApiDocumentOptions
         {
             AssemblyPath = TestPaths.SampleApiDll,
         });
 
-        doc.Info.Contact.Should().BeNull();
+        doc.Info.Contact.Should().NotBeNull(
+            "SampleApi embeds [AssemblyCompany] so the Contact block is auto-populated");
+        doc.Info.Contact!.Name.Should().Be("Acme Corp");
+        doc.Info.Contact.Email.Should().BeNull();
+        doc.Info.Contact.Url.Should().BeNull();
     }
 
     [Fact]
@@ -243,6 +248,8 @@ public class InfoAndServersTests
         doc.Info.Contact.Should().NotBeNull(
             "a non-null ContactEmail (even empty string) triggers Contact creation");
         doc.Info.Contact!.Email.Should().Be("");
+        doc.Info.Contact!.Name.Should().Be("Acme Corp",
+            because: "[AssemblyCompany] now populates Contact.Name when the CLI omits --contact-name");
     }
 
     // =========================================================================
@@ -250,14 +257,18 @@ public class InfoAndServersTests
     // =========================================================================
 
     [Fact]
-    public void Info_NoNewFieldsSet_BehaviorUnchanged()
+    public void Info_ExplicitOptionsOverrideAssemblyAttributes()
     {
+        // When all three option fields are set explicitly, assembly attributes must NOT override them.
+        // SampleApi embeds [AssemblyCompany] = "Acme Corp", but ContactName is set here explicitly
+        // so the explicit value must win.
         var baselineOptions = new OpenApiDocumentOptions
         {
             AssemblyPath = TestPaths.SampleApiDll,
             Title        = "MyApi",
             Version      = "v2",
             Description  = "Test description",
+            ContactName  = "Explicit Contact",
         };
 
         var doc = Build(baselineOptions);
@@ -265,7 +276,9 @@ public class InfoAndServersTests
         doc.Info.Title.Should().Be("MyApi");
         doc.Info.Version.Should().Be("v2");
         doc.Info.Description.Should().Be("Test description");
-        doc.Info.Contact.Should().BeNull();
+        // Explicit ContactName overrides [AssemblyCompany]
+        doc.Info.Contact.Should().NotBeNull();
+        doc.Info.Contact!.Name.Should().Be("Explicit Contact");
         doc.Info.License.Should().BeNull();
         doc.Info.TermsOfService.Should().BeNull();
         // Servers is not populated when the option is not set; the library may initialise the

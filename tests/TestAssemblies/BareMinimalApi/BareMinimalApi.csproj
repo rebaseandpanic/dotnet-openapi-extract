@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Minimal assembly fixture with *no* identity assembly-level attributes.
+    Covers the final fall-back in the title-resolution chain:
+      options.Title -> [AssemblyTitle] -> [AssemblyProduct] -> assembly.GetName().Name -> "API"
+    For this assembly, only the last two apply; tests assert the title is the
+    DLL file name (i.e. "BareMinimalApi").
+
+    Also used to verify the contact-gate fix: when ContactName, ContactEmail
+    and ContactUrl options are all absent and [AssemblyCompany] is missing,
+    no Contact block must be emitted.
+
+    GenerateAssemblyInfo is off so MSBuild does not add any identity attrs.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+</Project>

@@ -49,8 +49,12 @@ public sealed class OpenApiDocumentOptions
     /// </summary>
     public string? XmlPath { get; init; }
 
-    /// <summary>Title of the API (used in OpenAPI Info).</summary>
-    public string Title { get; init; } = "API";
+    /// <summary>
+    /// Title of the API (used in OpenAPI Info).
+    /// When <see langword="null"/> or whitespace, the builder falls back to
+    /// <c>[AssemblyTitle]</c>, then <c>[AssemblyProduct]</c>, then the DLL file name.
+    /// </summary>
+    public string? Title { get; init; }
 
     /// <summary>Version of the API (used in OpenAPI Info).</summary>
     public string Version { get; init; } = "v1";
@@ -321,15 +325,49 @@ public sealed class OpenApiDocumentBuilder
         var actions = ActionDiscovery.DiscoverActions(controllers);
 
         // ── Step 2: Initialise document skeleton ────────────────────────────
+
+        // Read assembly-level identity attributes (MetadataLoadContext: via CustomAttributeData,
+        // never constructed/invoked).
+        var asmAttrs = loader.Assembly.GetCustomAttributesData();
+        static string? ReadAsmStringAttr(IList<System.Reflection.CustomAttributeData> attrs, string fullName)
+            => attrs.FirstOrDefault(a => a.AttributeType.FullName == fullName)
+                   ?.ConstructorArguments.ElementAtOrDefault(0).Value as string;
+
+        var asmTitle       = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyTitle);
+        var asmDescription = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyDescription);
+        var asmProduct     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyProduct);
+        var asmCompany     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyCompany);
+
+        // Precedence chains (IsNullOrWhiteSpace rejects both null and empty/whitespace).
+        var resolvedTitle =
+            (!string.IsNullOrWhiteSpace(options.Title)       ? options.Title       : null)
+            ?? (!string.IsNullOrWhiteSpace(asmTitle)         ? asmTitle            : null)
+            ?? (!string.IsNullOrWhiteSpace(asmProduct)       ? asmProduct          : null)
+            ?? loader.Assembly.GetName().Name
+            ?? "API";
+
+        var resolvedDescription =
+            (!string.IsNullOrWhiteSpace(options.Description) ? options.Description : null)
+            ?? (!string.IsNullOrWhiteSpace(asmDescription)   ? asmDescription      : null);
+
+        // contact.name: option wins, then [AssemblyCompany] as last resort.
+        var resolvedContactName =
+            (!string.IsNullOrWhiteSpace(options.ContactName) ? options.ContactName : null)
+            ?? (!string.IsNullOrWhiteSpace(asmCompany)       ? asmCompany          : null);
+
         var info = new OpenApiInfo
         {
-            Title = options.Title,
-            Version = options.Version,
-            Description = options.Description,
+            Title       = resolvedTitle,
+            Version     = options.Version,
+            Description = resolvedDescription,
         };
 
-        // Contact
-        if (options.ContactName != null || options.ContactEmail != null || options.ContactUrl != null)
+        // Contact: build the block when any of the three CLI fields is set (preserves existing
+        // behaviour including ContactEmail = "" creating Contact) OR when [AssemblyCompany] resolves.
+        if (!string.IsNullOrWhiteSpace(options.ContactName)
+            || options.ContactEmail != null
+            || options.ContactUrl != null
+            || resolvedContactName != null)
         {
             Uri? contactUri = null;
             if (options.ContactUrl != null)
@@ -343,7 +381,7 @@ public sealed class OpenApiDocumentBuilder
 
             info.Contact = new OpenApiContact
             {
-                Name  = options.ContactName,
+                Name  = resolvedContactName,
                 Email = options.ContactEmail,
                 Url   = contactUri,
             };

@@ -2,6 +2,14 @@
 
 All notable changes to this project.
 
+## [0.10.0] - 2026-04-24
+
+- [FEATURE] `info.*` fields now auto-populate from assembly metadata when the corresponding CLI flags are absent — you can drop `--title`, `--description`, and `--contact-name` if your `.csproj` already declares them, and the spec will still be complete. Developers writing `<Description>`, `<AssemblyTitle>`, `<Product>`, `<Company>` in MSBuild no longer need to duplicate those values on the command line. CLI flags remain authoritative as overrides; whitespace-only options are treated as absent and fall through to the attribute chain. The three resolution chains:
+  - `info.description` ← `--description` → `[AssemblyDescription]`
+  - `info.title` ← `--title` → `[AssemblyTitle]` → `[AssemblyProduct]` → assembly file name
+  - `info.contact.name` ← `--contact-name` → `[AssemblyCompany]` (Contact block is auto-created when at least one contact source resolves)
+- [ARCHITECTURE] `OpenApiDocumentOptions.Title` changed from non-nullable with default `"API"` to nullable `string?`. In-process consumers that previously omitted `Title` from the initializer and relied on the `"API"` literal will now get the assembly-metadata fallback chain instead. Explicit `Title = "API"` continues to work. The CLI behaviour is unchanged for the common case because the filename-of-DLL fallback is now applied inside the Core builder rather than the CLI layer.
+
 ## [0.9.0] - 2026-04-22
 
 - [BUGFIX] Validation rule `schema.property-constraints` no longer produces false-positive errors on `List<T>` / array-typed properties decorated with `[MinLength]` / `[MaxLength]`. The extractor correctly emits `minItems` / `maxItems` on array schemas per OpenAPI spec, but the rule was always checking `minLength` / `maxLength` regardless of schema type — any array property with these attributes would block CI with a bogus "schema lacks 'maxLength'" error. The rule now dispatches by schema type: array → `maxItems` / `minItems`, otherwise → `maxLength` / `minLength`. `[StringLength]` is unchanged (string-only by contract). Violation messages also standardized — short attribute form (`[MaxLength]`, `[MinLength]`) matching existing `[Range]` / `[RegularExpression]` wording.

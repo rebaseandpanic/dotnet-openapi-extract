@@ -220,6 +220,12 @@ public static class AttributeHelper
         // ASP.NET Core Response Caching
         public const string ResponseCache = "Microsoft.AspNetCore.Mvc.ResponseCacheAttribute";
         public const string OutputCache = "Microsoft.AspNetCore.OutputCaching.OutputCacheAttribute";
+
+        // Assembly-level identity attributes (MSBuild embeds these from .csproj properties)
+        public const string AssemblyTitle = "System.Reflection.AssemblyTitleAttribute";
+        public const string AssemblyDescription = "System.Reflection.AssemblyDescriptionAttribute";
+        public const string AssemblyProduct = "System.Reflection.AssemblyProductAttribute";
+        public const string AssemblyCompany = "System.Reflection.AssemblyCompanyAttribute";
     }
 
     /// <summary>

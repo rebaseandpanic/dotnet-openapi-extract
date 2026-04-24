@@ -7,6 +7,8 @@
     <Project Path="tests/DotNetOpenApiExtract.Core.Tests/DotNetOpenApiExtract.Core.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/TestAssemblies/">
+    <Project Path="tests/TestAssemblies/BareMinimalApi/BareMinimalApi.csproj" />
+    <Project Path="tests/TestAssemblies/MinimalProductApi/MinimalProductApi.csproj" />
     <Project Path="tests/TestAssemblies/SampleApi/SampleApi.csproj" />
   </Folder>
 </Solution>

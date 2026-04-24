@@ -120,7 +120,7 @@ var formatOption = new Option<string>("--format")
 
 var titleOption = new Option<string?>("--title")
 {
-    Description = "API title (default: assembly file name without extension)",
+    Description = "API title. Defaults to [AssemblyTitle], then [AssemblyProduct], then DLL file name",
 };
 
 var versionOption = new Option<string>("--version")
@@ -406,7 +406,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             AssemblyPath        = assembly.FullName,
             XmlPath             = xml,
-            Title               = title ?? Path.GetFileNameWithoutExtension(assembly.Name),
+            Title               = title,
             Version             = version,
             Description         = description,
             NamingPolicy        = resolvedNamingPolicy,

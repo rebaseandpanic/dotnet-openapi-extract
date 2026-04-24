@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Minimal assembly fixture used to cover the fall-back chain for info.title.
+    This project declares [AssemblyProduct] but NOT [AssemblyTitle], so the
+    builder's title-resolution chain (options.Title -> [AssemblyTitle] ->
+    [AssemblyProduct] -> assembly name -> "API") must land on [AssemblyProduct].
+
+    GenerateAssemblyInfo is disabled so MSBuild does not auto-emit an
+    [AssemblyTitle] attribute (which defaults to the assembly name). The
+    only assembly attributes in the DLL are the ones declared in
+    AssemblyAttributes.cs.
+
+    The project deliberately has no controllers, no Program.cs and no API —
+    OpenApiDocumentBuilder tolerates an empty assembly (Paths will be empty).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+</Project>

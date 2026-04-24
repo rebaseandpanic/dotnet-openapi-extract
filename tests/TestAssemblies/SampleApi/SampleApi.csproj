@@ -6,6 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
+    <AssemblyTitle>Sample API Title</AssemblyTitle>
+    <Description>Sample API description for testing info.description auto-default</Description>
+    <Product>Sample API Product</Product>
+    <Company>Acme Corp</Company>
   </PropertyGroup>
 
   <ItemGroup>
