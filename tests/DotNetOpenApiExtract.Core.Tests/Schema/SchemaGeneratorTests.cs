@@ -1437,6 +1437,193 @@ public sealed class SchemaGeneratorTests : IDisposable
     }
 
     // =========================================================================
+    // Positional record primary-constructor parameter attribute merge
+    // =========================================================================
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_RequiredOnParam_PutsPropertyInRequiredArray()
+    {
+        // CreatePositionalCustomerRequest.Name is `[Required, StringLength(...)] string Name`.
+        // [Required] sits on the primary-constructor parameter. The schema generator
+        // must merge ParameterInfo attributes into the property's attribute set.
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("name");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_StringLengthOnParam_SetsMinAndMaxLength()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        var nameProp = (OpenApiSchema)schema.Properties!["name"];
+        nameProp.MaxLength.Should().Be(100);
+        nameProp.MinLength.Should().Be(2);
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_RangeOnParam_SetsMinimumAndMaximum()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        var ageProp = (OpenApiSchema)schema.Properties!["age"];
+        ageProp.Minimum.Should().Be("0");
+        ageProp.Maximum.Should().Be("150");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_RegularExpressionOnParam_SetsPattern()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        var codeProp = (OpenApiSchema)schema.Properties!["code"];
+        codeProp.Pattern.Should().Be(@"^[A-Z]{2}\d{4}$");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_EmailAddressOnParam_SetsEmailFormat()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        var emailProp = (OpenApiSchema)schema.Properties!["email"];
+        emailProp.Format.Should().Be("email");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_DescriptionOnParam_AppliesToInlineSchema()
+    {
+        // [Description("...")] in default-target form sits on the parameter.
+        // ApplyValidationAttributes reads [Description] from the merged attribute list
+        // and writes it onto the inline property schema.
+        var generator = new SchemaGenerator();
+        var type = GetType("CreatePositionalCustomerRequest");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["CreatePositionalCustomerRequest"];
+        var descProp = (OpenApiSchema)schema.Properties!["description"];
+        descProp.Description.Should().Be("Internal description override");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_PropertyTargetDescription_StillWorks()
+    {
+        // MixedTargetPositionalRecord.Subtitle uses [property: Description(...)].
+        // This already worked through PropertyInfo before the fix — verify it
+        // is not broken by the merge.
+        var generator = new SchemaGenerator();
+        var type = GetType("MixedTargetPositionalRecord");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["MixedTargetPositionalRecord"];
+        var subtitleProp = (OpenApiSchema)schema.Properties!["subtitle"];
+        subtitleProp.Description.Should().Be("Property-target description");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_MixedTargets_DefaultParamAndPropertyBothApply()
+    {
+        // Title has [Required, StringLength(50)] (default-target = param).
+        // Subtitle has [property: Description(...)] (explicit property target).
+        // Both must be reflected in the schema.
+        var generator = new SchemaGenerator();
+        var type = GetType("MixedTargetPositionalRecord");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["MixedTargetPositionalRecord"];
+
+        // Title required + maxLength
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("title");
+        var titleProp = (OpenApiSchema)schema.Properties!["title"];
+        titleProp.MaxLength.Should().Be(50);
+
+        // Subtitle description (property-target attribute path)
+        var subtitleProp = (OpenApiSchema)schema.Properties!["subtitle"];
+        subtitleProp.Description.Should().Be("Property-target description");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_DefaultValueOnParam_SetsSchemaDefault()
+    {
+        // [DefaultValue("US")] on parameter must propagate to schema.default.
+        var generator = new SchemaGenerator();
+        var type = GetType("PositionalDefaultsRecord");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["PositionalDefaultsRecord"];
+        var countryProp = (OpenApiSchema)schema.Properties!["country"];
+        countryProp.Default.Should().NotBeNull();
+        countryProp.Default!.GetValue<string>().Should().Be("US");
+    }
+
+    [Fact]
+    public void GenerateSchema_PositionalRecord_Inheritance_BaseAndDerivedAttributesBothApply()
+    {
+        // BasePositionalRecord has [Required, StringLength(36)] string Id.
+        // DerivedPositionalRecord adds [StringLength(20)] string Extra.
+        // The merge must use the declaring type's primary ctor for each property:
+        // Id's attrs come from BasePositionalRecord, Extra's from DerivedPositionalRecord.
+        var generator = new SchemaGenerator();
+        var type = GetType("DerivedPositionalRecord");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["DerivedPositionalRecord"];
+
+        // Id (inherited from base) — Required + MaxLength 36
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("id");
+        var idProp = (OpenApiSchema)schema.Properties!["id"];
+        idProp.MaxLength.Should().Be(36);
+
+        // Extra (declared on derived) — MaxLength 20
+        var extraProp = (OpenApiSchema)schema.Properties!["extra"];
+        extraProp.MaxLength.Should().Be(20);
+    }
+
+    [Fact]
+    public void GenerateSchema_PrimaryCtorClass_AttributesOnPrimaryCtorParam_PropagateToProperty()
+    {
+        // PrimaryCtorClassModel(string Name, int Quantity) — C# 12 primary ctor
+        // with attrs on parameters and explicitly declared properties of the same names.
+        // The merge must propagate Required+StringLength to Name, Range to Quantity.
+        var generator = new SchemaGenerator();
+        var type = GetType("PrimaryCtorClassModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["PrimaryCtorClassModel"];
+
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("name");
+
+        var nameProp = (OpenApiSchema)schema.Properties!["name"];
+        nameProp.MaxLength.Should().Be(50);
+
+        var qtyProp = (OpenApiSchema)schema.Properties!["quantity"];
+        qtyProp.Minimum.Should().Be("1");
+        qtyProp.Maximum.Should().Be("100");
+    }
+
+    // XML <param> → property description path is exercised by the integration test
+    // CreatePositionalCustomerRequest_NameProperty_DescriptionFromXmlParam in
+    // BugFixIntegrationTests, which goes through OpenApiDocumentBuilder.
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

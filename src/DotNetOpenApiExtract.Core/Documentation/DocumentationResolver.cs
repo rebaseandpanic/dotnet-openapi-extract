@@ -222,15 +222,19 @@ public sealed class DocumentationResolver
 
         string? description = null;
 
+        // Merged so that [SwaggerSchema] / [Description] applied to a positional-record
+        // parameter (default target) are seen, in addition to attributes on the property itself.
+        var propertyAttrs = AttributeHelper.GetMergedPropertyAttributes(property);
+
         // Priority 1: [SwaggerSchema(Description = "...")]
-        var swaggerSchema = AttributeHelper.GetAttribute(property, AttributeHelper.Names.SwaggerSchema);
+        var swaggerSchema = AttributeHelper.GetAttribute(propertyAttrs, AttributeHelper.Names.SwaggerSchema);
         if (swaggerSchema != null)
             description = AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Description");
 
         // Priority 2: [Description("...")]  (System.ComponentModel)
         if (string.IsNullOrEmpty(description))
         {
-            var descAttr = AttributeHelper.GetAttribute(property, AttributeHelper.Names.Description);
+            var descAttr = AttributeHelper.GetAttribute(propertyAttrs, AttributeHelper.Names.Description);
             if (descAttr != null)
                 description = AttributeHelper.GetConstructorArgument<string>(descAttr, 0);
         }

@@ -254,4 +254,66 @@ public static class AttributeHelper
         return parameter.GetCustomAttributesData()
             .Where(a => a.AttributeType.FullName == attributeFullName);
     }
+
+    // For positional records the C# compiler emits attributes whose target was not
+    // explicitly specified onto the primary-constructor parameter — not the synthesized
+    // property. Reading PropertyInfo alone misses [Required], [StringLength], [Description],
+    // [JsonIgnore], etc. The same applies to C# 12 primary constructors on classes when
+    // a property is initialized from a primary-ctor parameter of the same name.
+    public static IList<CustomAttributeData> GetMergedPropertyAttributes(PropertyInfo property)
+    {
+        var propAttrs = property.GetCustomAttributesData();
+        var declaringType = property.DeclaringType;
+        if (declaringType == null)
+            return propAttrs;
+
+        var paramAttrs = TryGetMatchingPrimaryCtorParameterAttrs(declaringType, property);
+        if (paramAttrs == null || paramAttrs.Count == 0)
+            return propAttrs;
+
+        var merged = new List<CustomAttributeData>(paramAttrs.Count + propAttrs.Count);
+        merged.AddRange(paramAttrs);
+        merged.AddRange(propAttrs);
+        return merged;
+    }
+
+    // Walks all instance constructors (public + non-public so internal records work) and
+    // returns the attribute data of the parameter that best matches <paramref name="property"/>.
+    // Match priority: name + parameter-type FullName equality (strong signal that this
+    // parameter is the source for the property), then name-only on a non-typed-match
+    // constructor. Records guarantee 1:1 name correspondence between positional parameters
+    // and properties; for primary-constructor classes the same convention holds when the
+    // user mirrors parameter names into properties.
+    private static IList<CustomAttributeData>? TryGetMatchingPrimaryCtorParameterAttrs(
+        Type declaringType,
+        PropertyInfo property)
+    {
+        var ctors = declaringType.GetConstructors(
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+        IList<CustomAttributeData>? nameOnlyMatch = null;
+        var propertyTypeFullName = property.PropertyType.FullName;
+
+        foreach (var ctor in ctors)
+        {
+            // The synthesized record copy-constructor takes a single parameter of the record
+            // type itself — it would name-collide only by coincidence.
+            foreach (var param in ctor.GetParameters())
+            {
+                if (param.Name != property.Name)
+                    continue;
+
+                var attrs = param.GetCustomAttributesData();
+                if (attrs.Count == 0)
+                    continue;
+
+                if (param.ParameterType.FullName == propertyTypeFullName)
+                    return attrs; // Strong match: name + type. Stop scanning.
+
+                nameOnlyMatch ??= attrs;
+            }
+        }
+
+        return nameOnlyMatch;
+    }
 }

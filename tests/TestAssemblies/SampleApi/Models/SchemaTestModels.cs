@@ -437,3 +437,101 @@ public enum UndocumentedEnum
     Beta,
     Gamma,
 }
+
+// =========================================================================
+// Positional record fixtures — verify default-target attributes on primary
+// constructor parameters merge with property attributes.
+// =========================================================================
+
+/// <summary>
+/// Positional record where validation and description attributes are placed on
+/// primary-constructor parameters using the C# default attribute target
+/// (no [param:] / [property:] prefix). The compiler emits these onto the parameter
+/// in IL, not onto the synthesized property — the schema generator must merge
+/// them in.
+/// JSON attributes such as [JsonIgnore] cannot be used here because their
+/// AttributeUsage forbids Parameter (CS0592) — they must be applied with the
+/// explicit [property:] target, which the existing PropertyInfo path handles.
+/// </summary>
+/// <param name="Name">Customer full name</param>
+/// <param name="Age">Customer age in years</param>
+/// <param name="Code">Tracking code (two letters + four digits)</param>
+/// <param name="Email">Optional email address</param>
+/// <param name="Description">Free-form description for the customer record</param>
+public record CreatePositionalCustomerRequest(
+    [Required, StringLength(100, MinimumLength = 2)] string Name,
+    [Range(0, 150)] int Age,
+    [RegularExpression(@"^[A-Z]{2}\d{4}$")] string Code,
+    [EmailAddress] string? Email,
+    [System.ComponentModel.Description("Internal description override")] string? Description
+);
+
+/// <summary>
+/// Positional record mixing default-target attributes (param) with explicit
+/// [property:] target attributes on the same and adjacent parameters. Both
+/// must be reflected in the resulting schema.
+/// </summary>
+/// <param name="Title">Title of the resource</param>
+/// <param name="Subtitle">Optional subtitle</param>
+public record MixedTargetPositionalRecord(
+    [Required, StringLength(50)] string Title,
+    [property: System.ComponentModel.Description("Property-target description")] string? Subtitle
+);
+
+/// <summary>
+/// Positional record with a default value on a parameter via [DefaultValue].
+/// </summary>
+/// <param name="Country">ISO country code</param>
+/// <param name="Currency">Currency code, optional with default</param>
+public record PositionalDefaultsRecord(
+    [DefaultValue("US")] string Country = "US",
+    string Currency = "USD"
+);
+
+/// <summary>
+/// Base positional record used in inheritance fixture below.
+/// </summary>
+/// <param name="Id">Identifier on the base</param>
+public record BasePositionalRecord([Required, StringLength(36)] string Id);
+
+/// <summary>
+/// Derived positional record — adds a new property with its own default-target
+/// attribute. The base property's attributes must come from the base ctor; the
+/// derived property's attributes must come from the derived ctor.
+/// </summary>
+/// <param name="Id">Identifier inherited from base</param>
+/// <param name="Extra">Additional field on derived record</param>
+public record DerivedPositionalRecord(
+    string Id,
+    [StringLength(20)] string Extra
+) : BasePositionalRecord(Id);
+
+/// <summary>
+/// Class with a C# 12 primary constructor whose parameters mirror the explicitly
+/// declared properties by name. Default-target attributes on the primary-ctor
+/// parameters must propagate to those properties' schemas.
+/// </summary>
+public class PrimaryCtorClassModel([Required, StringLength(50)] string Name, [Range(1, 100)] int Quantity)
+{
+    /// <summary>Mirrored Name property</summary>
+    public string Name { get; init; } = Name;
+
+    /// <summary>Mirrored Quantity property</summary>
+    public int Quantity { get; init; } = Quantity;
+}
+
+/// <summary>
+/// Positional record with a secondary user-written constructor that uses the same
+/// parameter name as the primary record constructor but carries no validation
+/// attributes. The attribute merge must prefer the primary ctor's parameter
+/// (which has [Required, StringLength]) — selecting the secondary ctor would
+/// silently drop the validation attributes.
+/// </summary>
+/// <param name="Name">Primary name</param>
+public record SecondaryCtorRecord([Required, StringLength(64)] string Name)
+{
+    // Secondary constructor with the same parameter name but no attrs.
+    // Reflection's GetConstructors() ordering is unspecified, so the merge
+    // logic must not return this constructor's empty-attr parameter.
+    public SecondaryCtorRecord(string Name, int unused) : this(Name) { _ = unused; }
+}

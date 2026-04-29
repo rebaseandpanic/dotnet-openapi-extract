@@ -274,4 +274,82 @@ public sealed class BugFixIntegrationTests
         pageSize!.Required.Should().BeFalse(
             because: "[DefaultValue(20)] on a non-path parameter must set required to false");
     }
+
+    // =========================================================================
+    // Positional record primary-ctor parameter attributes — end-to-end through
+    // OpenApiDocumentBuilder so XML <param> → property description and merged
+    // [Description] paths are exercised.
+    // =========================================================================
+
+    /// <summary>
+    /// <c>record CreatePositionalCustomerRequest([Required, StringLength(100, MinimumLength = 2)] string Name, ...)</c>:
+    /// the primary-ctor parameter carries the validation attributes. After the merge,
+    /// the component schema must list <c>name</c> in <c>required</c> and apply
+    /// <c>maxLength</c>/<c>minLength</c>.
+    /// </summary>
+    [Fact]
+    public void CreatePositionalCustomerRequest_NameProperty_HasValidationFromCtorParam()
+    {
+        var schema = ResolveComponentSchema("CreatePositionalCustomerRequest");
+
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("name",
+            because: "[Required] on the positional ctor param must reach the schema");
+
+        var nameProp = (OpenApiSchema)schema.Properties!["name"];
+        nameProp.MaxLength.Should().Be(100);
+        nameProp.MinLength.Should().Be(2);
+    }
+
+    /// <summary>
+    /// XML <c>&lt;param name="Name"&gt;Customer full name&lt;/param&gt;</c> on the record's
+    /// type-level XML doc must end up as the <c>name</c> property's description in the
+    /// component schema. The C# compiler propagates &lt;param&gt; into a synthesized
+    /// &lt;summary&gt; on the property; <c>OpenApiDocumentBuilder</c>'s doc-resolver
+    /// pass picks it up and writes it to the inline schema.
+    /// </summary>
+    [Fact]
+    public void CreatePositionalCustomerRequest_NameProperty_DescriptionFromXmlParam()
+    {
+        var schema = ResolveComponentSchema("CreatePositionalCustomerRequest");
+
+        var nameProp = (OpenApiSchema)schema.Properties!["name"];
+        nameProp.Description.Should().Be("Customer full name",
+            because: "<param name=\"Name\"> on the positional record must populate property description");
+    }
+
+    /// <summary>
+    /// <c>[Description("Internal description override")]</c> as a default-target attribute
+    /// on a positional ctor parameter must reach the inline property schema's
+    /// <c>description</c> via the merge — overriding any XML-derived description.
+    /// </summary>
+    [Fact]
+    public void CreatePositionalCustomerRequest_DescriptionProperty_UsesAttributeOverride()
+    {
+        var schema = ResolveComponentSchema("CreatePositionalCustomerRequest");
+
+        var descProp = (OpenApiSchema)schema.Properties!["description"];
+        descProp.Description.Should().Be("Internal description override",
+            because: "[Description(...)] on the positional ctor param wins over XML <param>");
+    }
+
+    /// <summary>
+    /// Reflection's <c>GetConstructors()</c> ordering is unspecified. When a record
+    /// has both a primary ctor (with <c>[Required, StringLength(64)] string Name</c>)
+    /// and a secondary ctor with the same parameter name but no attributes, the merge
+    /// must select the primary ctor — type-match tiebreak guarantees this.
+    /// </summary>
+    [Fact]
+    public void SecondaryCtorRecord_PrimaryCtorAttributes_WinOverNoAttrSecondaryCtor()
+    {
+        var schema = ResolveComponentSchema("SecondaryCtorRecord");
+
+        schema.Required.Should().NotBeNull();
+        schema.Required!.Should().Contain("name",
+            because: "primary ctor param has [Required] — secondary ctor param does not");
+
+        var nameProp = (OpenApiSchema)schema.Properties!["name"];
+        nameProp.MaxLength.Should().Be(64,
+            because: "primary ctor param has [StringLength(64)] — secondary ctor param does not");
+    }
 }

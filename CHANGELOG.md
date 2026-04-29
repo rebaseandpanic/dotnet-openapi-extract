@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [0.11.0] - 2026-04-29
+
+- [BUGFIX] Default-target attributes on positional record primary-constructor parameters now reach the schema. Given `public record CreateRequest([Required, StringLength(100)] string Name)`, the C# compiler emits `[Required]` and `[StringLength]` onto the constructor `ParameterInfo` — never onto the synthesized `PropertyInfo`. The extractor previously read only `propInfo.GetCustomAttributesData()` and silently emitted a property schema with no validation. The fix walks the declaring type's instance constructors (public + non-public, so `internal record` works), finds the parameter whose name matches the property, and merges its attributes with the property's own. Type-match (`ParameterInfo.ParameterType.FullName == PropertyInfo.PropertyType.FullName`) is used as a tiebreaker when a secondary user-written constructor reuses the same parameter name. Affects `[Required]`, `[StringLength]`, `[MaxLength]`, `[MinLength]`, `[Range]`, `[RegularExpression]`, `[EmailAddress]`, `[Url]`, `[Phone]`, `[Description]`, `[DefaultValue]`, `[Obsolete]`. Explicit `[property: ...]` and `[param: ...]` targets continue to work; the merge is additive. The same fix applies to C# 12 primary-constructor classes whose properties mirror primary-ctor parameter names by convention. JSON attributes that forbid `Parameter` in their `AttributeUsage` (`[JsonPropertyName]`, `[JsonIgnore]`) still require explicit `[property: ...]` — the C# compiler rejects them on positional record parameters with CS0592.
+
 ## [0.10.0] - 2026-04-24
 
 - [FEATURE] `info.*` fields now auto-populate from assembly metadata when the corresponding CLI flags are absent — you can drop `--title`, `--description`, and `--contact-name` if your `.csproj` already declares them, and the spec will still be complete. Developers writing `<Description>`, `<AssemblyTitle>`, `<Product>`, `<Company>` in MSBuild no longer need to duplicate those values on the command line. CLI flags remain authoritative as overrides; whitespace-only options are treated as absent and fall through to the attribute chain. The three resolution chains:

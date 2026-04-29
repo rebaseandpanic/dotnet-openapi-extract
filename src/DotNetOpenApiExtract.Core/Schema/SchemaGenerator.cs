@@ -601,7 +601,9 @@ public sealed class SchemaGenerator
             foreach (var (propName, propType, propInfo) in allProperties)
             {
                 // Cache attribute data once per property to avoid repeated GetCustomAttributesData() calls.
-                var propAttrData = propInfo.GetCustomAttributesData();
+                // Positional record parameters store their default-target attributes on the primary-ctor
+                // parameter, not the synthesized property — merge them in (see AttributeHelper).
+                var propAttrData = AttributeHelper.GetMergedPropertyAttributes(propInfo);
 
                 // Skip [JsonIgnore(Condition = Always)]
                 if (ShouldIgnoreProperty(propAttrData))
