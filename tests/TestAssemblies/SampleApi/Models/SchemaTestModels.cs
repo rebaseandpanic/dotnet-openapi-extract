@@ -557,3 +557,31 @@ public record SecondaryCtorRecord([Required, StringLength(64)] string Name)
     // logic must not return this constructor's empty-attr parameter.
     public SecondaryCtorRecord(string Name, int unused) : this(Name) { _ = unused; }
 }
+
+// =========================================================================
+// $ref + siblings fixtures — verify that properties whose type resolves to a
+// $ref schema still carry sibling keywords (description, default, constraints).
+// =========================================================================
+
+/// <summary>Simple DTO used as an inner reference type.</summary>
+public sealed class InnerDto
+{
+    /// <summary>The value field.</summary>
+    public string? Value { get; set; }
+}
+
+/// <summary>Outer model containing properties typed as another DTO (i.e. $ref properties)
+/// with sibling description, default, and validation constraints.</summary>
+public sealed class OuterWithRefPropertyModel
+{
+    /// <summary>Reference to inner DTO with this XML summary.</summary>
+    [System.ComponentModel.Description("Inner reference description")]
+    public InnerDto? Inner { get; set; }
+
+    /// <summary>Non-nullable inner reference — not wrapped by MakeNullable, so truly tests the $ref path.</summary>
+    [System.ComponentModel.Description("Non-nullable inner ref description")]
+    public required InnerDto RequiredInner { get; set; }
+
+    /// <summary>XML-only description on a non-nullable $ref property — no [Description] attribute.</summary>
+    public required InnerDto XmlOnlyRef { get; set; }
+}

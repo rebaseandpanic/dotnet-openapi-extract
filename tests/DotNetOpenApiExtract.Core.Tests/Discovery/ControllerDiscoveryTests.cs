@@ -93,7 +93,9 @@ public class ControllerDiscoveryTests : IDisposable
         // + RateLimiting, Caching (2 rate-limiting/caching controllers added for T13)
         // + ValidationModel (1 controller surfacing ValidationModel/ExtendedValidationModel for schema.property-constraints integration tests)
         // + NestedDto, Inheritance (2 controllers for nested-type and inheritance XML doc bug fixes)
-        _controllers.Should().HaveCount(24);
+        // + EventStream (1 SSE content-type fixture for Bug #4 fix)
+        // + RefProperty (1 $ref-siblings fixture for Bug #3 fix)
+        _controllers.Should().HaveCount(26);
     }
 
     // -------------------------------------------------------------------------

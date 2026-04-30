@@ -1624,6 +1624,63 @@ public sealed class SchemaGeneratorTests : IDisposable
     // BugFixIntegrationTests, which goes through OpenApiDocumentBuilder.
 
     // =========================================================================
+    // Bug #3 — $ref properties with sibling attributes are wrapped in allOf
+    // =========================================================================
+
+    /// <summary>
+    /// <c>OuterWithRefPropertyModel.RequiredInner</c> is a non-nullable <c>InnerDto</c>
+    /// property with a <c>[Description]</c> attribute. Because a bare <c>$ref</c> cannot
+    /// carry sibling keywords in OpenAPI 3.0, <see cref="SchemaGenerator"/> must wrap it
+    /// in an <c>allOf</c> via <see cref="SchemaGenerator.EnsureMutableSchema"/>.
+    /// This test calls <c>GenerateSchema</c> directly — no Builder involvement.
+    /// </summary>
+    [Fact]
+    public void GenerateSchema_RefPropertyWithDescriptionAttr_IsWrappedInAllOf()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("OuterWithRefPropertyModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["OuterWithRefPropertyModel"];
+        schema.Properties.Should().ContainKey("requiredInner");
+
+        // Must be a mutable OpenApiSchema (not a bare reference), because [Description] is a sibling.
+        var propSchema = schema.Properties!["requiredInner"] as OpenApiSchema;
+        propSchema.Should().NotBeNull(
+            because: "a $ref property with [Description] must be wrapped in allOf (OpenApiSchema), not remain a bare OpenApiSchemaReference");
+
+        propSchema!.AllOf.Should().NotBeNullOrEmpty(
+            because: "the allOf list must contain the $ref to InnerDto");
+
+        propSchema.Description.Should().Be("Non-nullable inner ref description",
+            because: "[Description(\"Non-nullable inner ref description\")] must appear on the allOf wrapper schema");
+    }
+
+    /// <summary>
+    /// <c>OuterWithRefPropertyModel.Inner</c> is a nullable <c>InnerDto?</c> reference.
+    /// MakeNullable already wraps it in <c>anyOf</c>, making it a mutable <c>OpenApiSchema</c>.
+    /// The <c>[Description]</c> attribute must land on that wrapper, not be dropped.
+    /// </summary>
+    [Fact]
+    public void GenerateSchema_NullableRefPropertyWithDescriptionAttr_DescriptionOnWrapper()
+    {
+        var generator = new SchemaGenerator();
+        var type = GetType("OuterWithRefPropertyModel");
+        generator.GenerateSchema(type);
+
+        var schema = generator.Schemas["OuterWithRefPropertyModel"];
+        schema.Properties.Should().ContainKey("inner");
+
+        // Nullable $ref → MakeNullable wraps in anyOf → result is already OpenApiSchema.
+        var propSchema = schema.Properties!["inner"] as OpenApiSchema;
+        propSchema.Should().NotBeNull(
+            because: "nullable $ref is wrapped by MakeNullable into an anyOf OpenApiSchema");
+
+        propSchema!.Description.Should().Be("Inner reference description",
+            because: "[Description(\"Inner reference description\")] must be applied to the wrapper");
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

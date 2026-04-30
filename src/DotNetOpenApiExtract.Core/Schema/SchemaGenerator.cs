@@ -632,9 +632,13 @@ public sealed class SchemaGenerator
                     propSchema = MakeNullable(propSchema);
                 }
 
-                // Apply validation and documentation attributes to inline schemas.
-                // $ref schemas cannot carry extra keywords; constraints are applied only
-                // when we have a concrete OpenApiSchema instance.
+                // Apply validation and documentation attributes to the property schema.
+                // OpenAPI forbids sibling keywords on a bare $ref (3.0) or treats them ambiguously (3.1).
+                // When the property schema is a reference AND there are attributes that write sibling
+                // keywords, wrap it in allOf so the keywords are valid on the enclosing schema.
+                if (propSchema is OpenApiSchemaReference && HasAnySiblingAttribute(propAttrData))
+                    propSchema = EnsureMutableSchema(propSchema);
+
                 if (propSchema is OpenApiSchema inlinePropSchema)
                     ApplyValidationAttributes(inlinePropSchema, propAttrData);
 
@@ -1180,6 +1184,42 @@ public sealed class SchemaGenerator
                 new OpenApiSchema { Type = JsonSchemaType.Null },
             },
         };
+    }
+
+    /// <summary>
+    /// Returns a mutable <see cref="OpenApiSchema"/> that can carry sibling keywords
+    /// (description, default, constraints). When <paramref name="schema"/> is already an
+    /// <see cref="OpenApiSchema"/> it is returned unchanged. When it is an
+    /// <see cref="OpenApiSchemaReference"/>, it is wrapped in an allOf-composite so that
+    /// sibling keywords can be attached per OpenAPI spec rules ($ref siblings are forbidden
+    /// in OpenAPI 3.0 and allowed but ambiguous in 3.1 — allOf is unambiguous in both).
+    /// </summary>
+    internal static OpenApiSchema EnsureMutableSchema(IOpenApiSchema schema)
+    {
+        if (schema is OpenApiSchema inline) return inline;
+        if (schema is OpenApiSchemaReference reference)
+            return new OpenApiSchema { AllOf = [reference] };
+        return new OpenApiSchema();
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="attrData"/> contains any attribute that
+    /// <see cref="ApplyValidationAttributes"/> would write to a schema as a sibling keyword.
+    /// Used to decide whether a <c>$ref</c> schema must be wrapped before applying attrs.
+    /// </summary>
+    private static bool HasAnySiblingAttribute(IList<CustomAttributeData> attrData)
+    {
+        return AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.StringLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MaxLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MinLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Range)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.RegularExpression)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.EmailAddress)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Url)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Phone)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.DefaultValue)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Description);
     }
 
     // =========================================================================

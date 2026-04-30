@@ -275,16 +275,32 @@ public static class SecuritySchemeExtractor
     private static IReadOnlyList<string> TryExtractRequirementSchemeNames(
         InvocationExpressionSyntax invocation)
     {
-        // We look for string literals used as keys inside the object initializer,
-        // but OpenApiSecurityRequirement uses OpenApiSecuritySchemeReference keys —
-        // these are typically: new OpenApiSecurityRequirement { { new OpenApiSecuritySchemeReference("Bearer"), [] } }
-        // We scan for new OpenApiSecuritySchemeReference("name") ctor calls.
-        var names = new List<string>();
-
+        // We look for string literals used as keys inside the object initializer.
+        // Two patterns are supported (additive):
+        //
+        // Pattern A — OpenApiSecuritySchemeReference constructor arg (Microsoft.OpenApi 2.x):
+        //   new OpenApiSecurityRequirement { { new OpenApiSecuritySchemeReference("Bearer"), [] } }
+        //
+        // Pattern B — OpenApiReference.Id named property (canonical Swashbuckle / Microsoft.OpenApi 1.x):
+        //   new OpenApiSecurityRequirement {
+        //     { new OpenApiSecurityScheme { Reference = new OpenApiReference { Id = "ApiKey",
+        //                                                Type = ReferenceType.SecurityScheme } }, [] }
+        //   }
+        //
         // DescendantNodes() descends into lambda bodies, so lambda-factory patterns
         // AddSecurityRequirement(doc => new OpenApiSecurityRequirement { ... })
-        // are handled without special-casing — the ObjectCreationExpressionSyntax
-        // nodes inside the lambda are reachable from ArgumentList.
+        // are handled without special-casing.
+
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void AddName(string name)
+        {
+            if (!string.IsNullOrWhiteSpace(name) && seen.Add(name))
+                names.Add(name);
+        }
+
+        // ── Pattern A: string literal ctor arg on SecuritySchemeReference / SecurityRequirement ──
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
             .OfType<ObjectCreationExpressionSyntax>())
         {
@@ -293,19 +309,65 @@ public static class SecuritySchemeExtractor
                 && !typeName.Contains("SecurityRequirement", StringComparison.Ordinal))
                 continue;
 
-            // Look for string literal constructor arguments → scheme reference ids
             if (objCreation.ArgumentList != null)
             {
                 foreach (var arg in objCreation.ArgumentList.Arguments)
                 {
                     if (arg.Expression is LiteralExpressionSyntax lit &&
-                        lit.Token.Value is string schemeId &&
-                        !string.IsNullOrWhiteSpace(schemeId))
+                        lit.Token.Value is string schemeId)
                     {
-                        names.Add(schemeId);
+                        AddName(schemeId);
                     }
                 }
             }
+        }
+
+        // ── Pattern B: Id = "<literal>" inside an object initializer that also signals a
+        //    security-scheme reference — either via Type = ReferenceType.SecurityScheme or
+        //    because the containing ObjectCreation type text contains "OpenApiReference". ──
+        foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
+            .OfType<ObjectCreationExpressionSyntax>())
+        {
+            if (objCreation.Initializer == null)
+                continue;
+
+            // Collect all assignments in this initializer.
+            var assignments = objCreation.Initializer.Expressions
+                .OfType<AssignmentExpressionSyntax>()
+                .ToList();
+
+            // Find Id = "<literal>" assignment.
+            string? idValue = null;
+            foreach (var assign in assignments)
+            {
+                if (assign.Left is IdentifierNameSyntax lhs &&
+                    lhs.Identifier.Text == "Id" &&
+                    assign.Right is LiteralExpressionSyntax rhs &&
+                    rhs.Token.Value is string s &&
+                    !string.IsNullOrWhiteSpace(s))
+                {
+                    idValue = s;
+                    break;
+                }
+            }
+
+            if (idValue == null)
+                continue;
+
+            // Gate: BOTH conditions must hold —
+            //   1. The ObjectCreation type name contains "OpenApiReference", AND
+            //   2. The same initializer contains Type = ReferenceType.SecurityScheme.
+            // Using OR would let any OpenApiReference with an Id (e.g. a schema reference
+            // inside AddSecurityRequirement) pollute the requirement list.
+            var typeName = GetUnqualifiedTypeName(objCreation.Type);
+            bool isReferenceType = typeName.Contains("OpenApiReference", StringComparison.Ordinal);
+
+            bool hasSecuritySchemeType = assignments.Any(a =>
+                a.Left is IdentifierNameSyntax l && l.Identifier.Text == "Type" &&
+                a.Right.ToString().EndsWith(".SecurityScheme", StringComparison.Ordinal));
+
+            if (isReferenceType && hasSecuritySchemeType)
+                AddName(idValue);
         }
 
         return names;

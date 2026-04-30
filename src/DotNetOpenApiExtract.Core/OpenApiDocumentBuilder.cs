@@ -543,16 +543,26 @@ public sealed class OpenApiDocumentBuilder
                             propMap.TryAdd(serialized, p);
                         }
 
-                        foreach (var (propName, propSchema) in schema.Properties)
+                        foreach (var (propName, propSchema) in schema.Properties.ToList())
                         {
-                            if (propSchema is OpenApiSchema inlineProp && string.IsNullOrEmpty(inlineProp.Description))
+                            if (!propMap.TryGetValue(propName, out var prop))
+                                continue;
+
+                            var propDoc = docResolver.ResolveProperty(schemaType, prop);
+                            if (string.IsNullOrEmpty(propDoc.Description))
+                                continue;
+
+                            if (propSchema is OpenApiSchemaReference)
                             {
-                                if (propMap.TryGetValue(propName, out var prop))
-                                {
-                                    var propDoc = docResolver.ResolveProperty(schemaType, prop);
-                                    if (!string.IsNullOrEmpty(propDoc.Description))
-                                        inlineProp.Description = propDoc.Description;
-                                }
+                                // $ref cannot carry sibling keywords directly — wrap in allOf.
+                                var wrapped = SchemaGenerator.EnsureMutableSchema(propSchema);
+                                wrapped.Description = propDoc.Description;
+                                schema.Properties[propName] = wrapped;
+                            }
+                            else if (propSchema is OpenApiSchema inlineProp
+                                     && string.IsNullOrEmpty(inlineProp.Description))
+                            {
+                                inlineProp.Description = propDoc.Description;
                             }
                         }
                     }
@@ -750,13 +760,19 @@ public sealed class OpenApiDocumentBuilder
 
             var apiResponse = new OpenApiResponse { Description = description };
 
-            if (resp.BodyType != null && resp.ContentTypes.Count > 0)
+            if (resp.ContentTypes.Count > 0 && (resp.BodyType != null || resp.ContentTypesExplicit))
             {
-                var bodySchema = schemaGenerator.GenerateSchema(resp.BodyType);
+                // Emit a Content section when there is a typed body, or when the content types
+                // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
+                IOpenApiSchema? bodySchema = resp.BodyType != null
+                    ? schemaGenerator.GenerateSchema(resp.BodyType)
+                    : null;
                 apiResponse.Content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
 
                 foreach (var ct in resp.ContentTypes)
-                    apiResponse.Content[ct] = new OpenApiMediaType { Schema = bodySchema };
+                    apiResponse.Content[ct] = bodySchema != null
+                        ? new OpenApiMediaType { Schema = bodySchema }
+                        : new OpenApiMediaType();
             }
 
             operation.Responses[statusKey] = apiResponse;

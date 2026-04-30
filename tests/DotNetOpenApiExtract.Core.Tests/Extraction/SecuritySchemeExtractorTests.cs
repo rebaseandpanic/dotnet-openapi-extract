@@ -497,6 +497,130 @@ public class SecuritySchemeExtractorTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Bug #5 — AddSecurityRequirement with OpenApiReference.Id pattern
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The canonical Swashbuckle / Microsoft.OpenApi 1.x pattern uses
+    /// <c>new OpenApiSecurityScheme { Reference = new OpenApiReference { Id = "ApiKey",
+    /// Type = ReferenceType.SecurityScheme } }</c> inside <c>AddSecurityRequirement</c>.
+    /// The scheme name must be extracted from the <c>Id</c> property.
+    /// </summary>
+    [Fact]
+    public void Extract_AddSecurityRequirement_OpenApiReferenceId_ExtractsSchemeName()
+    {
+        var source = """
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Id = "ApiKey",
+                            Type = ReferenceType.SecurityScheme
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+            """;
+
+        var context = BuildContext(source);
+        var result = SecuritySchemeExtractor.Extract(context);
+
+        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey",
+            because: "Id = \"ApiKey\" inside OpenApiReference with Type = ReferenceType.SecurityScheme must be extracted");
+    }
+
+    /// <summary>
+    /// Same pattern but with fully-qualified type names — e.g.
+    /// <c>Microsoft.OpenApi.OpenApiReference { Id = "Bearer", Type = Microsoft.OpenApi.ReferenceType.SecurityScheme }</c>.
+    /// </summary>
+    [Fact]
+    public void Extract_AddSecurityRequirement_FullyQualifiedOpenApiReferenceId_ExtractsSchemeName()
+    {
+        var source = """
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new Microsoft.OpenApi.OpenApiReference
+                        {
+                            Id = "Bearer",
+                            Type = Microsoft.OpenApi.ReferenceType.SecurityScheme
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+            """;
+
+        var context = BuildContext(source);
+        var result = SecuritySchemeExtractor.Extract(context);
+
+        result.GlobalRequirementSchemeNames.Should().Contain("Bearer",
+            because: "FQN OpenApiReference with Id = \"Bearer\" and Type = ReferenceType.SecurityScheme must be extracted");
+    }
+
+    /// <summary>
+    /// Multiple schemes in a single <c>AddSecurityRequirement</c> call — all must be extracted.
+    /// </summary>
+    [Fact]
+    public void Extract_AddSecurityRequirement_MultipleSchemes_ExtractsAll()
+    {
+        var source = """
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference { Id = "ApiKey", Type = ReferenceType.SecurityScheme }
+                    },
+                    Array.Empty<string>()
+                },
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference { Id = "Bearer", Type = ReferenceType.SecurityScheme }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+            """;
+
+        var context = BuildContext(source);
+        var result = SecuritySchemeExtractor.Extract(context);
+
+        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey",
+            because: "first entry with Id = \"ApiKey\" must be extracted");
+        result.GlobalRequirementSchemeNames.Should().Contain("Bearer",
+            because: "second entry with Id = \"Bearer\" must be extracted");
+    }
+
+    /// <summary>
+    /// Regression: the existing <c>OpenApiSecuritySchemeReference("Name")</c> pattern
+    /// (Microsoft.OpenApi 2.x) must still work after the additive extension.
+    /// </summary>
+    [Fact]
+    public void Extract_AddSecurityRequirement_SchemeReferenceCtorArg_StillWorks()
+    {
+        var source = """
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                { new OpenApiSecuritySchemeReference("ExistingScheme"), new List<string>() }
+            });
+            """;
+
+        var context = BuildContext(source);
+        var result = SecuritySchemeExtractor.Extract(context);
+
+        result.GlobalRequirementSchemeNames.Should().Contain("ExistingScheme",
+            because: "the pre-existing OpenApiSecuritySchemeReference(\"Name\") pattern must continue to work");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 

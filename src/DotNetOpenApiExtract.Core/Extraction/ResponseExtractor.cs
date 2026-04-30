@@ -25,6 +25,14 @@ public sealed class ResponseInfo
     /// Extractors override this explicitly — e.g. void/204 responses use an empty list.
     /// </summary>
     public IReadOnlyList<string> ContentTypes { get; init; } = ["application/json"];
+
+    /// <summary>
+    /// True when content types were explicitly set via <c>[Produces]</c> on the action or controller,
+    /// rather than falling back to the default <c>["application/json"]</c>.
+    /// Used to emit a <c>Content</c> section even when <see cref="BodyType"/> is null —
+    /// for example, SSE endpoints that declare <c>[Produces("text/event-stream")]</c> with no body.
+    /// </summary>
+    public bool ContentTypesExplicit { get; init; }
 }
 
 /// <summary>
@@ -60,14 +68,14 @@ public static class ResponseExtractor
         var controller = action.Controller;
 
         // Resolve default content types from [Produces] on the method, then the controller.
-        var defaultContentTypes = ResolveProducesContentTypes(method, controller.Type);
+        var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(method, controller.Type);
 
         var responses = new List<ResponseInfo>();
 
         // --- [SwaggerResponse] (highest priority) ---
         foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.SwaggerResponse))
         {
-            var response = ParseSwaggerResponse(attr, defaultContentTypes);
+            var response = ParseSwaggerResponse(attr, defaultContentTypes, contentTypesExplicit);
             if (response != null)
                 responses.Add(response);
         }
@@ -75,7 +83,7 @@ public static class ResponseExtractor
         // --- [ProducesResponseType] (all overloads, including generic form) ---
         foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.ProducesResponseType))
         {
-            var response = ParseProducesResponseType(attr, defaultContentTypes);
+            var response = ParseProducesResponseType(attr, defaultContentTypes, contentTypesExplicit);
             if (response != null)
                 responses.Add(response);
         }
@@ -83,7 +91,7 @@ public static class ResponseExtractor
         // --- [ProducesDefaultResponseType] / [ProducesDefaultResponseType(typeof(T))] ---
         foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.ProducesDefaultResponseType))
         {
-            var response = ParseProducesDefaultResponseType(attr, defaultContentTypes);
+            var response = ParseProducesDefaultResponseType(attr, defaultContentTypes, contentTypesExplicit);
             if (response != null)
                 responses.Add(response);
         }
@@ -94,7 +102,7 @@ public static class ResponseExtractor
             return DeduplicateByStatusCode(responses);
 
         // --- Fallback: infer from return type ---
-        return InferFromReturnType(method, defaultContentTypes);
+        return InferFromReturnType(method, defaultContentTypes, contentTypesExplicit);
     }
 
     // -------------------------------------------------------------------------
@@ -107,7 +115,8 @@ public static class ResponseExtractor
     /// </summary>
     private static ResponseInfo? ParseSwaggerResponse(
         CustomAttributeData attr,
-        IReadOnlyList<string> defaultContentTypes)
+        IReadOnlyList<string> defaultContentTypes,
+        bool contentTypesExplicit)
     {
         // Arg 0: int statusCode
         if (attr.ConstructorArguments.Count < 1)
@@ -133,6 +142,7 @@ public static class ResponseExtractor
             Description = description,
             BodyType = bodyType,
             ContentTypes = defaultContentTypes,
+            ContentTypesExplicit = contentTypesExplicit,
         };
     }
 
@@ -149,7 +159,8 @@ public static class ResponseExtractor
     /// </summary>
     private static ResponseInfo? ParseProducesResponseType(
         CustomAttributeData attr,
-        IReadOnlyList<string> defaultContentTypes)
+        IReadOnlyList<string> defaultContentTypes,
+        bool contentTypesExplicit)
     {
         var args = attr.ConstructorArguments;
 
@@ -254,6 +265,7 @@ public static class ResponseExtractor
             BodyType = bodyType,
             Description = description,
             ContentTypes = contentTypes,
+            ContentTypesExplicit = contentTypesExplicit,
         };
     }
 
@@ -264,7 +276,8 @@ public static class ResponseExtractor
     /// </summary>
     private static ResponseInfo? ParseProducesDefaultResponseType(
         CustomAttributeData attr,
-        IReadOnlyList<string> defaultContentTypes)
+        IReadOnlyList<string> defaultContentTypes,
+        bool contentTypesExplicit)
     {
         // Optional ctor arg: (Type type)
         Type? bodyType = null;
@@ -276,6 +289,7 @@ public static class ResponseExtractor
             StatusCode = DefaultStatusCode,
             BodyType = bodyType,
             ContentTypes = defaultContentTypes,
+            ContentTypesExplicit = contentTypesExplicit,
         };
     }
 
@@ -289,7 +303,8 @@ public static class ResponseExtractor
     /// </summary>
     private static IReadOnlyList<ResponseInfo> InferFromReturnType(
         MethodInfo method,
-        IReadOnlyList<string> defaultContentTypes)
+        IReadOnlyList<string> defaultContentTypes,
+        bool contentTypesExplicit)
     {
         var returnType = method.ReturnType;
         var unwrapped = UnwrapReturnType(returnType);
@@ -316,6 +331,7 @@ public static class ResponseExtractor
                 {
                     StatusCode = 200,
                     ContentTypes = defaultContentTypes,
+                    ContentTypesExplicit = contentTypesExplicit,
                 },
             ];
         }
@@ -328,6 +344,7 @@ public static class ResponseExtractor
                 StatusCode = 200,
                 BodyType = unwrapped,
                 ContentTypes = defaultContentTypes,
+                ContentTypesExplicit = contentTypesExplicit,
             },
         ];
     }
@@ -376,8 +393,11 @@ public static class ResponseExtractor
     /// Resolves the default content types by inspecting <c>[Produces]</c> on the
     /// method first, then on the controller class. Falls back to
     /// <c>["application/json"]</c> when neither is present.
+    /// Returns the content-type list and a flag indicating whether they came from
+    /// an explicit <c>[Produces]</c> attribute (true) or from the default fallback (false).
     /// </summary>
-    private static IReadOnlyList<string> ResolveProducesContentTypes(MethodInfo method, Type controllerType)
+    private static (IReadOnlyList<string> ContentTypes, bool Explicit) ResolveProducesContentTypes(
+        MethodInfo method, Type controllerType)
     {
         // Method-level [Produces] takes precedence.
         var methodAttr = AttributeHelper.GetAttribute(method, AttributeHelper.Names.Produces);
@@ -385,7 +405,7 @@ public static class ResponseExtractor
         {
             var ct = ParseProducesContentTypes(methodAttr);
             if (ct.Count > 0)
-                return ct;
+                return (ct, true);
         }
 
         // Controller-level [Produces].
@@ -394,10 +414,10 @@ public static class ResponseExtractor
         {
             var ct = ParseProducesContentTypes(controllerAttr);
             if (ct.Count > 0)
-                return ct;
+                return (ct, true);
         }
 
-        return ["application/json"];
+        return (["application/json"], false);
     }
 
     /// <summary>

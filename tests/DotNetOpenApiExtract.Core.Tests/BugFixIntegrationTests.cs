@@ -464,4 +464,115 @@ public sealed class BugFixIntegrationTests
         nameProp.MaxLength.Should().Be(64,
             because: "primary ctor param has [StringLength(64)] — secondary ctor param does not");
     }
+
+    // =========================================================================
+    // Bug #4 — [Produces("text/event-stream")] without BodyType emits Content section
+    // =========================================================================
+
+    /// <summary>
+    /// <c>EventStreamController.Subscribe</c> is decorated with <c>[Produces("text/event-stream")]</c>
+    /// and <c>[ProducesResponseType(StatusCodes.Status200OK)]</c> (no <c>typeof(T)</c>).
+    /// The 200 response must emit a Content section with the <c>text/event-stream</c> key,
+    /// even though no body schema is available.
+    /// </summary>
+    [Fact]
+    public void EventStream_Subscribe_200Response_HasTextEventStreamContent()
+    {
+        var operation = FindOperation("/api/v1/events", HttpMethod.Get);
+
+        operation.Responses.Should().ContainKey("200");
+        var response = operation.Responses["200"] as OpenApiResponse
+            ?? throw new InvalidOperationException("200 response is not OpenApiResponse.");
+
+        response.Content.Should().NotBeNull(
+            because: "[Produces(\"text/event-stream\")] must emit a Content section even with no body type");
+        response.Content.Should().ContainKey("text/event-stream",
+            because: "the explicit [Produces] content type must appear as a Content key");
+    }
+
+    [Fact]
+    public void EventStream_Subscribe_200Response_TextEventStream_HasNoSchema()
+    {
+        var operation = FindOperation("/api/v1/events", HttpMethod.Get);
+
+        var response = (operation.Responses?["200"] as OpenApiResponse)
+            ?? throw new InvalidOperationException("200 response is not OpenApiResponse.");
+        var mediaType = response.Content!["text/event-stream"] as OpenApiMediaType
+            ?? throw new InvalidOperationException("text/event-stream entry is not OpenApiMediaType.");
+
+        mediaType.Schema.Should().BeNull(
+            because: "no body type was declared — the media type entry should have no schema");
+    }
+
+    // =========================================================================
+    // Bug #3 — $ref properties carry description and constraints via allOf wrapping
+    // =========================================================================
+
+    /// <summary>
+    /// <c>OuterWithRefPropertyModel.Inner</c> is typed as <c>InnerDto?</c> (nullable).
+    /// After MakeNullable wraps it in anyOf, the enclosing schema is mutable and can
+    /// carry a description. The description from <c>[Description]</c> must be present.
+    /// </summary>
+    [Fact]
+    public void OuterWithRefPropertyModel_Inner_HasDescription()
+    {
+        var schema = ResolveComponentSchema("OuterWithRefPropertyModel");
+        schema.Properties.Should().ContainKey("inner");
+
+        var innerProp = schema.Properties!["inner"];
+        var description = innerProp switch
+        {
+            OpenApiSchema s => s.Description,
+            _ => null,
+        };
+
+        description.Should().Be("Inner reference description",
+            because: "[Description] attribute on a $ref property must propagate verbatim through the allOf wrapper");
+    }
+
+    /// <summary>
+    /// <c>OuterWithRefPropertyModel.RequiredInner</c> is typed as non-nullable <c>InnerDto</c>
+    /// (not wrapped by MakeNullable). It must be wrapped in allOf with a description because
+    /// it carries <c>[Description]</c> and its schema is a bare <c>$ref</c>.
+    /// </summary>
+    [Fact]
+    public void OuterWithRefPropertyModel_RequiredInner_HasDescriptionViaAllOf()
+    {
+        var schema = ResolveComponentSchema("OuterWithRefPropertyModel");
+        schema.Properties.Should().ContainKey("requiredInner");
+
+        var innerProp = schema.Properties!["requiredInner"] as OpenApiSchema;
+        innerProp.Should().NotBeNull(
+            because: "a $ref property with [Description] must be wrapped in allOf (OpenApiSchema), not remain a bare OpenApiSchemaReference");
+
+        innerProp!.AllOf.Should().NotBeNullOrEmpty(
+            because: "the allOf wrapper must contain the $ref to InnerDto");
+
+        innerProp.Description.Should().Be("Non-nullable inner ref description",
+            because: "the [Description] attribute must appear on the allOf wrapper");
+    }
+
+    /// <summary>
+    /// <c>OuterWithRefPropertyModel.XmlOnlyRef</c> is a non-nullable <c>InnerDto</c> property
+    /// with only an XML <c>&lt;summary&gt;</c> (no <c>[Description]</c> attribute).
+    /// The <see cref="OpenApiDocumentBuilder"/> XML-doc loop at the schema-enrichment phase
+    /// must detect that the property schema is a bare <c>$ref</c>, wrap it in allOf, and attach
+    /// the description — exercising the Builder path independently of SchemaGenerator.
+    /// </summary>
+    [Fact]
+    public void OuterWithRefPropertyModel_XmlOnlyRef_HasDescriptionFromXmlSummaryViaBuilder()
+    {
+        var schema = ResolveComponentSchema("OuterWithRefPropertyModel");
+        schema.Properties.Should().ContainKey("xmlOnlyRef");
+
+        var prop = schema.Properties!["xmlOnlyRef"] as OpenApiSchema;
+        prop.Should().NotBeNull(
+            because: "a bare $ref property whose description comes from XML <summary> must be wrapped in allOf by the Builder");
+
+        prop!.AllOf.Should().NotBeNullOrEmpty(
+            because: "the allOf wrapper must contain the $ref to InnerDto");
+
+        prop.Description.Should().Be("XML-only description on a non-nullable $ref property — no [Description] attribute.",
+            because: "the XML <summary> text must propagate verbatim to the allOf wrapper schema description");
+    }
 }
