@@ -92,7 +92,8 @@ public class ControllerDiscoveryTests : IDisposable
         // + JsonConverter (1 converter schema test controller added for T6)
         // + RateLimiting, Caching (2 rate-limiting/caching controllers added for T13)
         // + ValidationModel (1 controller surfacing ValidationModel/ExtendedValidationModel for schema.property-constraints integration tests)
-        _controllers.Should().HaveCount(22);
+        // + NestedDto, Inheritance (2 controllers for nested-type and inheritance XML doc bug fixes)
+        _controllers.Should().HaveCount(24);
     }
 
     // -------------------------------------------------------------------------

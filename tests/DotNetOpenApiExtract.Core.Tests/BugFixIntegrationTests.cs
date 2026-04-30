@@ -276,6 +276,118 @@ public sealed class BugFixIntegrationTests
     }
 
     // =========================================================================
+    // Bug A — Nested-type XML doc descriptions propagate to component schemas
+    // =========================================================================
+
+    /// <summary>
+    /// <c>NestedDtoController.ServiceDto</c> is declared as a nested type inside a controller.
+    /// Reflection emits its FullName with '+' (e.g. "NestedDtoController+ServiceDto") while
+    /// the XML compiler uses '.' — after the fix the component schema's properties must have
+    /// descriptions from the XML doc.
+    /// </summary>
+    [Fact]
+    public void ServiceDto_NameProperty_HasXmlDocDescriptionFromNestedType()
+    {
+        var schema = ResolveComponentSchema("ServiceDto");
+        schema.Properties.Should().ContainKey("name");
+
+        var nameSchema = schema.Properties!["name"] as OpenApiSchema;
+        nameSchema.Should().NotBeNull();
+        nameSchema!.Description.Should().Be("Service name",
+            because: "NestedDtoController.ServiceDto.Name has XML <summary> 'Service name'");
+    }
+
+    [Fact]
+    public void ServiceDto_EndpointProperty_HasXmlDocDescriptionFromNestedType()
+    {
+        var schema = ResolveComponentSchema("ServiceDto");
+        schema.Properties.Should().ContainKey("endpoint");
+
+        var endpointSchema = schema.Properties!["endpoint"] as OpenApiSchema;
+        endpointSchema.Should().NotBeNull();
+        endpointSchema!.Description.Should().Be("Service endpoint URL",
+            because: "NestedDtoController.ServiceDto.Endpoint has XML <summary> 'Service endpoint URL'");
+    }
+
+    [Fact]
+    public void ServiceResponse_SuccessProperty_HasXmlDocDescriptionFromNestedType()
+    {
+        var schema = ResolveComponentSchema("ServiceResponse");
+        schema.Properties.Should().ContainKey("success");
+
+        var successSchema = schema.Properties!["success"] as OpenApiSchema;
+        successSchema.Should().NotBeNull();
+        successSchema!.Description.Should().Be("Whether the service call succeeded",
+            because: "NestedDtoController.ServiceResponse.Success has XML <summary>");
+    }
+
+    /// <summary>
+    /// <c>NestedDtoController.ServiceDto.ServiceEndpoints</c> is a three-level nesting:
+    /// controller → DTO → inner class. Reflection emits
+    /// "NestedDtoController+ServiceDto+ServiceEndpoints" while the XML compiler emits
+    /// "NestedDtoController.ServiceDto.ServiceEndpoints". After the fix the schema must
+    /// resolve both the type-level and property-level descriptions.
+    /// </summary>
+    [Fact]
+    public void NestedDto_DeeplyNestedThreeLevel_ResolvesXmlDescriptions()
+    {
+        var schema = ResolveComponentSchema("ServiceEndpoints");
+        schema.Description.Should().NotBeNullOrEmpty(
+            because: "NestedDtoController.ServiceDto.ServiceEndpoints has XML <summary> on the class");
+
+        var healthPath = schema.Properties!["healthPath"] as OpenApiSchema;
+        healthPath.Should().NotBeNull();
+        healthPath!.Description.Should().Be("Health probe path",
+            because: "ServiceEndpoints.HealthPath has XML <summary> 'Health probe path'");
+    }
+
+    // =========================================================================
+    // Bug B — Inherited property descriptions propagate from base type XML docs
+    // =========================================================================
+
+    /// <summary>
+    /// <c>CreateServerRequest</c> inherits <c>Host</c> and <c>Port</c> from <c>ServerRequestBase</c>.
+    /// The XML doc for those properties lives under "P:SampleApi.Models.ServerRequestBase.Host" etc.
+    /// Before the fix, looking up the property with the leaf type (CreateServerRequest) misses.
+    /// </summary>
+    [Fact]
+    public void CreateServerRequest_HostProperty_HasInheritedXmlDocDescription()
+    {
+        var schema = ResolveComponentSchema("CreateServerRequest");
+        schema.Properties.Should().ContainKey("host");
+
+        var hostSchema = schema.Properties!["host"] as OpenApiSchema;
+        hostSchema.Should().NotBeNull();
+        hostSchema!.Description.Should().Be("Host name of the target server",
+            because: "CreateServerRequest.Host is inherited from ServerRequestBase and has XML <summary> on the base");
+    }
+
+    [Fact]
+    public void CreateServerRequest_PortProperty_HasInheritedXmlDocDescription()
+    {
+        var schema = ResolveComponentSchema("CreateServerRequest");
+        schema.Properties.Should().ContainKey("port");
+
+        var portSchema = schema.Properties!["port"] as OpenApiSchema;
+        portSchema.Should().NotBeNull();
+        portSchema!.Description.Should().Be("Port number to connect on",
+            because: "CreateServerRequest.Port is inherited from ServerRequestBase and has XML <summary> on the base");
+    }
+
+    [Fact]
+    public void CreateServerRequest_LabelProperty_HasOwnXmlDocDescription()
+    {
+        // Label is declared on the derived type itself — must also resolve correctly.
+        var schema = ResolveComponentSchema("CreateServerRequest");
+        schema.Properties.Should().ContainKey("label");
+
+        var labelSchema = schema.Properties!["label"] as OpenApiSchema;
+        labelSchema.Should().NotBeNull();
+        labelSchema!.Description.Should().Be("Display label for the new server",
+            because: "CreateServerRequest.Label is declared on the derived type and has XML <summary>");
+    }
+
+    // =========================================================================
     // Positional record primary-ctor parameter attributes — end-to-end through
     // OpenApiDocumentBuilder so XML <param> → property description and merged
     // [Description] paths are exercised.

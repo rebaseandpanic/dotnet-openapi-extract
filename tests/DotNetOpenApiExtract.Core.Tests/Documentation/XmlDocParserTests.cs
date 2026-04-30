@@ -342,6 +342,55 @@ public class XmlDocParserTests : IDisposable
     }
 
     // =========================================================================
+    // Nested type XML doc lookup (Bug A)
+    // =========================================================================
+
+    [Fact]
+    public void GetTypeDoc_NestedType_FindsEntryDespitePlusInFullName()
+    {
+        // Reflection emits the nested type as "SampleApi.Controllers.NestedDtoController+ServiceDto"
+        // ('+' separator), but the XML compiler emits "T:SampleApi.Controllers.NestedDtoController.ServiceDto"
+        // ('.' separator). The lookup must succeed after NormalizeTypeName replaces '+' with '.'.
+        var nestedType = _loader.Assembly.GetType(
+            "SampleApi.Controllers.NestedDtoController+ServiceDto")!;
+        nestedType.Should().NotBeNull("the nested type must exist in the test assembly");
+
+        // Verify that reflection does in fact use '+' in the FullName (confirming the bug scenario).
+        nestedType.FullName.Should().Contain("+", because: "reflection uses '+' for nested types");
+
+        var entry = _parser.GetTypeDoc(nestedType);
+        entry.Should().NotBeNull("nested type has an XML <summary>");
+        entry!.Summary.Should().Be("DTO declared as a nested type inside this controller.");
+    }
+
+    [Fact]
+    public void GetPropertyDoc_NestedType_FindsPropertyEntryDespitePlusInFullName()
+    {
+        // The property "Name" on NestedDtoController.ServiceDto is emitted in the XML as
+        // "P:SampleApi.Controllers.NestedDtoController.ServiceDto.Name" — the declaring type
+        // uses '.' but reflection gives '+'. NormalizeTypeName must fix this.
+        var nestedType = _loader.Assembly.GetType(
+            "SampleApi.Controllers.NestedDtoController+ServiceDto")!;
+        nestedType.Should().NotBeNull();
+
+        var entry = _parser.GetPropertyDoc(nestedType, "Name");
+        entry.Should().NotBeNull("ServiceDto.Name has an XML <summary>");
+        entry!.Summary.Should().Be("Service name");
+    }
+
+    [Fact]
+    public void GetPropertyDoc_NestedType_SecondProperty_FindsEntryDespitePlusInFullName()
+    {
+        var nestedType = _loader.Assembly.GetType(
+            "SampleApi.Controllers.NestedDtoController+ServiceDto")!;
+        nestedType.Should().NotBeNull();
+
+        var entry = _parser.GetPropertyDoc(nestedType, "Endpoint");
+        entry.Should().NotBeNull("ServiceDto.Endpoint has an XML <summary>");
+        entry!.Summary.Should().Be("Service endpoint URL");
+    }
+
+    // =========================================================================
     // Edge cases
     // =========================================================================
 

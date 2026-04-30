@@ -81,14 +81,16 @@ public sealed class XmlDocParser
     /// </remarks>
     public XmlDocEntry? GetTypeDoc(Type type)
     {
-        var key = $"T:{type.FullName}";
+        // Reflection emits nested types with '+' (e.g. "Outer+Inner") but the C# XML doc
+        // compiler uses '.' — normalize so nested-type lookups succeed.
+        var key = $"T:{NormalizeTypeName(type)}";
         if (_entries.TryGetValue(key, out var entry))
             return entry;
 
         // Fallback for closed generic types: retry with the open generic definition's FullName.
         if (type.IsGenericType && !type.IsGenericTypeDefinition)
         {
-            var openKey = $"T:{type.GetGenericTypeDefinition().FullName}";
+            var openKey = $"T:{NormalizeTypeName(type.GetGenericTypeDefinition())}";
             return _entries.GetValueOrDefault(openKey);
         }
 
@@ -110,14 +112,15 @@ public sealed class XmlDocParser
     /// </remarks>
     public XmlDocEntry? GetPropertyDoc(Type declaringType, string propertyName)
     {
-        var key = $"P:{declaringType.FullName}.{propertyName}";
+        // Normalize '+' → '.' so nested-type property lookups succeed.
+        var key = $"P:{NormalizeTypeName(declaringType)}.{propertyName}";
         if (_entries.TryGetValue(key, out var entry))
             return entry;
 
         // Fallback for closed generic types.
         if (declaringType.IsGenericType && !declaringType.IsGenericTypeDefinition)
         {
-            var openKey = $"P:{declaringType.GetGenericTypeDefinition().FullName}.{propertyName}";
+            var openKey = $"P:{NormalizeTypeName(declaringType.GetGenericTypeDefinition())}.{propertyName}";
             return _entries.GetValueOrDefault(openKey);
         }
 
@@ -131,14 +134,15 @@ public sealed class XmlDocParser
     /// </remarks>
     public XmlDocEntry? GetFieldDoc(Type declaringType, string fieldName)
     {
-        var key = $"F:{declaringType.FullName}.{fieldName}";
+        // Normalize '+' → '.' so nested-type field lookups succeed.
+        var key = $"F:{NormalizeTypeName(declaringType)}.{fieldName}";
         if (_entries.TryGetValue(key, out var entry))
             return entry;
 
         // Fallback for closed generic types.
         if (declaringType.IsGenericType && !declaringType.IsGenericTypeDefinition)
         {
-            var openKey = $"F:{declaringType.GetGenericTypeDefinition().FullName}.{fieldName}";
+            var openKey = $"F:{NormalizeTypeName(declaringType.GetGenericTypeDefinition())}.{fieldName}";
             return _entries.GetValueOrDefault(openKey);
         }
 
@@ -150,13 +154,14 @@ public sealed class XmlDocParser
         var declaringType = method.DeclaringType!;
         var parameters = method.GetParameters();
 
+        // Normalize '+' → '.' so nested-type method lookups succeed.
         if (parameters.Length == 0)
-            return $"M:{declaringType.FullName}.{method.Name}";
+            return $"M:{NormalizeTypeName(declaringType)}.{method.Name}";
 
         // Use StringBuilder to avoid LINQ iterator allocation (I2).
         var sb = new System.Text.StringBuilder();
         sb.Append("M:");
-        sb.Append(declaringType.FullName);
+        sb.Append(NormalizeTypeName(declaringType));
         sb.Append('.');
         sb.Append(method.Name);
         sb.Append('(');
@@ -191,8 +196,8 @@ public sealed class XmlDocParser
         {
             var genericDef = type.GetGenericTypeDefinition();
             // FullName of generic definition contains backtick: e.g. System.Nullable`1
-            // Strip the `N suffix to get the base name
-            var fullName = genericDef.FullName ?? genericDef.Name;
+            // Strip the `N suffix to get the base name, and normalize '+' → '.' for nested types.
+            var fullName = NormalizeTypeName(genericDef);
             var backtickIndex = fullName.IndexOf('`');
             var baseName = backtickIndex >= 0 ? fullName[..backtickIndex] : fullName;
 
@@ -200,9 +205,17 @@ public sealed class XmlDocParser
             return $"{baseName}{{{typeArgs}}}";
         }
 
-        // Simple types
-        return type.FullName ?? type.Name;
+        // Simple types — normalize '+' → '.' so nested-type parameter names match XML keys.
+        return NormalizeTypeName(type);
     }
+
+    /// <summary>
+    /// Converts a type's FullName to the format used by the C# XML doc compiler.
+    /// Reflection emits nested types with '+' (e.g. "Outer+Inner") while the compiler
+    /// emits 'T:Outer.Inner' — replacing '+' with '.' makes lookups succeed.
+    /// </summary>
+    private static string NormalizeTypeName(Type type) =>
+        (type.FullName ?? type.Name).Replace('+', '.');
 
     private static XmlDocEntry ParseMember(XElement member)
     {

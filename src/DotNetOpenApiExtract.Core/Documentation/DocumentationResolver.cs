@@ -239,8 +239,13 @@ public sealed class DocumentationResolver
                 description = AttributeHelper.GetConstructorArgument<string>(descAttr, 0);
         }
 
-        // Fetch XML doc once for both summary and example (W8: avoid double GetPropertyDoc call).
-        var xmlPropDoc = _xmlParser.GetPropertyDoc(declaringType, property.Name);
+        // XML doc keys live under the type that DECLARES the property.
+        // For inherited properties this is the base; for overridden properties it's
+        // the most-derived type that re-declares them. property.DeclaringType is
+        // always the right key — fall back to declaringType only if reflection
+        // returned a null DeclaringType (defensive against malformed assemblies).
+        var xmlDocOwner = property.DeclaringType ?? declaringType;
+        var xmlPropDoc = _xmlParser.GetPropertyDoc(xmlDocOwner, property.Name);
 
         // Priority 3: XML <summary>
         if (string.IsNullOrEmpty(description))

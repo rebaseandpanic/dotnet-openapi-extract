@@ -506,6 +506,28 @@ public record DerivedPositionalRecord(
     [StringLength(20)] string Extra
 ) : BasePositionalRecord(Id);
 
+// =========================================================================
+// Inheritance fixtures — verify that inherited property descriptions propagate
+// from the base type's XML doc key ("P:Base.Prop") to the derived schema.
+// =========================================================================
+
+/// <summary>Base request class with documented properties.</summary>
+public class ServerRequestBase
+{
+    /// <summary>Host name of the target server</summary>
+    public required string Host { get; set; }
+
+    /// <summary>Port number to connect on</summary>
+    public int Port { get; set; }
+}
+
+/// <summary>Derived request that adds its own field and inherits the base fields.</summary>
+public class CreateServerRequest : ServerRequestBase
+{
+    /// <summary>Display label for the new server</summary>
+    public required string Label { get; set; }
+}
+
 /// <summary>
 /// Class with a C# 12 primary constructor whose parameters mirror the explicitly
 /// declared properties by name. Default-target attributes on the primary-ctor

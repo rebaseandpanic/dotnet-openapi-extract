@@ -275,9 +275,11 @@ public class ActionDiscoveryTests : IDisposable
         // ValidationModel: Echo + EchoExtended + EchoPositionalCustomer + EchoSecondaryCtorRecord — 4
         //                  (the latter two surface positional-record fixtures for the
         //                   primary-ctor parameter-attribute merge fix)
-        // Total: 51
+        // NestedDto (Bug A fixture): GetService + CreateService — 2
+        // Inheritance (Bug B fixture): CreateServer — 1
+        // Total: 54
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(51);
+        allActions.Should().HaveCount(54);
     }
 
     // -------------------------------------------------------------------------
