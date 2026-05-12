@@ -134,10 +134,14 @@ var descriptionOption = new Option<string?>("--description")
     Description = "API description written to the info block",
 };
 
-var xmlOption = new Option<string?>("--xml")
+var xmlOption = new Option<string[]>("--xml")
 {
-    Description = "XML documentation file path (default: auto-detected next to the DLL). " +
-                  "If the explicitly-provided file does not exist, a warning is printed to stderr and extraction continues without XML documentation.",
+    Description = "XML documentation file path. Can be specified multiple times — each path adds one more source. " +
+                  "Sources are merged with first-added winning on key collision, so earlier --xml paths take priority. " +
+                  "Project XML is auto-detected next to the DLL and added after explicit paths. " +
+                  "Framework/SDK ref-pack XMLs are discovered automatically and added last. " +
+                  "If an explicitly-provided file does not exist, a warning is printed to stderr and that entry is skipped.",
+    AllowMultipleArgumentsPerToken = false,
 };
 
 var namingPolicyOption = new Option<string?>("--naming-policy")
@@ -288,7 +292,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var title        = parseResult.GetValue(titleOption);
     var version      = parseResult.GetValue(versionOption)!;
     var description  = parseResult.GetValue(descriptionOption);
-    var xml          = parseResult.GetValue(xmlOption);
+    var xmlPaths     = parseResult.GetValue(xmlOption);
     var namingPolicy = parseResult.GetValue(namingPolicyOption);
     var enumAsStr    = parseResult.GetValue(enumAsStringOption);
     var openapiVer   = parseResult.GetValue(openapiVersionOption)!;
@@ -317,12 +321,23 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var requireRespCodes  = parseResult.GetValue(requireResponseCodeOption);
     var ruleMinLengths    = parseResult.GetValue(ruleMinLengthOption);
 
-    // ── Warn if explicitly provided --xml path does not exist ────────────────
-    if (xml != null && !File.Exists(xml))
+    // ── Warn if any explicitly provided --xml path does not exist ───────────
+    List<string>? validXmlPaths = null;
+    if (xmlPaths is { Length: > 0 })
     {
-        Console.Error.WriteLine(
-            $"Warning: --xml '{xml}' does not exist. Running without XML documentation.");
-        xml = null;
+        validXmlPaths = new List<string>(xmlPaths.Length);
+        foreach (var xmlPath in xmlPaths)
+        {
+            if (!File.Exists(xmlPath))
+            {
+                Console.Error.WriteLine(
+                    $"Warning: --xml '{xmlPath}' does not exist. Skipping this XML source.");
+            }
+            else
+            {
+                validXmlPaths.Add(xmlPath);
+            }
+        }
     }
 
     // ── Warn on unrecognized rule IDs ─────────────────────────────────────────
@@ -405,7 +420,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         var options = new OpenApiDocumentOptions
         {
             AssemblyPath        = assembly.FullName,
-            XmlPath             = xml,
+            XmlPaths            = validXmlPaths is { Count: > 0 } ? validXmlPaths : null,
             Title               = title,
             Version             = version,
             Description         = description,

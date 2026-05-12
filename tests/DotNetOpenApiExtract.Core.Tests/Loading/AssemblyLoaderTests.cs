@@ -266,4 +266,67 @@ public class AssemblyLoaderTests : IDisposable
             .First(a => a.MemberName == "IgnoreApi");
         ignoreApi.TypedValue.Value.Should().Be(true);
     }
+
+    // =========================================================================
+    // GetXmlDocumentationFiles tests
+    // =========================================================================
+
+    [Fact]
+    public void GetXmlDocumentationFiles_ReturnsOnlyXmlsWithDllSibling()
+    {
+        var xmlFiles = _loader.GetXmlDocumentationFiles();
+
+        // Every returned XML file must have a sibling DLL
+        foreach (var xmlFile in xmlFiles)
+        {
+            var dllSibling = Path.ChangeExtension(xmlFile, ".dll");
+            File.Exists(dllSibling).Should().BeTrue(
+                because: $"'{xmlFile}' was returned but has no sibling DLL");
+        }
+    }
+
+    [Fact]
+    public void GetXmlDocumentationFiles_ReturnsNoDuplicates()
+    {
+        var xmlFiles = _loader.GetXmlDocumentationFiles();
+
+        xmlFiles.Should().OnlyHaveUniqueItems(
+            because: "GetXmlDocumentationFiles must not return duplicate paths");
+    }
+
+    [Fact]
+    public void GetXmlDocumentationFiles_IncludesProjectXml()
+    {
+        var xmlFiles = _loader.GetXmlDocumentationFiles();
+        var projectXml = Path.ChangeExtension(TestPaths.SampleApiDll, ".xml");
+
+        // If the project XML exists (it should — SampleApi has GenerateDocumentationFile=true),
+        // it must appear in the result.
+        if (File.Exists(projectXml))
+        {
+            xmlFiles.Should().Contain(projectXml,
+                because: "the project XML alongside the target DLL must be included");
+        }
+    }
+
+    [Fact]
+    public void GetXmlDocumentationFiles_ReturnsNonEmptyListOnStandardSdk()
+    {
+        // On a standard .NET SDK installation (which is always present in CI/dev),
+        // there should be at least the runtime XML files from the ref packs.
+        var xmlFiles = _loader.GetXmlDocumentationFiles();
+
+        // We know at minimum that the project directory has SampleApi.xml (GenerateDocumentationFile=true)
+        xmlFiles.Should().NotBeEmpty(
+            because: "there must be at least the project XML in the result");
+    }
+
+    [Fact]
+    public void MissingRefPackHints_ReturnsListOrEmpty()
+    {
+        // MissingRefPackHints is non-null but may be empty if ref packs are installed.
+        // We just verify the property is accessible and returns a valid (non-null) list.
+        _loader.MissingRefPackHints.Should().NotBeNull(
+            because: "MissingRefPackHints must always return a non-null list");
+    }
 }

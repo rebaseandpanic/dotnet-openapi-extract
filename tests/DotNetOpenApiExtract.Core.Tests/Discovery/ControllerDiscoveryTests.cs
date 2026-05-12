@@ -95,7 +95,8 @@ public class ControllerDiscoveryTests : IDisposable
         // + NestedDto, Inheritance (2 controllers for nested-type and inheritance XML doc bug fixes)
         // + EventStream (1 SSE content-type fixture for Bug #4 fix)
         // + RefProperty (1 $ref-siblings fixture for Bug #3 fix)
-        _controllers.Should().HaveCount(26);
+        // + FrameworkTypeRef (1 controller for framework XML doc loading test)
+        _controllers.Should().HaveCount(27);
     }
 
     // -------------------------------------------------------------------------

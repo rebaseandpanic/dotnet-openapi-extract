@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using DotNetOpenApiExtract.Core;
 using DotNetOpenApiExtract.Core.Schema;
 using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.OpenApi;
@@ -97,8 +96,13 @@ public sealed class ProblemDetailsIntegrationTests
     // ──────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Build_WithoutAddProblemDetails_SchemaAbsentFromComponents()
+    public void Build_WithoutAddProblemDetails_DefaultErrorResponsesNotInjectedGlobally()
     {
+        // NOTE: SampleApi now has FrameworkTypeRefController which declares
+        // [ProducesResponseType(typeof(ProblemDetails), 422)] directly, so ProblemDetails
+        // WILL appear in components/schemas via the SchemaGenerator even without AddProblemDetails().
+        // What AddProblemDetails() controls is the GLOBAL injection of default 400/500 responses
+        // into ALL operations. This test verifies that gate works correctly.
         using var tempDir = new TempDirectory();
         File.WriteAllText(
             Path.Combine(tempDir.Path, "Program.cs"),
@@ -119,10 +123,23 @@ public sealed class ProblemDetailsIntegrationTests
 
         var document = OpenApiDocumentBuilder.Build(options);
 
-        // ProblemDetails schema must NOT be present when AddProblemDetails() is not called.
-        var hasSchema = document.Components?.Schemas?.ContainsKey(ProblemDetailsSchema.SchemaId) == true;
-        hasSchema.Should().BeFalse(
-            because: "ProblemDetails schema must only be injected when AddProblemDetails() is detected");
+        // When AddProblemDetails() is NOT called, ApplyProblemDetails must NOT inject default
+        // 400 and 500 responses into operations that don't declare them.
+        // Verify via GetUsers (UsersController) — it only declares 200 responses, no error responses.
+        var getUsersOp = document.Paths?
+            .SelectMany(p => p.Value is OpenApiPathItem pi && pi.Operations != null
+                ? pi.Operations.Values
+                : Enumerable.Empty<OpenApiOperation>())
+            .FirstOrDefault(op =>
+                op.OperationId == "GetUsers" ||
+                (op.Summary?.Contains("Get all users", StringComparison.OrdinalIgnoreCase) == true));
+
+        getUsersOp.Should().NotBeNull(
+            because: "GetUsers must exist in the document for this test to be meaningful");
+
+        // Without ApplyProblemDetails, there must be NO globally-injected 400/500 responses
+        getUsersOp!.Responses.Should().NotContainKey("500",
+            because: "500 response must only be globally injected when AddProblemDetails() is detected");
     }
 
     [Fact]

@@ -38,7 +38,7 @@ This means you can generate OpenAPI specs:
 | `--title <string>` | no | assembly name | API title in the info block |
 | `--version <string>` | no | `v1` | API version in the info block |
 | `--description <string>` | no | — | API description |
-| `--xml <path>` | no | auto-detect | Path to XML documentation file |
+| `--xml <path>` | no | auto-detect | Path to XML documentation file. Repeatable — each `--xml` adds one more source. Sources are merged with first-added winning on key collision. Framework/SDK ref-pack XMLs are also discovered automatically and added last (lowest priority). |
 | `--source <path>` | no | — | Entry-point source file (usually auto-detected) |
 | `--source-root <dir>` | no | auto-detect | Project root for Roslyn analysis of `Program.cs` |
 | `--naming-policy <policy>` | no | `camelCase` | `camelCase`, `snake_case_lower`, `snake_case_upper`, `kebab-case-lower`, `kebab-case-upper`, `preserve` |

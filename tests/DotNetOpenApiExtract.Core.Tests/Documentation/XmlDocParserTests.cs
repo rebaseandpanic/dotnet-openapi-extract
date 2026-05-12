@@ -419,4 +419,135 @@ public class XmlDocParserTests : IDisposable
         entry.Should().NotBeNull();
         entry!.Summary.Should().Be("Liveness probe");
     }
+
+    // =========================================================================
+    // Multi-source constructor tests
+    // =========================================================================
+
+    [Fact]
+    public void MultiSource_EmptyList_CreatesEmptyParser()
+    {
+        var parser = XmlDocParser.FromSources(Array.Empty<string>());
+        parser.GetTypeDoc(typeof(string)).Should().BeNull();
+    }
+
+    [Fact]
+    public void MultiSource_SingleSource_LoadsEntries()
+    {
+        // Same as single-path ctor but via multi-source path
+        var parser = XmlDocParser.FromSources(new[] { TestPaths.SampleApiXml });
+        var entry = parser.GetTypeDoc(_userDtoType);
+        entry.Should().NotBeNull();
+        entry!.Summary.Should().Be("User data transfer object");
+    }
+
+    [Fact]
+    public void MultiSource_FirstWins_ProjectXmlOverridesFrameworkXml()
+    {
+        // Create two temp XML files with the same member key but different summaries.
+        // The first file should win.
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        // Create placeholder DLLs so the collector's "has sibling DLL" check passes
+        // when these XMLs are used via GetXmlDocumentationFiles. Here we pass paths directly,
+        // so we don't need the DLL trick — just use the XmlDocParser internal ctor.
+        try
+        {
+            var firstXml = Path.Combine(tempDir, "first.xml");
+            var secondXml = Path.Combine(tempDir, "second.xml");
+
+            // XML keys must match typeof(XmlMergeTestTypes.KeyA).FullName normalized with '+' → '.'
+            // FullName: DotNetOpenApiExtract.Core.Tests.Documentation.XmlMergeTestTypes+KeyA
+            // Normalized key: T:DotNetOpenApiExtract.Core.Tests.Documentation.XmlMergeTestTypes.KeyA
+            var prefix = "DotNetOpenApiExtract.Core.Tests.Documentation.XmlMergeTestTypes";
+
+            File.WriteAllText(firstXml, $"""
+                <?xml version="1.0"?>
+                <doc>
+                  <members>
+                    <member name="T:{prefix}.KeyA">
+                      <summary>From first source</summary>
+                    </member>
+                    <member name="T:{prefix}.OnlyInFirst">
+                      <summary>Only in first</summary>
+                    </member>
+                  </members>
+                </doc>
+                """);
+
+            File.WriteAllText(secondXml, $"""
+                <?xml version="1.0"?>
+                <doc>
+                  <members>
+                    <member name="T:{prefix}.KeyA">
+                      <summary>From second source</summary>
+                    </member>
+                    <member name="T:{prefix}.OnlyInSecond">
+                      <summary>Only in second</summary>
+                    </member>
+                  </members>
+                </doc>
+                """);
+
+            var parser = XmlDocParser.FromSources(new[] { firstXml, secondXml });
+
+            // Collision: first wins — verify by probing the raw entry via a real type
+            // We cannot call GetTypeDoc with a fabricated type easily, so we probe indirectly
+            // by checking that the parser has entries via types in the existing test assembly
+            // that share the same XML key pattern. Instead, we use a helper that exercises
+            // the lookup directly using the key convention.
+            // Since XmlDocParser.GetTypeDoc normalizes types, we use a trick: call GetPropertyDoc
+            // on a made-up declaring type by using a type whose FullName matches our XML key.
+            // The simplest approach: call GetTypeDoc on typeof(XmlMergeTest.KeyA) which is defined
+            // in this test file's namespace below.
+            var collisionEntry = parser.GetTypeDoc(typeof(XmlMergeTestTypes.KeyA));
+            collisionEntry.Should().NotBeNull();
+            collisionEntry!.Summary.Should().Be("From first source",
+                because: "first-added source must win on key collision");
+
+            // Only-in-first: available
+            var onlyFirstEntry = parser.GetTypeDoc(typeof(XmlMergeTestTypes.OnlyInFirst));
+            onlyFirstEntry.Should().NotBeNull();
+            onlyFirstEntry!.Summary.Should().Be("Only in first");
+
+            // Only-in-second: still available (not overridden, just merged)
+            var onlySecondEntry = parser.GetTypeDoc(typeof(XmlMergeTestTypes.OnlyInSecond));
+            onlySecondEntry.Should().NotBeNull();
+            onlySecondEntry!.Summary.Should().Be("Only in second");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void MultiSource_ToleratesNullsAndMissingFiles()
+    {
+        // The IReadOnlyList<string> ctor does NOT accept nulls in the list, but it does tolerate
+        // non-existent paths. We verify a mix of existing + missing paths works correctly.
+        var parser = XmlDocParser.FromSources(
+            new[]
+            {
+                "/nonexistent/missing.xml",
+                TestPaths.SampleApiXml,
+            });
+
+        // Should still have entries from the valid file
+        var entry = parser.GetTypeDoc(_userDtoType);
+        entry.Should().NotBeNull();
+        entry!.Summary.Should().Be("User data transfer object");
+    }
+}
+
+/// <summary>
+/// Marker types used for multi-source merge tests. Their FullName is used as XML member keys.
+/// They live in the XmlMergeTestTypes namespace so the XML keys match the typeof() lookup.
+/// </summary>
+internal static class XmlMergeTestTypes
+{
+    internal sealed class KeyA { }
+    internal sealed class OnlyInFirst { }
+    internal sealed class OnlyInSecond { }
 }

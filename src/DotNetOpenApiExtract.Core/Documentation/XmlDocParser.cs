@@ -41,10 +41,36 @@ public sealed class XmlDocParser
     private readonly Dictionary<string, XmlDocEntry> _entries = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Load and parse an XML documentation file.
+    /// Load and parse a single XML documentation file.
     /// </summary>
     /// <param name="xmlPath">Path to the .xml file. If null or non-existent, creates an empty parser.</param>
     public XmlDocParser(string? xmlPath)
+    {
+        LoadFile(xmlPath);
+    }
+
+    private XmlDocParser(IReadOnlyList<string> xmlPaths)
+    {
+        foreach (var xmlPath in xmlPaths)
+            LoadFile(xmlPath);
+    }
+
+    /// <summary>
+    /// Load and merge XML documentation from multiple files.
+    /// First-added source wins on key collision, so higher-priority sources (e.g. project XML)
+    /// should be listed before lower-priority ones (e.g. framework/SDK XMLs).
+    /// Null paths and paths to non-existent files are silently skipped.
+    /// </summary>
+    /// <param name="xmlPaths">
+    /// Ordered list of paths to .xml files. Each file is merged into a single dictionary.
+    /// </param>
+    internal static XmlDocParser FromSources(IReadOnlyList<string> xmlPaths)
+    {
+        ArgumentNullException.ThrowIfNull(xmlPaths);
+        return new XmlDocParser(xmlPaths);
+    }
+
+    private void LoadFile(string? xmlPath)
     {
         if (string.IsNullOrEmpty(xmlPath) || !File.Exists(xmlPath))
             return;
@@ -54,9 +80,12 @@ public sealed class XmlDocParser
         {
             doc = XDocument.Load(xmlPath);
         }
-        catch (Exception ex) when (ex is System.Xml.XmlException or IOException)
+        catch (Exception ex) when (ex is System.Xml.XmlException
+                                     or IOException
+                                     or UnauthorizedAccessException)
         {
-            // XML doc is optional — proceed without it if the file is malformed or locked
+            // XML doc is optional — proceed without it if the file is malformed, locked,
+            // or unreadable (e.g. ref-pack XML with restrictive permissions on a stripped image).
             return;
         }
 
@@ -68,7 +97,8 @@ public sealed class XmlDocParser
             if (string.IsNullOrEmpty(name))
                 continue;
 
-            _entries[name] = ParseMember(member);
+            // TryAdd: first source wins — project XML takes priority over framework XML.
+            _entries.TryAdd(name, ParseMember(member));
         }
     }
 

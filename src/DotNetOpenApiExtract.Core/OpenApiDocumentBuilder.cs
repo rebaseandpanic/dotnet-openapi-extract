@@ -46,8 +46,18 @@ public sealed class OpenApiDocumentOptions
     /// <summary>
     /// Path to the XML documentation file. When <see langword="null"/>,
     /// the path is auto-detected by replacing the assembly extension with ".xml".
+    /// For multiple sources, prefer <see cref="XmlPaths"/>.
     /// </summary>
     public string? XmlPath { get; init; }
+
+    /// <summary>
+    /// Ordered list of XML documentation file paths to merge. First-added source wins on key collision,
+    /// so higher-priority sources (e.g. project XML, explicit user paths) should be listed first.
+    /// When set, this takes precedence over <see cref="XmlPath"/>.
+    /// When <see langword="null"/> or empty, the builder falls back to <see cref="XmlPath"/> and
+    /// auto-detection.
+    /// </summary>
+    public IReadOnlyList<string>? XmlPaths { get; init; }
 
     /// <summary>
     /// Title of the API (used in OpenAPI Info).
@@ -302,11 +312,10 @@ public sealed class OpenApiDocumentBuilder
             ?? options.NamingPolicy
             ?? JsonNamingPolicy.CamelCase;
 
-        // Resolve XML path: use the explicitly provided path, or auto-detect alongside the DLL.
-        var xmlPath = options.XmlPath
-            ?? Path.ChangeExtension(options.AssemblyPath, ".xml");
+        // ── Resolve XML documentation paths (priority: XmlPaths > XmlPath > auto-detect > framework) ──
+        var xmlPaths = BuildXmlPathList(options, loader);
 
-        var xmlParser = new XmlDocParser(xmlPath);
+        var xmlParser = XmlDocParser.FromSources(xmlPaths);
         var docResolver = new DocumentationResolver(xmlParser);
         var schemaGenerator = new SchemaGenerator(new SchemaOptions
         {
@@ -609,6 +618,65 @@ public sealed class OpenApiDocumentBuilder
         ApplyDocumentTagsMetadata(document, docTagsResult);
 
         return new BuildCoreResult(document, controllers, actions, schemaGenerator, sourceContext);
+    }
+
+    // =========================================================================
+    // XML path list builder
+    // =========================================================================
+
+    /// <summary>
+    /// Builds the ordered list of XML documentation file paths to load, in priority order:
+    /// <list type="number">
+    ///   <item>Explicit paths from <see cref="OpenApiDocumentOptions.XmlPaths"/> (user-provided, highest priority).</item>
+    ///   <item>Auto-detected project XML alongside the assembly DLL (or explicit <see cref="OpenApiDocumentOptions.XmlPath"/>).</item>
+    ///   <item>Framework / SDK ref-pack XML files discovered from the resolver's search paths.</item>
+    /// </list>
+    /// First-wins merging in <see cref="XmlDocParser"/> ensures project docs override framework docs.
+    /// </summary>
+    private static IReadOnlyList<string> BuildXmlPathList(OpenApiDocumentOptions options, AssemblyLoader loader)
+    {
+        var paths = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddPath(string? path)
+        {
+            if (!string.IsNullOrEmpty(path) && seen.Add(path))
+                paths.Add(path);
+        }
+
+        // 1. Explicit user-provided paths (highest priority)
+        if (options.XmlPaths is { Count: > 0 })
+        {
+            foreach (var p in options.XmlPaths)
+                AddPath(p);
+        }
+
+        // 2. Auto-detected project XML (or explicit XmlPath for single-path back-compat)
+        var autoDetectedXml = options.XmlPath
+            ?? Path.ChangeExtension(options.AssemblyPath, ".xml");
+        AddPath(autoDetectedXml);
+
+        // 3. Framework / SDK ref-pack XML files (lowest priority — fill in descriptions for framework types)
+        var frameworkXmls = loader.GetXmlDocumentationFiles();
+        foreach (var p in frameworkXmls)
+            AddPath(p);
+
+        // Emit stderr warning if no ref-pack XML was discovered despite ref-pack paths being
+        // expected. We compare against RefPackXmlCount (not the combined list size) because
+        // the combined list also includes project XML found in Phase 1 — checking it would
+        // suppress the warning whenever the project has its own XML doc.
+        var missingHints = loader.MissingRefPackHints;
+        if (missingHints.Count > 0 && loader.RefPackXmlCount == 0)
+        {
+            Console.Error.WriteLine(
+                "Warning: framework XML documentation not found in SDK ref packs at: " +
+                string.Join(", ", missingHints) +
+                "; descriptions for framework types (e.g. ProblemDetails) will be empty. " +
+                "Ref packs ship with the .NET SDK — install the SDK rather than only the runtime " +
+                "(e.g. base your Docker image on mcr.microsoft.com/dotnet/sdk:N.0 instead of aspnet:N.0).");
+        }
+
+        return paths;
     }
 
     // =========================================================================

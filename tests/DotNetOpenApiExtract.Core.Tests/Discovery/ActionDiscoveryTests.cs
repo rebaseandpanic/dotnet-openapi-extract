@@ -279,9 +279,10 @@ public class ActionDiscoveryTests : IDisposable
         // Inheritance (Bug B fixture): CreateServer — 1
         // EventStream (Bug #4 fixture): Subscribe — 1
         // RefProperty (Bug #3 fixture): Get — 1
-        // Total: 56
+        // FrameworkTypeRef (framework XML doc test): GetResource — 1
+        // Total: 57
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(56);
+        allActions.Should().HaveCount(57);
     }
 
     // -------------------------------------------------------------------------
