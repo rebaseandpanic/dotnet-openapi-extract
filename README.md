@@ -19,9 +19,9 @@ dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --output openapi.js
 
 ## Why
 
-Standard OpenAPI generation tools (`swagger tofile`, `Microsoft.AspNetCore.OpenApi`) require the application to fully start — which means a real database, message queues, external APIs, background services, and all environment variables must be available. Without infrastructure, the app crashes and the spec is never generated.
+The standard ways to get an OpenAPI file out of an ASP.NET Core app run the app's own startup code. The Swashbuckle CLI (`swagger tofile`) loads your startup assembly and builds its host. [Build-time generation in `Microsoft.AspNetCore.OpenApi`](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/aspnetcore-openapi#generate-openapi-documents-at-build-time) invokes your entry point with a mock server. Neither serves requests, but every service registration and configuration read in `Program.cs` executes. If that code connects to a database or message broker, calls an external API, or fails fast on a missing required environment variable, document generation fails without that infrastructure. The usual fix is to guard startup code for the generator: a `GetDocument.Insider` entry-assembly check for Microsoft's generator, or a `SwaggerHostFactory` for the Swashbuckle CLI.
 
-DotNetOpenApiExtract solves this by reading metadata directly from the compiled DLL via `MetadataLoadContext`. It never executes any code from your assembly. All it needs is the build output directory.
+DotNetOpenApiExtract reads metadata straight from the compiled DLL via `MetadataLoadContext`. It never executes any code from your assembly, so it needs no guards in your startup code — only the build output directory.
 
 This means you can generate OpenAPI specs:
 - In CI/CD without any infrastructure

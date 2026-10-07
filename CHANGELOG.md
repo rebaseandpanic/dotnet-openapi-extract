@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [0.16.1] - 2026-10-07
+
+- [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.
+
 ## [0.16.0] - 2026-10-07
 
 - [SECURITY] `Microsoft.OpenApi` and `Microsoft.OpenApi.YamlReader` bumped 3.5.0 → 3.10.2. Fixes two high-severity denial-of-service advisories, both reachable through the `validate` command, which parses user-supplied spec files in-process:
