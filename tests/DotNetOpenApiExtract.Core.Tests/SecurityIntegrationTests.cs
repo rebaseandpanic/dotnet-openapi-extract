@@ -211,4 +211,78 @@ public class SecurityIntegrationTests
         schemeKey!.Reference?.Id.Should().Be("ApiKey",
             because: "the scheme name 'ApiKey' must appear as the key in the security requirement");
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 18. Security requirements survive serialization (document- and operation-level)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The written spec — not just the in-memory model — must carry each requirement as
+    /// <c>{"&lt;scheme name&gt;": []}</c> when the scheme is declared in
+    /// <c>components/securitySchemes</c> (OpenAPI: "Each name MUST correspond to a security
+    /// scheme which is declared in the Security Schemes under the Components Object").
+    /// An empty <c>{}</c> instead would mean "no authentication required".
+    /// </summary>
+    /// <param name="version">Spec version passed to the serializer, as the CLI does.</param>
+    /// <param name="operationPath">
+    /// Path of the GET operation whose <c>security</c> is checked, or <see langword="null"/>
+    /// for the document-level <c>security</c>.
+    /// </param>
+    /// <param name="expectedScheme">The single scheme name the requirement must contain.</param>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0, null, "ApiKey")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1, null, "ApiKey")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2, null, "ApiKey")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0, "/api/secure/admin", "Bearer")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1, "/api/secure/admin", "Bearer")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2, "/api/secure/admin", "Bearer")]
+    public async Task Serialize_DeclaredSchemeRequirement_WrittenWithSchemeName(
+        OpenApiSpecVersion version, string? operationPath, string expectedScheme)
+    {
+        using var tempDir = new TempDirectory();
+
+        // "Bearer" is declared by AddJwtBearer and required by
+        // [Authorize(AuthenticationSchemes = "Bearer")] on GET /api/secure/admin;
+        // "ApiKey" is declared by AddSecurityDefinition and required globally.
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Program.cs"),
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddAuthentication().AddJwtBearer(o => { });
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key"
+                });
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    { new OpenApiSecuritySchemeReference("ApiKey"), [] }
+                });
+            });
+            builder.Build().Run();
+            """);
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.SampleApiDll,
+            XmlPath      = TestPaths.SampleApiXml,
+            SourceRoot   = tempDir.Path,
+        });
+
+        var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+
+        var owner = operationPath == null ? root : root["paths"]?[operationPath]?["get"];
+        owner.Should().NotBeNull();
+
+        var security = owner!["security"];
+        security.Should().NotBeNull();
+        security!.ToJsonString().Should().Be($$"""[{"{{expectedScheme}}":[]}]""");
+    }
 }

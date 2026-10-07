@@ -493,7 +493,7 @@ public sealed class OpenApiDocumentBuilder
                 var actionAttrs     = action.Method.GetCustomAttributesData();
                 var controllerAttrs = action.Controller.Type.GetCustomAttributesData();
 
-                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult);
+                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document);
                 ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
                 ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
@@ -693,7 +693,8 @@ public sealed class OpenApiDocumentBuilder
         IList<System.Reflection.CustomAttributeData> controllerAttrs,
         DocumentationResolver docResolver,
         SchemaGenerator schemaGenerator,
-        SecuritySchemeExtractionResult securityResult)
+        SecuritySchemeExtractionResult securityResult,
+        OpenApiDocument document)
     {
         var docs = docResolver.ResolveOperation(action);
         var parameters = ParameterExtractor.ExtractParameters(action);
@@ -847,7 +848,7 @@ public sealed class OpenApiDocumentBuilder
         }
 
         // ── Per-operation security ────────────────────────────────────────────
-        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult);
+        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document);
 
         return operation;
     }
@@ -1157,7 +1158,11 @@ public sealed class OpenApiDocumentBuilder
             var requirement = new OpenApiSecurityRequirement();
             foreach (var schemeName in securityResult.GlobalRequirementSchemeNames)
             {
-                var reference = new OpenApiSecuritySchemeReference(schemeName, null, null);
+                // The host document is required for serialization: Microsoft.OpenApi writes a
+                // requirement key only if its reference resolves against the host document's
+                // components/securitySchemes (OpenApiSecurityRequirement.CanSerializeSecurityScheme);
+                // with a null host document every key is dropped and the requirement becomes {}.
+                var reference = new OpenApiSecuritySchemeReference(schemeName, document, null);
                 requirement[reference] = [];
             }
 
@@ -1181,7 +1186,8 @@ public sealed class OpenApiDocumentBuilder
         OpenApiOperation operation,
         IList<System.Reflection.CustomAttributeData> actionAttrs,
         IList<System.Reflection.CustomAttributeData> controllerAttrs,
-        SecuritySchemeExtractionResult securityResult)
+        SecuritySchemeExtractionResult securityResult,
+        OpenApiDocument document)
     {
         var auth = AuthorizationExtractor.Extract(actionAttrs, controllerAttrs);
 
@@ -1197,7 +1203,11 @@ public sealed class OpenApiDocumentBuilder
             var requirement = new OpenApiSecurityRequirement();
             foreach (var schemeName in auth.AuthenticationSchemes)
             {
-                var reference = new OpenApiSecuritySchemeReference(schemeName, null, null);
+                // The host document is required for serialization: Microsoft.OpenApi writes a
+                // requirement key only if its reference resolves against the host document's
+                // components/securitySchemes (OpenApiSecurityRequirement.CanSerializeSecurityScheme);
+                // with a null host document every key is dropped and the requirement becomes {}.
+                var reference = new OpenApiSecuritySchemeReference(schemeName, document, null);
                 requirement[reference] = [];
             }
 
