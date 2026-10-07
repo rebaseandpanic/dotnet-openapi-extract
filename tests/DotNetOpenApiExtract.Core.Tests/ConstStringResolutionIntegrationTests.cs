@@ -23,6 +23,9 @@ public sealed class ConstStringResolutionIntegrationTests
 
         /// <summary>Header name on every response (global middleware header).</summary>
         ResponseHeaderName,
+
+        /// <summary>Scheme referenced by a document-level <c>security</c> requirement.</summary>
+        GlobalSecurityRequirementScheme,
     }
 
     /// <summary>
@@ -38,6 +41,9 @@ public sealed class ConstStringResolutionIntegrationTests
             public const string JwtScheme = "JwtFromConst";
             public const string AppendedHeader = "X-Appended-From-Const";
             public const string IndexedHeader = "X-Indexed-From-Const";
+            public const string RequirementScheme = "RequirementFromConst";
+            public const string LambdaRequirementScheme = "LambdaRequirementFromConst";
+            public const string LegacyRequirementScheme = "LegacyRequirementFromConst";
         }
         """;
 
@@ -95,6 +101,64 @@ public sealed class ConstStringResolutionIntegrationTests
             SpecLocation.ResponseHeaderName,
             "X-Indexed-From-Const"
         },
+        {
+            // Microsoft.OpenApi 2.x+: scheme reference constructor argument.
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    { new OpenApiSecuritySchemeReference(Consts.RequirementScheme), [] }
+                });
+            });
+            builder.Build().Run();
+            """,
+            SpecLocation.GlobalSecurityRequirementScheme,
+            "RequirementFromConst"
+        },
+        {
+            // Swashbuckle 10 lambda-factory form: the host document is the second argument.
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityRequirement(doc => new OpenApiSecurityRequirement
+                {
+                    [new OpenApiSecuritySchemeReference(Consts.LambdaRequirementScheme, doc)] = []
+                });
+            });
+            builder.Build().Run();
+            """,
+            SpecLocation.GlobalSecurityRequirementScheme,
+            "LambdaRequirementFromConst"
+        },
+        {
+            // Microsoft.OpenApi 1.x / classic Swashbuckle: OpenApiReference.Id.
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    {
+                        new OpenApiSecurityScheme
+                        {
+                            Reference = new OpenApiReference
+                            {
+                                Type = ReferenceType.SecurityScheme,
+                                Id = Consts.LegacyRequirementScheme,
+                            }
+                        },
+                        new List<string>()
+                    }
+                });
+            });
+            builder.Build().Run();
+            """,
+            SpecLocation.GlobalSecurityRequirementScheme,
+            "LegacyRequirementFromConst"
+        },
     };
 
     [Theory]
@@ -135,6 +199,14 @@ public sealed class ConstStringResolutionIntegrationTests
                 responses.Should().NotBeEmpty();
                 responses.Should().AllSatisfy(r =>
                     r.Headers.Should().NotBeNull().And.ContainKey(expectedName));
+                break;
+
+            case SpecLocation.GlobalSecurityRequirementScheme:
+                document.Security.Should().NotBeNullOrEmpty();
+                document.Security!
+                    .SelectMany(requirement => requirement.Keys)
+                    .Select(schemeReference => schemeReference.Reference.Id)
+                    .Should().Contain(expectedName);
                 break;
 
             default:

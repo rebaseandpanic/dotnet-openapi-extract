@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.OpenApi;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
@@ -29,9 +30,10 @@ public sealed class SecuritySchemeExtractionResult
 /// and global security requirements declared in Program.cs (or the detected entry-point).
 /// </summary>
 /// <remarks>
-/// All analysis is purely syntactic — no semantic resolution is performed. Unknown or
-/// complex patterns (e.g. variables, configuration-sourced names) are skipped with a
-/// warning to <c>stderr</c> rather than producing partial or incorrect output.
+/// Analysis is syntactic, except that scheme names given as in-project <c>const string</c>
+/// members are folded through the semantic model. Unknown or complex patterns (e.g.
+/// variables, configuration-sourced names) are skipped with a warning to <c>stderr</c>
+/// rather than producing partial or incorrect output.
 ///
 /// Limitations: only the entry-point node (and its descendants) is scanned. Security
 /// registrations inside a separate <c>Startup.ConfigureServices</c> method that is not
@@ -118,7 +120,8 @@ public static class SecuritySchemeExtractor
         // ── 3. AddSecurityRequirement registrations ───────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddSecurityRequirement"))
         {
-            var names = TryExtractRequirementSchemeNames(invocation);
+            var names = TryExtractRequirementSchemeNames(
+                invocation, context.CompilationResult?.Compilation);
             globalRequirements.AddRange(names);
         }
 
@@ -272,10 +275,17 @@ public static class SecuritySchemeExtractor
     /// Attempts to extract scheme names from an <c>AddSecurityRequirement(...)</c> invocation.
     /// Returns an empty list when the pattern is too complex to parse reliably.
     /// </summary>
+    /// <param name="invocation">The <c>AddSecurityRequirement</c> call.</param>
+    /// <param name="compilation">
+    /// Optional compilation used to resolve scheme names given as in-project
+    /// <c>const string</c> members. Pass <see langword="null"/> to accept literals only.
+    /// </param>
     private static IReadOnlyList<string> TryExtractRequirementSchemeNames(
-        InvocationExpressionSyntax invocation)
+        InvocationExpressionSyntax invocation,
+        CSharpCompilation? compilation)
     {
-        // We look for string literals used as keys inside the object initializer.
+        // We look for scheme names (string literals or in-project string constants)
+        // used as keys inside the object initializer.
         // Two patterns are supported (additive):
         //
         // Pattern A — OpenApiSecuritySchemeReference constructor arg (Microsoft.OpenApi 2.x):
@@ -300,7 +310,7 @@ public static class SecuritySchemeExtractor
                 names.Add(name);
         }
 
-        // ── Pattern A: string literal ctor arg on SecuritySchemeReference / SecurityRequirement ──
+        // ── Pattern A: scheme-name ctor arg on SecuritySchemeReference / SecurityRequirement ──
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
             .OfType<ObjectCreationExpressionSyntax>())
         {
@@ -309,21 +319,37 @@ public static class SecuritySchemeExtractor
                 && !typeName.Contains("SecurityRequirement", StringComparison.Ordinal))
                 continue;
 
-            if (objCreation.ArgumentList != null)
+            if (objCreation.ArgumentList == null)
+                continue;
+
+            foreach (var arg in objCreation.ArgumentList.Arguments)
             {
-                foreach (var arg in objCreation.ArgumentList.Arguments)
+                if (arg.Expression is LiteralExpressionSyntax lit &&
+                    lit.Token.Value is string schemeId)
                 {
-                    if (arg.Expression is LiteralExpressionSyntax lit &&
-                        lit.Token.Value is string schemeId)
-                    {
-                        AddName(schemeId);
-                    }
+                    AddName(schemeId);
                 }
             }
+
+            // The scheme name of OpenApiSecuritySchemeReference(referenceId, hostDocument?, ...)
+            // may also be an in-project const (Consts.SchemeName). Literals were taken above;
+            // anything else is resolved through the semantic model or reported as skipped.
+            if (!typeName.Contains("SecuritySchemeReference", StringComparison.Ordinal))
+                continue;
+
+            var referenceIdArg = GetReferenceIdArgument(objCreation.ArgumentList);
+            if (referenceIdArg == null || referenceIdArg is LiteralExpressionSyntax)
+                continue;
+
+            var resolvedName = InvocationMatcher.GetStringValue(referenceIdArg, compilation);
+            if (resolvedName == null)
+                WarnNonLiteralRequirementSchemeName();
+            else
+                AddName(resolvedName);
         }
 
-        // ── Pattern B: Id = "<literal>" inside an object initializer that also signals a
-        //    security-scheme reference — either via Type = ReferenceType.SecurityScheme or
+        // ── Pattern B: Id = "<literal>" or Id = <const> inside an object initializer that
+        //    also signals a security-scheme reference — either via Type = ReferenceType.SecurityScheme or
         //    because the containing ObjectCreation type text contains "OpenApiReference". ──
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
             .OfType<ObjectCreationExpressionSyntax>())
@@ -336,22 +362,12 @@ public static class SecuritySchemeExtractor
                 .OfType<AssignmentExpressionSyntax>()
                 .ToList();
 
-            // Find Id = "<literal>" assignment.
-            string? idValue = null;
-            foreach (var assign in assignments)
-            {
-                if (assign.Left is IdentifierNameSyntax lhs &&
-                    lhs.Identifier.Text == "Id" &&
-                    assign.Right is LiteralExpressionSyntax rhs &&
-                    rhs.Token.Value is string s &&
-                    !string.IsNullOrWhiteSpace(s))
-                {
-                    idValue = s;
-                    break;
-                }
-            }
+            // Find the Id = <expr> assignment (C# forbids initializing a member twice).
+            var idExpression = assignments
+                .FirstOrDefault(a => a.Left is IdentifierNameSyntax lhs && lhs.Identifier.Text == "Id")
+                ?.Right;
 
-            if (idValue == null)
+            if (idExpression == null)
                 continue;
 
             // Gate: BOTH conditions must hold —
@@ -366,10 +382,38 @@ public static class SecuritySchemeExtractor
                 a.Left is IdentifierNameSyntax l && l.Identifier.Text == "Type" &&
                 a.Right.ToString().EndsWith(".SecurityScheme", StringComparison.Ordinal));
 
-            if (isReferenceType && hasSecuritySchemeType)
+            if (!isReferenceType || !hasSecuritySchemeType)
+                continue;
+
+            // Id is a literal or an in-project const (Consts.SchemeName); anything else
+            // cannot be resolved statically and is reported as skipped.
+            var idValue = InvocationMatcher.GetStringValue(idExpression, compilation);
+            if (idValue == null)
+                WarnNonLiteralRequirementSchemeName();
+            else
                 AddName(idValue);
         }
 
         return names;
     }
+
+    /// <summary>
+    /// Returns the <c>referenceId</c> argument of an <c>OpenApiSecuritySchemeReference</c>
+    /// constructor call: the named <c>referenceId:</c> argument, otherwise the first
+    /// positional argument. Returns <see langword="null"/> when there is none.
+    /// </summary>
+    private static ExpressionSyntax? GetReferenceIdArgument(ArgumentListSyntax argumentList)
+    {
+        var named = argumentList.Arguments.FirstOrDefault(a =>
+            a.NameColon?.Name.Identifier.Text == "referenceId");
+        if (named != null)
+            return named.Expression;
+
+        var first = argumentList.Arguments.FirstOrDefault();
+        return first != null && first.NameColon == null ? first.Expression : null;
+    }
+
+    private static void WarnNonLiteralRequirementSchemeName()
+        => Console.Error.WriteLine(
+            "Warning: AddSecurityRequirement call with non-literal scheme name — skipped.");
 }
