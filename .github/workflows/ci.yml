@@ -25,4 +25,11 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
+        run: dotnet test --solution DotNetOpenApiExtract.slnx --no-build --configuration Release --verbosity normal --results-directory TestResults -- --report-xunit-trx --report-xunit-trx-filename tests.trx
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/

@@ -30,7 +30,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.VERSION }}
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
+        run: dotnet test --solution DotNetOpenApiExtract.slnx --no-build --configuration Release --verbosity normal --results-directory TestResults -- --report-xunit-trx --report-xunit-trx-filename tests.trx
 
       - name: Pack CLI tool
         run: dotnet pack src/DotNetOpenApiExtract.Cli/DotNetOpenApiExtract.Cli.csproj --no-build --configuration Release -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
