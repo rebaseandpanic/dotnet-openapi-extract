@@ -4,8 +4,10 @@ All notable changes to this project.
 
 ## [0.16.0] - 2026-10-07
 
-- [SECURITY] `Microsoft.OpenApi` and `Microsoft.OpenApi.YamlReader` bumped 3.5.0 → 3.10.2. Fixes [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) (CVE-2026-49451, high): a crafted document with circular schema references caused uncontrolled recursion and terminated the process. Affected the `validate` command, which parses user-supplied spec files in-process. 3.10.x also bounds YAML anchor/alias expansion and hardens YAML parsing.
-- [BEHAVIOR] OpenAPI 3.0 output (the default `--openapi-version`) changes for nullable properties typed as another component schema. The upstream serializer (Microsoft.OpenApi 3.9.0, "handle nullability more accurately during serialization for 3.0") now emits the null branch inside the composite instead of a sibling `nullable` flag:
+- [SECURITY] `Microsoft.OpenApi` and `Microsoft.OpenApi.YamlReader` bumped 3.5.0 → 3.10.2. Fixes two high-severity denial-of-service advisories, both reachable through the `validate` command, which parses user-supplied spec files in-process:
+  - [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) (CVE-2026-49451): a document with circular schema references caused uncontrolled recursion and terminated the process. Fixed in `Microsoft.OpenApi` 3.5.4.
+  - [GHSA-7pxr-59rr-hqj2](https://github.com/microsoft/OpenAPI.NET/security/advisories/GHSA-7pxr-59rr-hqj2) (CVE-2026-72923): a small YAML document with nested anchors and aliases caused unbounded expansion and out-of-memory termination. Fixed in `Microsoft.OpenApi.YamlReader` 3.10.0.
+- [BEHAVIOR] OpenAPI 3.0 output (the default `--openapi-version`) changes for nullable properties typed as another component schema. The upstream serializer now emits the null branch inside the composite instead of a sibling `nullable` flag (Microsoft.OpenApi 3.9.0 moved the null branch into the composite, "handle nullability more accurately during serialization for 3.0"; 3.10.0 added `nullable: true` on that branch, "better nullability round-tripping"):
   - before: `{"anyOf": [{"$ref": "#/components/schemas/UserDto"}], "nullable": true}`
   - after: `{"anyOf": [{"$ref": "#/components/schemas/UserDto"}, {"enum": [null], "nullable": true}]}`
 
