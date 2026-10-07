@@ -185,11 +185,11 @@ approach which executes the assembly partially instead of analyzing it staticall
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `Microsoft.OpenApi` | 3.5.0 | OpenAPI document model, JSON/YAML serialization, validation |
-| `Microsoft.OpenApi.YamlReader` | 3.5.0 | YAML output support |
-| `System.Reflection.MetadataLoadContext` | 10.0.5 | Load DLLs without executing code, read attributes and types |
-| `Microsoft.CodeAnalysis.CSharp` | 4.11.0 | Roslyn parsing of `Program.cs` for runtime-configuration extraction |
-| `System.CommandLine` | 2.0.5 | CLI argument parsing |
+| `Microsoft.OpenApi` | 3.10.2 | OpenAPI document model, JSON/YAML serialization, validation |
+| `Microsoft.OpenApi.YamlReader` | 3.10.2 | YAML output support |
+| `System.Reflection.MetadataLoadContext` | 10.0.12 | Load DLLs without executing code, read attributes and types |
+| `Microsoft.CodeAnalysis.CSharp` | 5.9.0 | Roslyn parsing of `Program.cs` for runtime-configuration extraction (`LanguageVersion.Latest`, i.e. C# 14) |
+| `System.CommandLine` | 2.0.12 | CLI argument parsing |
 
 Does **not** depend on: ASP.NET Core, Swashbuckle, Entity Framework, or any infrastructure packages.
 
