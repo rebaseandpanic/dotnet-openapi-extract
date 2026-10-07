@@ -13,6 +13,7 @@ All notable changes to this project.
 
   OpenAPI 3.1 and 3.2 output is unchanged. If you generate client SDKs from 3.0 specs, regenerate and review nullable reference properties.
 - [DEPS] `System.CommandLine` 2.0.5 → 2.0.12, `System.Reflection.MetadataLoadContext` 10.0.5 → 10.0.12.
+- [DEPS] `Microsoft.CodeAnalysis.CSharp` 4.11.0 → 5.9.0. `Program.cs` sources are still parsed with `LanguageVersion.Latest`, which now resolves to C# 14 instead of C# 12, so C# 13/14 syntax in the analyzed project (extension blocks, null-conditional assignment, `nameof` of unbound generics) no longer produces parse errors. No change in generated specs or validation reports was found on the bundled test assemblies.
 
 ## [0.15.0] - 2026-05-12
 
