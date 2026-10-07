@@ -24,7 +24,7 @@ public class SecuritySchemeExtractorTests
         var result = SecuritySchemeExtractor.Extract(SourceAnalysisContext.Empty);
 
         result.Schemes.Should().BeEmpty();
-        result.GlobalRequirementSchemeNames.Should().BeEmpty();
+        result.GlobalRequirements.SelectMany(names => names).Should().BeEmpty();
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().ContainSingle()
+        result.GlobalRequirements.SelectMany(names => names).Should().ContainSingle()
             .Which.Should().Be("Bearer",
                 because: "the string literal in OpenApiSecuritySchemeReference ctor is the scheme id");
     }
@@ -217,7 +217,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().BeEmpty(
+        result.GlobalRequirements.SelectMany(names => names).Should().BeEmpty(
             because: "a non-literal scheme name in the reference ctor cannot be resolved statically");
     }
 
@@ -294,7 +294,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().ContainSingle()
+        result.GlobalRequirements.SelectMany(names => names).Should().ContainSingle()
             .Which.Should().Be("ApiKey",
                 because: "the string literal 'ApiKey' in the lambda-factory OpenApiSecuritySchemeReference ctor must be extracted");
     }
@@ -316,10 +316,10 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().HaveCount(2,
+        result.GlobalRequirements.SelectMany(names => names).Should().HaveCount(2,
             because: "both scheme references in the lambda-factory initializer must be extracted");
-        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey");
-        result.GlobalRequirementSchemeNames.Should().Contain("ClientId");
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ApiKey");
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ClientId");
     }
 
     /// <summary>
@@ -346,10 +346,10 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().HaveCount(2,
+        result.GlobalRequirements.SelectMany(names => names).Should().HaveCount(2,
             because: "FQN type names must be matched via Contains('SecuritySchemeReference') substring check");
-        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey");
-        result.GlobalRequirementSchemeNames.Should().Contain("ClientId");
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ApiKey");
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ClientId");
     }
 
     /// <summary>
@@ -371,7 +371,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().ContainSingle()
+        result.GlobalRequirements.SelectMany(names => names).Should().ContainSingle()
             .Which.Should().Be("Bearer",
                 because: "block-body lambda must be walked into and the scheme name extracted");
     }
@@ -392,7 +392,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().ContainSingle()
+        result.GlobalRequirements.SelectMany(names => names).Should().ContainSingle()
             .Which.Should().Be("Bearer",
                 because: "the original direct object-creation pattern must continue to work");
     }
@@ -425,7 +425,7 @@ public class SecuritySchemeExtractorTests
 
         result.Schemes.Should().ContainKey("Bearer",
             because: "AddSecurityDefinition inside AddSwaggerGen lambda must be found via DescendantNodes()");
-        result.GlobalRequirementSchemeNames.Should().ContainSingle()
+        result.GlobalRequirements.SelectMany(names => names).Should().ContainSingle()
             .Which.Should().Be("Bearer",
                 because: "AddSecurityRequirement inside AddSwaggerGen lambda must be found via DescendantNodes()");
     }
@@ -529,7 +529,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey",
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ApiKey",
             because: "Id = \"ApiKey\" inside OpenApiReference with Type = ReferenceType.SecurityScheme must be extracted");
     }
 
@@ -560,7 +560,7 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().Contain("Bearer",
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("Bearer",
             because: "FQN OpenApiReference with Id = \"Bearer\" and Type = ReferenceType.SecurityScheme must be extracted");
     }
 
@@ -593,9 +593,9 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().Contain("ApiKey",
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ApiKey",
             because: "first entry with Id = \"ApiKey\" must be extracted");
-        result.GlobalRequirementSchemeNames.Should().Contain("Bearer",
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("Bearer",
             because: "second entry with Id = \"Bearer\" must be extracted");
     }
 
@@ -616,8 +616,29 @@ public class SecuritySchemeExtractorTests
         var context = BuildContext(source);
         var result = SecuritySchemeExtractor.Extract(context);
 
-        result.GlobalRequirementSchemeNames.Should().Contain("ExistingScheme",
+        result.GlobalRequirements.SelectMany(names => names).Should().Contain("ExistingScheme",
             because: "the pre-existing OpenApiSecuritySchemeReference(\"Name\") pattern must continue to work");
+    }
+
+    /// <summary>
+    /// Only the <c>referenceId</c> argument of <c>OpenApiSecuritySchemeReference</c> is a
+    /// scheme name; a string <c>externalResource</c> (third argument) is a document URI and
+    /// must not become a requirement name.
+    /// </summary>
+    [Fact]
+    public void Extract_AddSecurityRequirement_ExternalResourceArgument_NotTakenAsSchemeName()
+    {
+        var source = """
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                { new OpenApiSecuritySchemeReference("ApiKey", null, "https://example.com/shared.json"), [] }
+            });
+            """;
+
+        var result = SecuritySchemeExtractor.Extract(BuildContext(source));
+
+        result.GlobalRequirements.Should().ContainSingle()
+            .Which.Should().Equal("ApiKey");
     }
 
     // ──────────────────────────────────────────────────────────────────────────

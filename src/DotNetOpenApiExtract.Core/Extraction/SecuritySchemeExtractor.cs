@@ -19,10 +19,26 @@ public sealed class SecuritySchemeExtractionResult
         = new Dictionary<string, OpenApiSecurityScheme>(StringComparer.Ordinal);
 
     /// <summary>
-    /// Scheme names that appear in global <c>AddSecurityRequirement</c> calls.
-    /// When non-empty these are used to populate <c>security</c> at the document level.
+    /// Document-level security requirements, one entry per <c>AddSecurityRequirement</c> call
+    /// that yielded at least one scheme name, in source order. Each entry holds the scheme
+    /// names of that call. Mirrors the OpenAPI <c>security</c> array: entries are
+    /// alternatives (any one satisfies the requirement, OR); the names inside one entry must
+    /// all be satisfied together (AND).
     /// </summary>
-    public IReadOnlyList<string> GlobalRequirementSchemeNames { get; init; } = [];
+    public IReadOnlyList<IReadOnlyList<string>> GlobalRequirements { get; init; } = [];
+
+    /// <summary>
+    /// [DEPRECATED] All scheme names from <see cref="GlobalRequirements"/>, flattened in
+    /// order. The flattening loses which names are alternatives and which must be combined.
+    /// Setting it replaces <see cref="GlobalRequirements"/> with a single requirement that
+    /// combines all given names (the former interpretation).
+    /// </summary>
+    [Obsolete("Flattens the requirements and loses their OR/AND grouping. Use GlobalRequirements instead.")]
+    public IReadOnlyList<string> GlobalRequirementSchemeNames
+    {
+        get => GlobalRequirements.SelectMany(names => names).ToList();
+        init => GlobalRequirements = value.Count > 0 ? [value] : [];
+    }
 }
 
 /// <summary>
@@ -61,7 +77,7 @@ public static class SecuritySchemeExtractor
             return new SecuritySchemeExtractionResult();
 
         var schemes = new Dictionary<string, OpenApiSecurityScheme>(StringComparer.Ordinal);
-        var globalRequirements = new List<string>();
+        var globalRequirements = new List<IReadOnlyList<string>>();
 
         // ── 1. AddJwtBearer registrations ─────────────────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddJwtBearer"))
@@ -120,15 +136,18 @@ public static class SecuritySchemeExtractor
         // ── 3. AddSecurityRequirement registrations ───────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddSecurityRequirement"))
         {
+            // One call = one Security Requirement Object: its names are combined (AND),
+            // separate calls are alternatives (OR).
             var names = TryExtractRequirementSchemeNames(
                 invocation, context.CompilationResult?.Compilation);
-            globalRequirements.AddRange(names);
+            if (names.Count > 0)
+                globalRequirements.Add(names);
         }
 
         return new SecuritySchemeExtractionResult
         {
             Schemes = schemes,
-            GlobalRequirementSchemeNames = globalRequirements,
+            GlobalRequirements = globalRequirements,
         };
     }
 
@@ -310,35 +329,20 @@ public static class SecuritySchemeExtractor
                 names.Add(name);
         }
 
-        // ── Pattern A: scheme-name ctor arg on SecuritySchemeReference / SecurityRequirement ──
+        // ── Pattern A: referenceId argument of new OpenApiSecuritySchemeReference(...) ──
+        // Only referenceId names a scheme; hostDocument and externalResource (a document
+        // URI) are not scheme names. The argument may be a literal or an in-project const
+        // (Consts.SchemeName); anything else is reported as skipped.
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
             .OfType<ObjectCreationExpressionSyntax>())
         {
             var typeName = GetUnqualifiedTypeName(objCreation.Type);
             if (!typeName.Contains("SecuritySchemeReference", StringComparison.Ordinal)
-                && !typeName.Contains("SecurityRequirement", StringComparison.Ordinal))
-                continue;
-
-            if (objCreation.ArgumentList == null)
-                continue;
-
-            foreach (var arg in objCreation.ArgumentList.Arguments)
-            {
-                if (arg.Expression is LiteralExpressionSyntax lit &&
-                    lit.Token.Value is string schemeId)
-                {
-                    AddName(schemeId);
-                }
-            }
-
-            // The scheme name of OpenApiSecuritySchemeReference(referenceId, hostDocument?, ...)
-            // may also be an in-project const (Consts.SchemeName). Literals were taken above;
-            // anything else is resolved through the semantic model or reported as skipped.
-            if (!typeName.Contains("SecuritySchemeReference", StringComparison.Ordinal))
+                || objCreation.ArgumentList == null)
                 continue;
 
             var referenceIdArg = GetReferenceIdArgument(objCreation.ArgumentList);
-            if (referenceIdArg == null || referenceIdArg is LiteralExpressionSyntax)
+            if (referenceIdArg == null)
                 continue;
 
             var resolvedName = InvocationMatcher.GetStringValue(referenceIdArg, compilation);

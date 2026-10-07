@@ -1154,10 +1154,12 @@ public sealed class OpenApiDocumentBuilder
                 document.Components.SecuritySchemes.TryAdd(name, scheme);
         }
 
-        if (securityResult.GlobalRequirementSchemeNames.Count > 0)
+        // One Security Requirement Object per AddSecurityRequirement call: names within it
+        // are combined (AND), separate objects in the array are alternatives (OR).
+        foreach (var schemeNames in securityResult.GlobalRequirements)
         {
             var requirement = new OpenApiSecurityRequirement();
-            foreach (var schemeName in securityResult.GlobalRequirementSchemeNames)
+            foreach (var schemeName in schemeNames)
             {
                 // The host document is required for serialization: Microsoft.OpenApi writes a
                 // requirement key only if its reference resolves against the host document's

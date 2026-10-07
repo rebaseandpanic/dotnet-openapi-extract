@@ -131,6 +131,7 @@ public class SecurityIntegrationTests
     [Theory]
     [InlineData(OpenApiSpecVersion.OpenApi3_0)]
     [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
     public async Task Serialize_OperationRequirementOnUndeclaredScheme_NoGlobal_SecurityKeyAbsent(
         OpenApiSpecVersion version)
     {
@@ -154,6 +155,7 @@ public class SecurityIntegrationTests
     [Theory]
     [InlineData(OpenApiSpecVersion.OpenApi3_0)]
     [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
     public async Task Serialize_OperationRequirementOnUndeclaredScheme_InheritsGlobalRequirement(
         OpenApiSpecVersion version)
     {
@@ -191,6 +193,7 @@ public class SecurityIntegrationTests
     [Theory]
     [InlineData(OpenApiSpecVersion.OpenApi3_0)]
     [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
     public async Task Serialize_MixedRequirement_OnlyDeclaredSchemeWritten(OpenApiSpecVersion version)
     {
         var root = await BuildAndSerializeAsync(
@@ -217,6 +220,92 @@ public class SecurityIntegrationTests
         root["security"].Should().NotBeNull();
         root["security"]!.ToJsonString().Should().Be("""[{"ApiKey":[]}]""");
     }
+
+    /// <summary>
+    /// GET /api/secure/public carries <c>[AllowAnonymous]</c>. With a document-level
+    /// requirement in place it must be written with an explicit <c>security: []</c> — the
+    /// OpenAPI way to remove the top-level requirement for one operation. A missing key
+    /// would make it inherit the requirement, so the two are told apart.
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
+    public async Task Serialize_AllowAnonymousWithGlobalRequirement_EmptySecurityArrayWritten(
+        OpenApiSpecVersion version)
+    {
+        var root = await BuildAndSerializeAsync(ApiKeyDefinitionAnd(
+            """
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                { new OpenApiSecuritySchemeReference("ApiKey"), [] }
+            });
+            """), version);
+
+        root["security"].Should().NotBeNull();
+        var operation = root["paths"]?["/api/secure/public"]?["get"]?.AsObject();
+        operation.Should().NotBeNull();
+        operation!.ContainsKey("security").Should().BeTrue();
+        operation["security"]!.ToJsonString().Should().Be("[]");
+    }
+
+    /// <summary>
+    /// Keys inside one Security Requirement Object are AND; separate array entries are OR.
+    /// Each <c>AddSecurityRequirement</c> call is its own alternative (OR); several names in
+    /// one call must all be satisfied together (AND).
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0, true)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1, true)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2, true)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0, false)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1, false)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2, false)]
+    public async Task Serialize_GlobalRequirements_EachCallIsAlternativeNamesInCallAreCombined(
+        OpenApiSpecVersion version, bool separateCalls)
+    {
+        var requirements = separateCalls
+            ? """
+              c.AddSecurityRequirement(new OpenApiSecurityRequirement
+              {
+                  { new OpenApiSecuritySchemeReference("ApiKey"), [] }
+              });
+              c.AddSecurityRequirement(new OpenApiSecurityRequirement
+              {
+                  { new OpenApiSecuritySchemeReference("Bearer"), [] }
+              });
+              """
+            : """
+              c.AddSecurityRequirement(new OpenApiSecurityRequirement
+              {
+                  { new OpenApiSecuritySchemeReference("ApiKey"), [] },
+                  { new OpenApiSecuritySchemeReference("Bearer"), [] }
+              });
+              """;
+        var expected = separateCalls
+            ? """[{"ApiKey":[]},{"Bearer":[]}]"""
+            : """[{"ApiKey":[],"Bearer":[]}]""";
+
+        var root = await BuildAndSerializeAsync(ApiKeyDefinitionAnd(requirements), version);
+
+        root["security"].Should().NotBeNull();
+        System.Text.Json.Nodes.JsonNode.DeepEquals(
+                root["security"], System.Text.Json.Nodes.JsonNode.Parse(expected))
+            .Should().BeTrue($"security must be {expected}, was {root["security"]!.ToJsonString()}");
+    }
+
+    /// <summary>
+    /// Program.cs declaring <c>ApiKey</c> (AddSecurityDefinition) and <c>Bearer</c>
+    /// (AddJwtBearer), followed by <paramref name="swaggerGenStatements"/> inside
+    /// <c>AddSwaggerGen(c =&gt; { ... })</c>.
+    /// </summary>
+    private static string ApiKeyDefinitionAnd(string swaggerGenStatements) =>
+        "var builder = WebApplication.CreateBuilder(args);\n" +
+        "builder.Services.AddAuthentication().AddJwtBearer(o => { });\n" +
+        "builder.Services.AddSwaggerGen(c =>\n{\n" +
+        "    c.AddSecurityDefinition(\"ApiKey\", new OpenApiSecurityScheme\n" +
+        "    {\n        Type = SecuritySchemeType.ApiKey,\n        In = ParameterLocation.Header,\n        Name = \"X-Api-Key\"\n    });\n" +
+        swaggerGenStatements + "\n});\nbuilder.Build().Run();\n";
 
     // ──────────────────────────────────────────────────────────────────────────
     // 17. Lambda-factory AddSecurityRequirement → document.Security populated

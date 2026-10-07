@@ -183,7 +183,7 @@ public sealed class ConstStringResolutionIntegrationTests
 
     [Theory]
     [MemberData(nameof(Registrations))]
-    public void Build_ConstStringArgumentInProgramCs_ResolvedToLiteralValueInSpec(
+    public async Task Build_ConstStringArgumentInProgramCs_ResolvedToLiteralValueInSpec(
         string programSource, SpecLocation location, string expectedName)
     {
         using var tempDir = new TempDirectory();
@@ -222,11 +222,12 @@ public sealed class ConstStringResolutionIntegrationTests
                 break;
 
             case SpecLocation.GlobalSecurityRequirementScheme:
-                document.Security.Should().NotBeNullOrEmpty();
-                document.Security!
-                    .SelectMany(requirement => requirement.Keys)
-                    .Select(schemeReference => schemeReference.Reference.Id)
-                    .Should().Contain(expectedName);
+                // Checked on the written spec: the requirement must survive serialization.
+                var json = await document.SerializeAsJsonAsync(
+                    OpenApiSpecVersion.OpenApi3_0, TestContext.Current.CancellationToken);
+                var security = System.Text.Json.Nodes.JsonNode.Parse(json)!["security"];
+                security.Should().NotBeNull();
+                security!.ToJsonString().Should().Be($$"""[{"{{expectedName}}":[]}]""");
                 break;
 
             default:
