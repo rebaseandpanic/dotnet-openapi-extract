@@ -600,6 +600,7 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Step 7: Security schemes ─────────────────────────────────────────
         ApplySecuritySchemes(document, securityResult);
+        OmitUndeclaredSecuritySchemes(document);
 
         // ── Step 8: ProblemDetails ──────────────────────────────────────────
         if (ProblemDetailsDetector.IsRegistered(sourceContext))
@@ -1169,6 +1170,76 @@ public sealed class OpenApiDocumentBuilder
             document.Security ??= new List<OpenApiSecurityRequirement>();
             document.Security.Add(requirement);
         }
+    }
+
+    /// <summary>
+    /// Removes scheme names that are not declared in <c>components/securitySchemes</c> from
+    /// the document-level and per-operation security requirements, with a warning per name.
+    /// </summary>
+    /// <remarks>
+    /// OpenAPI requires every requirement name to correspond to a declared scheme, and the
+    /// serializer drops undeclared names anyway — leaving <c>{}</c>, which (like <c>[]</c>)
+    /// asserts anonymous access. A requirement left without names is removed; a
+    /// <c>security</c> list left without requirements is unset, so an operation inherits the
+    /// document-level requirement and the document claims no requirement at all. An explicit
+    /// <c>security: []</c> from <c>[AllowAnonymous]</c> holds no requirements and is untouched.
+    /// Must run after <see cref="ApplySecuritySchemes"/>, path exclusion and path base, so that
+    /// declared schemes are final and warnings name the paths written to the spec.
+    /// </remarks>
+    private static void OmitUndeclaredSecuritySchemes(OpenApiDocument document)
+    {
+        var declared = document.Components?.SecuritySchemes;
+
+        document.Security = OmitUndeclared(document.Security, declared, "document-level");
+
+        foreach (var (path, pathItemInterface) in document.Paths)
+        {
+            if (pathItemInterface is not OpenApiPathItem { Operations: not null } pathItem)
+                continue;
+
+            foreach (var (method, operation) in pathItem.Operations)
+            {
+                operation.Security = OmitUndeclared(
+                    operation.Security, declared, $"{method.Method.ToUpperInvariant()} {path}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns <paramref name="requirements"/> without the scheme names missing from
+    /// <paramref name="declared"/>, or <see langword="null"/> when no requirement is left.
+    /// An empty or <see langword="null"/> input is returned unchanged.
+    /// </summary>
+    private static IList<OpenApiSecurityRequirement>? OmitUndeclared(
+        IList<OpenApiSecurityRequirement>? requirements,
+        IDictionary<string, IOpenApiSecurityScheme>? declared,
+        string location)
+    {
+        if (requirements is not { Count: > 0 })
+            return requirements;
+
+        var kept = new List<OpenApiSecurityRequirement>();
+        foreach (var requirement in requirements)
+        {
+            var undeclared = requirement.Keys
+                .Where(reference => declared == null
+                                    || reference.Reference.Id == null
+                                    || !declared.ContainsKey(reference.Reference.Id))
+                .ToList();
+
+            foreach (var reference in undeclared)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: security requirement references undeclared scheme '{reference.Reference.Id}' " +
+                    $"({location}) — omitted; declare it with AddSecurityDefinition.");
+                requirement.Remove(reference);
+            }
+
+            if (requirement.Count > 0)
+                kept.Add(requirement);
+        }
+
+        return kept.Count > 0 ? kept : null;
     }
 
     /// <summary>

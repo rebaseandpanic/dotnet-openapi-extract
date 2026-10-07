@@ -118,35 +118,104 @@ public class SecurityIntegrationTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 16. [Authorize(AuthenticationSchemes = "Bearer")] → operation security set
+    // 16. Requirement on a scheme that is not declared in components/securitySchemes
     // ──────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Build_AuthorizeWithSchemes_OperationHasSchemeRequirement()
+    /// <summary>
+    /// GET /api/secure/admin carries <c>[Authorize(AuthenticationSchemes = "Bearer")]</c>
+    /// but no "Bearer" scheme is declared. OpenAPI requires every requirement name to be a
+    /// declared scheme, and <c>security: [{}]</c> / <c>security: []</c> would both assert
+    /// anonymous access — so the operation must carry no <c>security</c> key at all and
+    /// fall back to the document-level requirement (here: none).
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    public async Task Serialize_OperationRequirementOnUndeclaredScheme_NoGlobal_SecurityKeyAbsent(
+        OpenApiSpecVersion version)
     {
-        var options = new OpenApiDocumentOptions
-        {
-            AssemblyPath = TestPaths.SampleApiDll,
-            XmlPath      = TestPaths.SampleApiXml,
-        };
+        var root = await BuildAndSerializeAsync(
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Build().Run();
+            """,
+            version);
 
-        var document = OpenApiDocumentBuilder.Build(options);
-
-        // GET /api/secure/admin has [Authorize(Policy = "Admin", AuthenticationSchemes = "Bearer")]
-        document.Paths.Should().ContainKey("/api/secure/admin");
-        var pathItem = document.Paths!["/api/secure/admin"] as Microsoft.OpenApi.OpenApiPathItem;
-        pathItem.Should().NotBeNull();
-
-        var operation = pathItem!.Operations?[HttpMethod.Get];
+        var operation = root["paths"]?["/api/secure/admin"]?["get"]?.AsObject();
         operation.Should().NotBeNull();
+        operation!.ContainsKey("security").Should().BeFalse();
+        root.AsObject().ContainsKey("security").Should().BeFalse();
+    }
 
-        operation!.Security.Should().NotBeNull()
-            .And.NotBeEmpty(because: "action has [Authorize(AuthenticationSchemes = \"Bearer\")]");
+    /// <summary>
+    /// Same undeclared "Bearer" operation requirement, with a declared document-level
+    /// requirement: the operation must not override it, so it inherits <c>ApiKey</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    public async Task Serialize_OperationRequirementOnUndeclaredScheme_InheritsGlobalRequirement(
+        OpenApiSpecVersion version)
+    {
+        var root = await BuildAndSerializeAsync(
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key"
+                });
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    { new OpenApiSecuritySchemeReference("ApiKey"), [] }
+                });
+            });
+            builder.Build().Run();
+            """,
+            version);
 
-        var requirement = operation.Security![0];
-        var schemeKey = requirement.Keys.FirstOrDefault();
-        schemeKey.Should().NotBeNull();
-        schemeKey!.Reference?.Id.Should().Be("Bearer");
+        var operation = root["paths"]?["/api/secure/admin"]?["get"]?.AsObject();
+        operation.Should().NotBeNull();
+        operation!.ContainsKey("security").Should().BeFalse();
+        root["security"].Should().NotBeNull();
+        root["security"]!.ToJsonString().Should().Be("""[{"ApiKey":[]}]""");
+    }
+
+    /// <summary>
+    /// A requirement that names one declared and one undeclared scheme keeps the declared
+    /// one only (an undeclared name cannot be written into a valid spec).
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    public async Task Serialize_MixedRequirement_OnlyDeclaredSchemeWritten(OpenApiSpecVersion version)
+    {
+        var root = await BuildAndSerializeAsync(
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key"
+                });
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    { new OpenApiSecuritySchemeReference("ApiKey"), [] },
+                    { new OpenApiSecuritySchemeReference("Undeclared"), [] }
+                });
+            });
+            builder.Build().Run();
+            """,
+            version);
+
+        root["security"].Should().NotBeNull();
+        root["security"]!.ToJsonString().Should().Be("""[{"ApiKey":[]}]""");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -284,5 +353,29 @@ public class SecurityIntegrationTests
         var security = owner!["security"];
         security.Should().NotBeNull();
         security!.ToJsonString().Should().Be($$"""[{"{{expectedScheme}}":[]}]""");
+    }
+
+    /// <summary>
+    /// Builds SampleApi with <paramref name="programSource"/> as the analysed Program.cs and
+    /// returns the document serialized the way the CLI writes it.
+    /// </summary>
+    private static async Task<System.Text.Json.Nodes.JsonNode> BuildAndSerializeAsync(
+        string programSource, OpenApiSpecVersion version)
+    {
+        using var tempDir = new TempDirectory();
+        File.WriteAllText(Path.Combine(tempDir.Path, "Program.cs"), programSource);
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.SampleApiDll,
+            XmlPath      = TestPaths.SampleApiXml,
+            SourceRoot   = tempDir.Path,
+        });
+
+        var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
+        return System.Text.Json.Nodes.JsonNode.Parse(json)!;
     }
 }

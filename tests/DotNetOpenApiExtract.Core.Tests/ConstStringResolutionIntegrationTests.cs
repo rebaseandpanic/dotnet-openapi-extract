@@ -101,12 +101,20 @@ public sealed class ConstStringResolutionIntegrationTests
             SpecLocation.ResponseHeaderName,
             "X-Indexed-From-Const"
         },
+        // Requirement cases declare the scheme as well: a requirement on an undeclared
+        // scheme is omitted from the spec by design, which would mask the property tested.
         {
             // Microsoft.OpenApi 2.x+: scheme reference constructor argument.
             """
             var builder = WebApplication.CreateBuilder(args);
             builder.Services.AddSwaggerGen(c =>
             {
+                c.AddSecurityDefinition(Consts.RequirementScheme, new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key",
+                });
                 c.AddSecurityRequirement(new OpenApiSecurityRequirement
                 {
                     { new OpenApiSecuritySchemeReference(Consts.RequirementScheme), [] }
@@ -123,6 +131,12 @@ public sealed class ConstStringResolutionIntegrationTests
             var builder = WebApplication.CreateBuilder(args);
             builder.Services.AddSwaggerGen(c =>
             {
+                c.AddSecurityDefinition(Consts.LambdaRequirementScheme, new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key",
+                });
                 c.AddSecurityRequirement(doc => new OpenApiSecurityRequirement
                 {
                     [new OpenApiSecuritySchemeReference(Consts.LambdaRequirementScheme, doc)] = []
@@ -139,6 +153,12 @@ public sealed class ConstStringResolutionIntegrationTests
             var builder = WebApplication.CreateBuilder(args);
             builder.Services.AddSwaggerGen(c =>
             {
+                c.AddSecurityDefinition(Consts.LegacyRequirementScheme, new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key",
+                });
                 c.AddSecurityRequirement(new OpenApiSecurityRequirement
                 {
                     {
