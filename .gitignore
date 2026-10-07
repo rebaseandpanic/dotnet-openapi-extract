@@ -15,6 +15,11 @@ nupkg/
 CLAUDE.md
 CLAUDE_DEV_GUIDELINES.md
 CLAUDE_DOTNET_GUIDELINES.md
+CLAUDE_TEST_GUIDELINES.md
+CLAUDE_GO_GUIDELINES.md
+
+# Local code review reports
+docs/coderev/
 
 # Dev container configuration
 .devcontainer/
