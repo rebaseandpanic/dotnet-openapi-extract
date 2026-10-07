@@ -8,10 +8,11 @@ namespace DotNetOpenApiExtract.Core.SourceAnalysis;
 /// found under a given source root directory.
 /// </summary>
 /// <remarks>
-/// The compilation is built without full framework references — only
-/// <c>System.Runtime</c> is added as a minimal reference so that primitive types
-/// can be resolved. This is intentional: the goal is syntax-level analysis and
-/// literal extraction, not a complete semantic build.
+/// The compilation is built without full framework references — only the core
+/// library (<c>System.Private.CoreLib</c>) and the <c>System.Runtime</c> facade are
+/// added so that primitive types resolve and in-project <c>const string</c> members
+/// can be folded by the semantic model. This is intentional: the goal is syntax-level
+/// analysis and literal / constant extraction, not a complete semantic build.
 /// </remarks>
 public static class SourceCompiler
 {
@@ -58,7 +59,7 @@ public static class SourceCompiler
             })
             .ToList();
 
-        // Minimal MetadataReference: System.Runtime for basic type resolution.
+        // Minimal MetadataReferences: core library + System.Runtime for basic type resolution.
         // We deliberately don't reference ASP.NET Core assemblies — this compilation
         // is for syntax analysis only.
         var references = BuildMinimalReferences();
@@ -102,15 +103,25 @@ public static class SourceCompiler
 
     /// <summary>
     /// Builds a minimal set of <see cref="MetadataReference"/>s needed to resolve
-    /// primitive types. Only <c>System.Runtime</c> from the current runtime is added.
+    /// primitive types: the core library of the current runtime plus the
+    /// <c>System.Runtime</c> / <c>mscorlib</c> / <c>netstandard</c> facades.
     /// </summary>
     private static IReadOnlyList<MetadataReference> BuildMinimalReferences()
     {
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var coreLibPath = typeof(object).Assembly.Location;
+        var runtimeDir = Path.GetDirectoryName(coreLibPath)!;
 
-        var references = new List<MetadataReference>();
+        var references = new List<MetadataReference>
+        {
+            // System.Private.CoreLib — the assembly that actually defines System.Object,
+            // System.String, etc. In the runtime directory System.Runtime.dll is only a
+            // facade that type-forwards these types here; without this reference the
+            // compilation has no core library, `string` does not bind, and
+            // SemanticModel.GetConstantValue cannot fold in-project `const string` members.
+            MetadataReference.CreateFromFile(coreLibPath),
+        };
 
-        // System.Runtime — provides string, int, bool, etc.
+        // System.Runtime — the facade that source-level type names resolve through.
         TryAddReference(references, runtimeDir, "System.Runtime.dll");
         // mscorlib / netstandard for older project styles
         TryAddReference(references, runtimeDir, "mscorlib.dll");
