@@ -2,6 +2,16 @@
 
 All notable changes to this project.
 
+## [0.16.0] - 2026-10-07
+
+- [SECURITY] `Microsoft.OpenApi` and `Microsoft.OpenApi.YamlReader` bumped 3.5.0 → 3.10.2. Fixes [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) (CVE-2026-49451, high): a crafted document with circular schema references caused uncontrolled recursion and terminated the process. Affected the `validate` command, which parses user-supplied spec files in-process. 3.10.x also bounds YAML anchor/alias expansion and hardens YAML parsing.
+- [BEHAVIOR] OpenAPI 3.0 output (the default `--openapi-version`) changes for nullable properties typed as another component schema. The upstream serializer (Microsoft.OpenApi 3.9.0, "handle nullability more accurately during serialization for 3.0") now emits the null branch inside the composite instead of a sibling `nullable` flag:
+  - before: `{"anyOf": [{"$ref": "#/components/schemas/UserDto"}], "nullable": true}`
+  - after: `{"anyOf": [{"$ref": "#/components/schemas/UserDto"}, {"enum": [null], "nullable": true}]}`
+
+  OpenAPI 3.1 and 3.2 output is unchanged. If you generate client SDKs from 3.0 specs, regenerate and review nullable reference properties.
+- [DEPS] `System.CommandLine` 2.0.5 → 2.0.12, `System.Reflection.MetadataLoadContext` 10.0.5 → 10.0.12.
+
 ## [0.15.0] - 2026-05-12
 
 - [FEATURE] Framework / SDK XML documentation is now auto-discovered and merged into the docs catalog — types pulled into `components/schemas` from referenced framework assemblies (most commonly `Microsoft.AspNetCore.Mvc.ProblemDetails` via `[ProducesResponseType(typeof(ProblemDetails), 422)]` or `AddProblemDetails()` injection) now carry `description` on the schema and on every property, sourced from the XML files Microsoft publishes alongside the SDK ref packs at `<dotnet_root>/packs/Microsoft.NETCore.App.Ref/<ver>/ref/net<major>.<minor>/*.xml` and `<dotnet_root>/packs/Microsoft.AspNetCore.App.Ref/<ver>/ref/net<major>.<minor>/*.xml`. Previously these schemas emitted empty descriptions, which (under `--validate`) made the `schema.description` and `schema.property-description` rules fire as errors for every framework type — unfixable without skipping the rules globally and losing protection on user-owned DTOs. The new `AssemblyLoader.GetXmlDocumentationFiles()` collects every `*.xml` that has a sibling `*.dll` across the resolver search paths (app output, runtime, ASP.NET Core shared framework) **and** the parallel ref-pack directories derived from `RuntimeEnvironment.GetRuntimeDirectory()`. Discovery is generic — it does not hardcode type names or descriptions; any framework or NuGet-shipped assembly whose XML lives next to its DLL is picked up.
