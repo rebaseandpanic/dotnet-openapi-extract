@@ -219,7 +219,7 @@ public sealed class SchemaGenerator
     {
         // --- 1. byte[] → base64 binary string (before the array check below) ---
         if (type.IsArray && type.GetElementType()?.FullName == "System.Byte")
-            return new OpenApiSchema { Type = JsonSchemaType.String, Format = "byte" };
+            return VersionedSchemaForms.Base64(_options.OpenApiVersion);
 
         // --- 1b. File content (FileResult, IFileHttpResult, Stream, IFormFile) → binary string ---
         // Raw bytes on the wire, never a JSON object: no component for the framework type.
@@ -731,6 +731,12 @@ public sealed class SchemaGenerator
             if (propConverterHint != null)
             {
                 propSchema = BuildSchemaFromHint(propConverterHint, propType);
+            }
+            else if (propType.FullName == "System.String"
+                     && AttributeHelper.HasAttribute(propAttrData, AttributeHelper.Names.Base64String))
+            {
+                // [Base64String] string: the value is base64 data, in the form of the target version.
+                propSchema = VersionedSchemaForms.Base64(_options.OpenApiVersion);
             }
 
             // Apply nullable flag for reference type properties (matches Swashbuckle behavior).

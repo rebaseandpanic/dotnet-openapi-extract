@@ -29,4 +29,15 @@ internal static class VersionedSchemaForms
 
         throw new ArgumentException($"Unsupported single value of type {value.GetType()}.", nameof(value));
     }
+
+    /// <summary>
+    /// A base64 string (<c>byte[]</c>, <c>[Base64String] string</c>): <c>format: byte</c> for 3.0;
+    /// <c>contentEncoding: base64</c> without <c>format</c> for 3.1+, where <c>byte</c> is not in the
+    /// format registry. Nothing of the other form is set, so 3.0 output carries no
+    /// <c>x-jsonschema-contentEncoding</c>.
+    /// </summary>
+    public static OpenApiSchema Base64(OpenApiSpecVersion version) =>
+        version == OpenApiSpecVersion.OpenApi3_0
+            ? new OpenApiSchema { Type = JsonSchemaType.String, Format = "byte" }
+            : new OpenApiSchema { Type = JsonSchemaType.String, ContentEncoding = "base64" };
 }

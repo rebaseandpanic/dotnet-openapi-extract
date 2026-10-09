@@ -51,6 +51,8 @@ All notable changes to this project.
 
 - [BUGFIX] `[Consumes]` on an action or a controller sets the media types of the request body (the action wins over the controller, the controller over a global `[Consumes]` filter); previously a `[FromBody]` body was always `application/json`. A form body uses its `[Consumes]` media type (for example `application/x-www-form-urlencoded`) instead of always `multipart/form-data`, which stays the default.
 
+- [FEATURE] Base64 data follows the target version: `byte[]` and `string` with `[Base64String]` are `type: string, format: byte` for OpenAPI 3.0 and `type: string, contentEncoding: base64` without `format` for 3.1 and 3.2 (`byte` is not in their format registry); nullable variants keep the version's nullable form. `[Base64String]` was ignored before. OpenAPI 3.0 output changes only for `[Base64String]` properties.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.
