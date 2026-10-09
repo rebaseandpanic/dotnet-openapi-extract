@@ -82,7 +82,7 @@ public sealed class DocumentationResolver
     /// <list type="bullet">
     ///   <item>Summary: [SwaggerOperation] → [EndpointSummary] → XML &lt;summary&gt;</item>
     ///   <item>Description: [SwaggerOperation] → [EndpointDescription] → XML &lt;remarks&gt;</item>
-    ///   <item>OperationId: [SwaggerOperation] → HTTP attribute Name named arg</item>
+    ///   <item>OperationId: [SwaggerOperation] → Name of the attribute that produced the operation</item>
     ///   <item>Tags: [SwaggerOperation] → [Tags] → controller name</item>
     ///   <item>Deprecated: presence of [Obsolete] on the method or on the controller class</item>
     ///   <item>ParameterDescriptions: attribute-sourced descriptions merged with XML &lt;param&gt;</item>
@@ -152,9 +152,10 @@ public sealed class DocumentationResolver
         if (swaggerOp != null)
             operationId = AttributeHelper.GetNamedArgument<string>(swaggerOp, "OperationId");
 
-        // Priority 2: Named arg "Name" on the HTTP method attribute
+        // Priority 2: Name of the attribute that produced this operation ([HttpGet(Name = …)],
+        // [AcceptVerbs(…, Name = …)]). Never synthesized: without a source the id is absent.
         if (string.IsNullOrEmpty(operationId))
-            operationId = ResolveHttpAttributeName(method);
+            operationId = action.OperationName;
 
         if (string.IsNullOrEmpty(operationId))
             operationId = null;
@@ -379,43 +380,6 @@ public sealed class DocumentationResolver
     // =========================================================================
     // Private helpers
     // =========================================================================
-
-    /// <summary>
-    /// HTTP verb attribute full names — allocated once as a static field (I5).
-    /// </summary>
-    private static readonly string[] HttpAttributeFullNames =
-    {
-        AttributeHelper.Names.HttpGet,
-        AttributeHelper.Names.HttpPost,
-        AttributeHelper.Names.HttpPut,
-        AttributeHelper.Names.HttpDelete,
-        AttributeHelper.Names.HttpPatch,
-        AttributeHelper.Names.HttpHead,
-        AttributeHelper.Names.HttpOptions,
-    };
-
-    /// <summary>
-    /// Reads the <c>Name</c> named argument from the HTTP method attribute on the given method.
-    /// For example, <c>[HttpGet(Name = "GetWidget")]</c> returns "GetWidget".
-    /// </summary>
-    private static string? ResolveHttpAttributeName(MethodInfo method)
-    {
-        // Check all HTTP verb attributes for a Name named argument.
-        var httpAttributeNames = HttpAttributeFullNames;
-
-        foreach (var attrFullName in httpAttributeNames)
-        {
-            var attr = AttributeHelper.GetAttribute(method, attrFullName);
-            if (attr == null)
-                continue;
-
-            var name = AttributeHelper.GetNamedArgument<string>(attr, "Name");
-            if (!string.IsNullOrEmpty(name))
-                return name;
-        }
-
-        return null;
-    }
 
     /// <summary>
     /// Reads the <c>Tags</c> named argument from a <c>[SwaggerOperation]</c> attribute.

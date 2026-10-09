@@ -26,6 +26,31 @@ public class HttpMethodsController : ControllerBase
     [HttpGet("same")]
     public IActionResult Same() => Ok();
 
+    /// <summary>TRACE has its own field in every version.</summary>
+    [AcceptVerbs("TRACE", Route = "trace")]
+    public IActionResult Trace() => Ok();
+
+    /// <summary>An explicit operationId shared by both operations of the action.</summary>
+    [AcceptVerbs("GET", "POST", Route = "operation-id/explicit")]
+    [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(OperationId = "SharedExplicitId")]
+    public IActionResult ExplicitOperationId() => Ok();
+
+    /// <summary>No operationId source: none is synthesized.</summary>
+    [AcceptVerbs("GET", "POST", Route = "operation-id/none")]
+    public IActionResult NoOperationId() => Ok();
+
+    /// <summary>The attribute's Name becomes the operationId.</summary>
+    [AcceptVerbs("GET", Route = "operation-id/named", Name = "NamedByAttribute")]
+    public IActionResult NamedOperationId() => Ok();
+
+    /// <summary>Overload taking an integer; wins over the string overload by parameter type name.</summary>
+    [HttpGet("overloads")]
+    public IActionResult Overloaded([FromQuery] int value) => Ok();
+
+    /// <summary>Overload taking a string.</summary>
+    [HttpGet("overloads")]
+    public IActionResult Overloaded([FromQuery] string value) => Ok();
+
     /// <summary>No method at all: not emitted, with a warning.</summary>
     [AcceptVerbs(Route = "empty")]
     public IActionResult Empty() => Ok();

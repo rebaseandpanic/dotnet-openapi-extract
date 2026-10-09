@@ -297,16 +297,12 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Build CLR bindings for validation ────────────────────────────────
         // ActionByOperationKey: "METHOD /path" → (Controller, Action)
+        // Bound to the same winner the document uses for each path and method.
         var actionByKey = new Dictionary<string, (ControllerInfo, ActionInfo)>(StringComparer.Ordinal);
-        foreach (var action in core.Actions)
+        foreach (var group in OperationConflicts.Group(core.Actions))
         {
-            var path = RouteBuilder.BuildPath(
-                action.Controller.RouteTemplate,
-                action.RouteTemplate,
-                action.Controller.Type.Name,
-                action.Name);
-            var key = $"{action.HttpMethod} {path}";
-            actionByKey.TryAdd(key, (action.Controller, action));
+            var key = $"{group.HttpMethod} {group.Path}";
+            actionByKey.TryAdd(key, (group.Winner.Controller, group.Winner));
         }
 
         // TypeBySchemaId: schema component ID → CLR Type
@@ -507,13 +503,12 @@ public sealed class OpenApiDocumentBuilder
             IList<System.Reflection.CustomAttributeData> ControllerAttrs,
             OpenApiOperation Operation)>();
 
-        foreach (var action in actions)
+        // One operation per path and method: the winner by the ordinal key, independent of
+        // discovery order; a conflict is reported once, naming every action involved.
+        foreach (var group in OperationConflicts.Group(actions))
         {
-            var path = RouteBuilder.BuildPath(
-                action.Controller.RouteTemplate,
-                action.RouteTemplate,
-                action.Controller.Type.Name,
-                action.Name);
+            var action = group.Winner;
+            var path = group.Path;
 
             // Standard methods map to the shared HttpMethod instances; any other method from
             // [AcceptVerbs] keeps its literal (the capitalization that goes into the request).
@@ -546,6 +541,7 @@ public sealed class OpenApiDocumentBuilder
                 pathItem.Operations[httpMethod] = operation;
                 builtOperations.Add((action, actionAttrs, controllerAttrs, operation));
                 RecordRequestBodyOnGetHeadDelete(ledger, httpMethod, operation);
+                RecordPathMethodConflict(ledger, group, operation);
             }
             catch (Exception ex) when (ex is FileNotFoundException
                                         or FileLoadException
@@ -694,6 +690,29 @@ public sealed class OpenApiDocumentBuilder
             Feature         = "requestBody",
             Action          = DiagnosticAction.SemanticsChanged,
             RequiredVersion = OpenApiSpecVersion.OpenApi3_1,
+        });
+    }
+
+    /// <summary>
+    /// Several actions declare one path and method: the document keeps the winner by the ordinal
+    /// key, and one warning names every action involved. Anchored on the kept operation, so a
+    /// conflict on an excluded path is not reported.
+    /// </summary>
+    private static void RecordPathMethodConflict(LossLedger ledger, OperationGroup group, OpenApiOperation operation)
+    {
+        if (group.Others.Count == 0)
+            return;
+
+        var names = group.All.Select(OperationConflicts.DisplayName).ToList();
+        ledger.Add(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.OperationPathMethodConflict,
+            Anchor   = new LossAnchor.Operation(operation),
+            Message  = $"declared by {names.Count} actions ({string.Join(", ", names)}); the document uses " +
+                       $"{names[0]} (ordinal key: controller type, method name, parameter types, attribute order).",
+            Feature  = "operation",
+            Subjects = names,
         });
     }
 

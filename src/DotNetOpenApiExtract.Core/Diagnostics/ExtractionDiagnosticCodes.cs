@@ -60,6 +60,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string DiscoveryUnknownHttpMethodAttribute = "discovery.unknown-http-method-attribute";
 
+    /// <summary>
+    /// Several actions declare one path and HTTP method; the document keeps one, chosen by an ordinal key
+    /// independent of discovery order. Location: <c>METHOD /path</c>. Subjects: every action involved
+    /// (<c>Controller.Method</c>), the kept one first.
+    /// </summary>
+    public const string OperationPathMethodConflict = "operation.path-method-conflict";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
