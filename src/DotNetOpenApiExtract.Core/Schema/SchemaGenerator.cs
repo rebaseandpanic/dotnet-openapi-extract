@@ -573,17 +573,22 @@ public sealed class SchemaGenerator
             raw = null;
         }
 
-        // Microsoft.OpenApi writes no ulong value: a ulong above long.MaxValue goes through decimal,
-        // which holds it exactly.
-        return raw switch
-        {
-            ulong ul when ul > long.MaxValue => JsonValue.Create((decimal)ul),
-            null     => JsonValue.Create(0),
-            _        => Convert.ToInt64(raw, CultureInfo.InvariantCulture) is var number && number is >= int.MinValue and <= int.MaxValue
-                ? JsonValue.Create((int)number) // as before for values an int holds
-                : JsonValue.Create(number),
-        };
+        return raw == null ? JsonValue.Create(0) : IntegralValue(raw);
     }
+
+    /// <summary>
+    /// An integral value (any integer type, or an enum member's raw value) as a JSON number without
+    /// loss: <c>int</c> when it fits (as before), else <c>long</c>; a <c>ulong</c> above
+    /// <c>long.MaxValue</c> goes through <c>decimal</c>, which holds it exactly — Microsoft.OpenApi
+    /// writes no <c>ulong</c> value.
+    /// </summary>
+    internal static JsonNode IntegralValue(object raw) => raw switch
+    {
+        ulong ul when ul > long.MaxValue => JsonValue.Create((decimal)ul),
+        _ => Convert.ToInt64(raw, CultureInfo.InvariantCulture) is var number && number is >= int.MinValue and <= int.MaxValue
+            ? JsonValue.Create((int)number)
+            : JsonValue.Create(number),
+    };
 
     /// <summary>Full name of the underlying type of <paramref name="enumType"/> (from its <c>value__</c> field).</summary>
     private static string EnumUnderlyingTypeName(Type enumType) =>
@@ -1513,7 +1518,7 @@ public sealed class SchemaGenerator
 
             if (Allows(JsonSchemaType.Integer))
             {
-                node = JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture));
+                node = IntegralValue(value);
                 return true;
             }
 
@@ -1537,10 +1542,7 @@ public sealed class SchemaGenerator
         var typeName = argument.ArgumentType.FullName ?? string.Empty;
         if (IntegralTypes.Contains(typeName) && (Allows(JsonSchemaType.Integer) || Allows(JsonSchemaType.Number)))
         {
-            // Microsoft.OpenApi writes no ulong value: through decimal, which holds it exactly.
-            node = typeName == "System.UInt64"
-                ? JsonValue.Create((decimal)Convert.ToUInt64(value, CultureInfo.InvariantCulture))
-                : JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture));
+            node = IntegralValue(value);
             return true;
         }
 

@@ -126,4 +126,16 @@ public class AllowedDeniedValuesSchemaTests(AllowedValuesFixture fixture) : ICla
             .Where(d => d.Location == "#/components/schemas/AllowedValuesModel/properties/mismatched")
             .Should().ContainSingle().Which.Code.Should().Be(ExtractionDiagnosticCodes.SchemaValueNotConvertible);
     }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void UlongEnumMemberAboveLongMaxValue_IsWrittenWithoutLoss(OpenApiSpecVersion version)
+    {
+        var properties = fixture.Builds[version].Document["components"]!["schemas"]!["HugeCodeValuesModel"]!["properties"]!;
+
+        var allowed = properties["allowedHuge"]!["allOf"]!.AsArray();
+        Json(allowed[1]!["enum"]).Should().Equal(["18446744073709551615"]);
+
+        Json(properties["deniedHuge"]!["not"]!["enum"]).Should().Equal(["18446744073709551615"]);
+    }
 }

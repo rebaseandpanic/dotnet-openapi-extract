@@ -332,3 +332,15 @@ public class DefaultValuesModel
     [System.ComponentModel.DefaultValue(5)]
     public int Literal { get; set; } = 5;
 }
+
+/// <summary>Allowed and denied values on members of an enum over ulong.</summary>
+public class HugeCodeValuesModel
+{
+    /// <summary>Allowed: the largest member.</summary>
+    [AllowedValues(HugeCode.Largest)]
+    public HugeCode AllowedHuge { get; set; } = HugeCode.Largest;
+
+    /// <summary>Denied: the largest member.</summary>
+    [DeniedValues(HugeCode.Largest)]
+    public HugeCode DeniedHuge { get; set; }
+}

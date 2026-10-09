@@ -72,4 +72,8 @@ public class SchemaKeywordsController : ControllerBase
         [FromQuery, System.ComponentModel.DefaultValue(typeof(int), "many")] int broken,
         [FromQuery, System.ComponentModel.DefaultValue(5)] int literal,
         [FromQuery] int page = 1) => Ok();
+
+    /// <summary>Allowed and denied ulong enum members.</summary>
+    [HttpGet("huge-code-values")]
+    public ActionResult<HugeCodeValuesModel> HugeCodeValues() => new HugeCodeValuesModel();
 }
