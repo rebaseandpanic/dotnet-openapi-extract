@@ -41,11 +41,6 @@ public sealed class ResponseInfo
     /// </summary>
     public bool BodyFromHttpResult { get; init; }
 
-    /// <summary>
-    /// The action returns an <c>IResult</c> whose status code is not statically known (untyped
-    /// <c>IResult</c>, a user-defined result, …): the response is written without a schema.
-    /// </summary>
-    internal bool UnknownResultStatus { get; init; }
 }
 
 /// <summary>
@@ -91,12 +86,24 @@ public static class ResponseExtractor
     /// else declares one (<c>void</c> / <c>Task</c> → 204, <c>IActionResult</c> → 200 without a body).
     /// </para>
     /// </remarks>
-    public static IReadOnlyList<ResponseInfo> ExtractResponses(ActionInfo action)
+    public static IReadOnlyList<ResponseInfo> ExtractResponses(ActionInfo action) =>
+        ExtractResponses(action, out _);
+
+    /// <summary>
+    /// Same as <see cref="ExtractResponses(ActionInfo)"/>; <paramref name="unknownResults"/> receives
+    /// the result types (the action's <c>IResult</c> or variants of its <c>Results&lt;…&gt;</c>) whose
+    /// status code is not statically known, when the action declares no response that would
+    /// document them. Empty otherwise.
+    /// </summary>
+    internal static IReadOnlyList<ResponseInfo> ExtractResponses(ActionInfo action, out IReadOnlyList<Type> unknownResults)
     {
         var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(action.Method, action.Controller.Type);
-        return ExtractResponsesCore(action, defaultContentTypes, contentTypesExplicit)
+        var unknown = new List<Type>();
+        var responses = ExtractResponsesCore(action, defaultContentTypes, contentTypesExplicit, unknown)
             .Select(r => WithFileMediaType(r, defaultContentTypes, contentTypesExplicit))
             .ToList();
+        unknownResults = unknown;
+        return responses;
     }
 
     /// <summary>
@@ -125,7 +132,7 @@ public static class ResponseExtractor
     }
 
     private static IReadOnlyList<ResponseInfo> ExtractResponsesCore(
-        ActionInfo action, IReadOnlyList<string> defaultContentTypes, bool contentTypesExplicit)
+        ActionInfo action, IReadOnlyList<string> defaultContentTypes, bool contentTypesExplicit, List<Type> unknownResults)
     {
         var method = action.Method;
         var controllerType = action.Controller.Type;
@@ -142,7 +149,7 @@ public static class ResponseExtractor
 
         // A typed IResult declares its own responses; explicit declarations win per status code.
         if (signatureType != null && TypedResults.IsResult(signatureType))
-            return MergeWithResultResponses(declared.Select(d => d.Response).ToList(), signatureType);
+            return MergeWithResultResponses(declared.Select(d => d.Response).ToList(), signatureType, unknownResults);
 
         if (declared.Count == 0 && producesType == null)
             return InferFromReturnType(signatureType, defaultContentTypes, contentTypesExplicit);
@@ -184,11 +191,12 @@ public static class ResponseExtractor
     /// <summary>
     /// The declared responses (their bodies, too, are written by the result, in the HTTP context)
     /// followed by the responses the typed result <paramref name="resultType"/> writes, for the status
-    /// codes not declared. A result whose status is not statically known
-    /// adds a 200 response without a body, flagged so the caller can report it, unless something
-    /// declares a response.
+    /// codes not declared. Variants whose status is not statically known go to
+    /// <paramref name="unknownResults"/> (only when nothing is declared, since a declaration documents
+    /// them); when no response is known at all, a 200 response without a body stands in.
     /// </summary>
-    private static IReadOnlyList<ResponseInfo> MergeWithResultResponses(List<ResponseInfo> declared, Type resultType)
+    private static IReadOnlyList<ResponseInfo> MergeWithResultResponses(
+        List<ResponseInfo> declared, Type resultType, List<Type> unknownResults)
     {
         // Whatever an IResult action declares is still written by the result, with the HTTP JSON options.
         var responses = declared
@@ -204,27 +212,18 @@ public static class ResponseExtractor
             .ToList();
         var codes = declared.Select(r => r.StatusCode).ToHashSet();
 
-        var inferred = TypedResults.Responses(resultType);
-        if (inferred == null)
-        {
-            if (responses.Count == 0)
-            {
-                responses.Add(new ResponseInfo
-                {
-                    StatusCode          = 200,
-                    ContentTypes        = [],
-                    UnknownResultStatus = true,
-                });
-            }
-
-            return responses;
-        }
-
-        foreach (var response in inferred)
+        var (known, unknown) = TypedResults.Analyze(resultType);
+        foreach (var response in known)
         {
             if (codes.Add(response.StatusCode))
                 responses.Add(response);
         }
+
+        if (declared.Count == 0)
+            unknownResults.AddRange(unknown);
+
+        if (responses.Count == 0)
+            responses.Add(new ResponseInfo { StatusCode = 200, ContentTypes = [] });
 
         return responses;
     }

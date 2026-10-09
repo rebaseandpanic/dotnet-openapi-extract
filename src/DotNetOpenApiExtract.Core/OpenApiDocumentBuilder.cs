@@ -941,7 +941,7 @@ public sealed class OpenApiDocumentBuilder
     {
         var docs = docResolver.ResolveOperation(action);
         var parameters = ParameterExtractor.ExtractParameters(action);
-        var responses = ResponseExtractor.ExtractResponses(action);
+        var responses = ResponseExtractor.ExtractResponses(action, out var unknownResults);
 
         var operation = new OpenApiOperation
         {
@@ -1071,8 +1071,6 @@ public sealed class OpenApiDocumentBuilder
 
             var apiResponse = new OpenApiResponse { Description = description };
 
-            if (resp.UnknownResultStatus)
-                RecordUnknownResultStatus(ledger, operation, action.Method.ReturnType);
 
             if (resp.ContentTypes.Count > 0 && (resp.BodyType != null || resp.ContentTypesExplicit))
             {
@@ -1085,6 +1083,9 @@ public sealed class OpenApiDocumentBuilder
 
             operation.Responses[statusKey] = apiResponse;
         }
+
+        if (unknownResults.Count > 0)
+            RecordUnknownResultStatus(ledger, operation, action.Method.ReturnType, unknownResults);
 
         // ── Per-operation security ────────────────────────────────────────────
         ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document);
@@ -1157,23 +1158,26 @@ public sealed class OpenApiDocumentBuilder
     }
 
     /// <summary>
-    /// An action returning an <c>IResult</c> whose status is not statically known gets a 200 response
-    /// without a schema; one warning on the operation says so.
+    /// One warning on the operation naming the results whose status is not statically known (the
+    /// action's <c>IResult</c> itself or variants of its <c>Results&lt;…&gt;</c>): their responses are
+    /// missing from the document; when no response is known at all, a 200 without a schema stands in.
     /// </summary>
-    private static void RecordUnknownResultStatus(LossLedger ledger, OpenApiOperation operation, Type returnType)
+    private static void RecordUnknownResultStatus(
+        LossLedger ledger, OpenApiOperation operation, Type returnType, IReadOnlyList<Type> unknownResults)
     {
-        var name = TypeDisplayName(returnType);
+        var names = unknownResults.Select(TypeDisplayName).Distinct(StringComparer.Ordinal).ToList();
         ledger.Add(new PendingLoss
         {
             Class    = LossClass.Source,
             Code     = ExtractionDiagnosticCodes.ResponseResultStatusUnknown,
             Anchor   = new LossAnchor.Operation(operation),
-            Message  = $"the action returns {name}, whose status code and body are not statically known: " +
-                       "written as a 200 response without a schema. Return a typed result (Ok<T>, Results<…>) " +
-                       "or declare [ProducesResponseType].",
+            Message  = $"the action returns {TypeDisplayName(returnType)}; the status code and body of " +
+                       $"{string.Join(", ", names)} are not statically known, so their responses are not described " +
+                       "(without any known response: a 200 response without a schema). Use typed results with a " +
+                       "fixed status or declare [ProducesResponseType].",
             Feature  = "responses",
             Action   = DiagnosticAction.Omitted,
-            Subjects = [name],
+            Subjects = names,
         });
     }
 

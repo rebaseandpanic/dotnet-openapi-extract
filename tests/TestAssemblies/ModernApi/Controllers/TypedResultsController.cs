@@ -64,6 +64,18 @@ public class TypedResultsController : ControllerBase
     [HttpGet("json")]
     public JsonHttpResult<ResultItem> Json() => TypedResults.Json(Item);
 
+    /// <summary>An unknown status first, then a known one with a body.</summary>
+    [HttpPost("unknown-first")]
+    public Results<JsonHttpResult<ResultItem>, Created<ResultItem>> UnknownFirst() => TypedResults.Created("/x", Item);
+
+    /// <summary>A known status with a body first, then an unknown one.</summary>
+    [HttpGet("unknown-last")]
+    public Results<Ok<ResultItem>, ProblemHttpResult> UnknownLast() => TypedResults.Ok(Item);
+
+    /// <summary>A status-only result and an unknown one.</summary>
+    [HttpGet("status-only-and-unknown")]
+    public Results<NotFound, JsonHttpResult<ResultItem>> StatusOnlyAndUnknown() => TypedResults.NotFound();
+
     /// <summary>An untyped result with a declared response.</summary>
     [HttpGet("untyped-declared")]
     [ProducesResponseType(typeof(ResultItem), StatusCodes.Status200OK)]

@@ -125,9 +125,11 @@ public static class ExtractionDiagnosticCodes
     public const string SerializationContextsSharedTypes = "serialization-contexts.shared-types";
 
     /// <summary>
-    /// An action returns an <c>IResult</c> whose status code is not statically known (an untyped
-    /// <c>IResult</c>, a user-defined result, <c>JsonHttpResult&lt;T&gt;</c>, …) and declares no response:
-    /// it is written as a 200 response without a schema. Location: the operation. Subjects: the return type.
+    /// An action returns an <c>IResult</c>, or a <c>Results&lt;…&gt;</c> with variants, whose status code is
+    /// not statically known (an untyped <c>IResult</c>, a user-defined result, <c>JsonHttpResult&lt;T&gt;</c>,
+    /// <c>ProblemHttpResult</c>, …) and declares no response: those responses are not described; the
+    /// known variants still are, and only when none is known a 200 response without a schema stands in.
+    /// One per operation. Location: the operation. Subjects: the results of unknown status.
     /// </summary>
     public const string ResponseResultStatusUnknown = "response.result-status-unknown";
 

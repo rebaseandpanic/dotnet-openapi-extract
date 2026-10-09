@@ -54,35 +54,35 @@ internal static class TypedResults
         type.FullName == ResultInterface || type.GetInterfaces().Any(i => i.FullName == ResultInterface);
 
     /// <summary>
-    /// The responses <paramref name="resultType"/> writes: one per variant of <c>Results&lt;…&gt;</c>, or
-    /// the one response of a result with a known status. <see langword="null"/> when a status is not
-    /// statically known.
+    /// The responses <paramref name="resultType"/> writes — one per variant of <c>Results&lt;…&gt;</c>,
+    /// or the one response of a result with a known status — and the results (the type itself or
+    /// variants) whose status is not statically known. Every variant is visited: an unknown one
+    /// never hides the known ones.
     /// </summary>
-    public static IReadOnlyList<ResponseInfo>? Responses(Type resultType)
+    public static (IReadOnlyList<ResponseInfo> Known, IReadOnlyList<Type> Unknown) Analyze(Type resultType)
     {
-        var responses = new List<ResponseInfo>();
-        return Collect(resultType, responses) ? responses : null;
+        var known = new List<ResponseInfo>();
+        var unknown = new List<Type>();
+        Collect(resultType, known, unknown);
+        return (known, unknown);
     }
 
-    private static bool Collect(Type type, List<ResponseInfo> responses)
+    private static void Collect(Type type, List<ResponseInfo> responses, List<Type> unknown)
     {
         var name = DefinitionName(type);
 
         if (name.StartsWith(Namespace + "Results`", StringComparison.Ordinal))
         {
             foreach (var variant in type.GetGenericArguments())
-            {
-                if (!Collect(variant, responses))
-                    return false;
-            }
-            return true;
+                Collect(variant, responses, unknown);
+            return;
         }
 
         if (name == ServerSentEventsResult)
         {
             // Writes its own text/event-stream; the builder describes the events.
             Add(responses, new ResponseInfo { StatusCode = 200, BodyType = type, ContentTypes = ["text/event-stream"] });
-            return true;
+            return;
         }
 
         if (Schema.FileTypes.IsFile(type))
@@ -90,11 +90,14 @@ internal static class TypedResults
             // A file result writes the file with 200; its media type is the declared one or
             // application/octet-stream (decided by the caller).
             Add(responses, new ResponseInfo { StatusCode = 200, BodyType = type, ContentTypes = [] });
-            return true;
+            return;
         }
 
         if (!StatusByType.TryGetValue(name, out var status))
-            return false;
+        {
+            unknown.Add(type);
+            return;
+        }
 
         var bodyType = ValueType(type);
         Add(responses, new ResponseInfo
@@ -104,7 +107,6 @@ internal static class TypedResults
             ContentTypes       = bodyType == null ? [] : ProblemResults.Contains(name) ? ["application/problem+json"] : ["application/json"],
             BodyFromHttpResult = bodyType != null,
         });
-        return true;
     }
 
     /// <summary>The first variant of a status code wins, as ASP.NET Core metadata does.</summary>

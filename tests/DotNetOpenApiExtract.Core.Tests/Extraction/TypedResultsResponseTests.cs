@@ -169,6 +169,43 @@ public class TypedResultsResponseTests(TypedResultsFixture fixture) : IClassFixt
         }
     }
 
+    public static TheoryData<OpenApiSpecVersion, string, string, string[], string> MixedUnions
+    {
+        get
+        {
+            var data = new TheoryData<OpenApiSpecVersion, string, string, string[], string>();
+            foreach (var version in VersionedDocumentHarness.Versions)
+            {
+                data.Add(version, "post", "/typed-results/unknown-first", ["201"],
+                    "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult<ModernApi.Models.TypedResults.ResultItem>");
+                data.Add(version, "get", "/typed-results/unknown-last", ["200"],
+                    "Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult");
+                data.Add(version, "get", "/typed-results/status-only-and-unknown", ["404"],
+                    "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult<ModernApi.Models.TypedResults.ResultItem>");
+            }
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(MixedUnions))]
+    public void UnionWithAnUnknownVariant_KeepsEveryKnownVariantAndWarnsOnce(
+        OpenApiSpecVersion version, string method, string path, string[] knownCodes, string unknownVariant)
+    {
+        var build = fixture.Builds[version];
+        var responses = Responses(build.Document, path, method);
+
+        responses.Select(r => r.Key).Should().Equal(knownCodes, because: "the unknown variant hides no known one and adds no 200");
+        if (knownCodes[0] != "404")
+            BodyRef(responses, knownCodes[0]).Should().Be("#/components/schemas/ResultItem");
+        else
+            responses["404"]!["content"].Should().BeNull();
+
+        var warning = Warnings(build, $"{method.ToUpperInvariant()} {path}").Should().ContainSingle().Subject;
+        warning.Code.Should().Be(UnknownCode);
+        warning.Subjects.Should().Equal(unknownVariant);
+    }
+
     [Theory]
     [MemberData(nameof(AllVersions))]
     public void ResultOfUnknownStatus_WithADeclaredResponse_UsesItWithoutWarning(OpenApiSpecVersion version)
