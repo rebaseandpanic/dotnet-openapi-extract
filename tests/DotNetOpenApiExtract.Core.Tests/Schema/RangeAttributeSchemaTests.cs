@@ -159,6 +159,10 @@ public class RangeAttributeSchemaTests(RangeSchemaFixture fixture) : IClassFixtu
 
     public sealed class EqualInclusive { [Range(5, 5)] public int Value { get; set; } }
 
+    public sealed class UnparseableHalf { [Range(typeof(Half), "abc", "5")] public Half Value { get; set; } }
+
+    public sealed class ValidHalf { [Range(typeof(Half), "0.5", "10")] public Half Value { get; set; } }
+
     private static Action ValidateWithAttribute(Type type, string property, object value) =>
         () => type.GetProperty(property)!.GetCustomAttribute<RangeAttribute>()!.IsValid(value);
 
@@ -169,6 +173,8 @@ public class RangeAttributeSchemaTests(RangeSchemaFixture fixture) : IClassFixtu
         { typeof(Unparseable), 1m, true },
         { typeof(NotANumberMaximum), 0.5, true },
         { typeof(EqualInclusive), 5, false },
+        { typeof(UnparseableHalf), (Half)1, true },
+        { typeof(ValidHalf), (Half)1, false },
     };
 
     [Theory]
@@ -190,5 +196,16 @@ public class RangeAttributeSchemaTests(RangeSchemaFixture fixture) : IClassFixtu
             attribute.Should().NotThrow();
             generate.Should().NotThrow();
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void FloatAndHalfStringBounds_ArePrintedAsTheirOwnType(OpenApiSpecVersion version)
+    {
+        Bounds(Property(version, "ratio")).Should().Equal(new Dictionary<string, string> { ["minimum"] = "0.1", ["maximum"] = "2.5" },
+            because: "a float bound is printed as the float, not as the nearest double");
+        Bounds(Property(version, "small")).Should().Equal(new Dictionary<string, string> { ["minimum"] = "0.5", ["maximum"] = "10" },
+            because: "a Half operand is numeric");
+        fixture.Diagnostics[version].Should().NotContain(d => d.Location == Pointer + "small");
     }
 }

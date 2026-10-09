@@ -91,24 +91,33 @@ internal sealed class RangeDeclaration
             return FromDecimals(min, max, minExclusive, maxExclusive);
         }
 
-        if (name is "System.Double" or "System.Single")
+        if (name is "System.Double" or "System.Single" or "System.Half")
         {
             const NumberStyles style = NumberStyles.Float | NumberStyles.AllowThousands;
-            double min, max;
-            if (name == "System.Single")
+            var culture = CultureInfo.InvariantCulture;
+            switch (name)
             {
-                if (!float.TryParse(minText, style, CultureInfo.InvariantCulture, out var minFloat)
-                    || !float.TryParse(maxText, style, CultureInfo.InvariantCulture, out var maxFloat))
-                    return Invalid($"a bound is not a valid {operand.Name}");
-                (min, max) = (minFloat, maxFloat);
-            }
-            else if (!double.TryParse(minText, style, CultureInfo.InvariantCulture, out min)
-                     || !double.TryParse(maxText, style, CultureInfo.InvariantCulture, out max))
-            {
-                return Invalid($"a bound is not a valid {operand.Name}");
-            }
+                case "System.Single":
+                    if (!float.TryParse(minText, style, culture, out var minFloat)
+                        || !float.TryParse(maxText, style, culture, out var maxFloat))
+                        return Invalid($"a bound is not a valid {operand.Name}");
+                    // Printed as the float it is, not as the double nearest to it (0.1, not 0.10000000149011612).
+                    return FromDoubles(minFloat, maxFloat, minExclusive, maxExclusive,
+                        v => ((float)v).ToString("R", culture));
 
-            return FromDoubles(min, max, minExclusive, maxExclusive);
+                case "System.Half":
+                    if (!Half.TryParse(minText, style, culture, out var minHalf)
+                        || !Half.TryParse(maxText, style, culture, out var maxHalf))
+                        return Invalid($"a bound is not a valid {operand.Name}");
+                    return FromDoubles((double)minHalf, (double)maxHalf, minExclusive, maxExclusive,
+                        v => ((Half)v).ToString(culture));
+
+                default:
+                    if (!double.TryParse(minText, style, culture, out var min)
+                        || !double.TryParse(maxText, style, culture, out var max))
+                        return Invalid($"a bound is not a valid {operand.Name}");
+                    return FromDoubles(min, max, minExclusive, maxExclusive);
+            }
         }
 
         return new RangeDeclaration { Kind = Outcome.NonNumericOperand, Detail = name };
@@ -149,8 +158,10 @@ internal sealed class RangeDeclaration
         };
     }
 
-    private static RangeDeclaration FromDoubles(double min, double max, bool minExclusive, bool maxExclusive)
+    private static RangeDeclaration FromDoubles(
+        double min, double max, bool minExclusive, bool maxExclusive, Func<double, string>? format = null)
     {
+        format ??= v => v.ToString("R", CultureInfo.InvariantCulture);
         // double.CompareTo orders NaN below every number, as RangeAttribute's comparison does.
         if (CheckOrder(min.CompareTo(max), minExclusive, maxExclusive) is { } invalid)
             return invalid;
@@ -158,8 +169,8 @@ internal sealed class RangeDeclaration
         return new RangeDeclaration
         {
             Kind               = Outcome.Numeric,
-            Minimum            = double.IsFinite(min) ? min.ToString("R", CultureInfo.InvariantCulture) : null,
-            Maximum            = double.IsFinite(max) ? max.ToString("R", CultureInfo.InvariantCulture) : null,
+            Minimum            = double.IsFinite(min) ? format(min) : null,
+            Maximum            = double.IsFinite(max) ? format(max) : null,
             NonFiniteMinimum   = double.IsFinite(min) ? null : min.ToString(CultureInfo.InvariantCulture),
             NonFiniteMaximum   = double.IsFinite(max) ? null : max.ToString(CultureInfo.InvariantCulture),
             MinimumIsExclusive = minExclusive,

@@ -136,6 +136,14 @@ public class RangeModel
     [Range(double.NegativeInfinity, 5.0)]
     public double Unbounded { get; set; }
 
+    /// <summary>A float range from strings.</summary>
+    [Range(typeof(float), "0.1", "2.5")]
+    public float Ratio { get; set; }
+
+    /// <summary>A Half range from strings.</summary>
+    [Range(typeof(Half), "0.5", "10")]
+    public Half Small { get; set; }
+
     /// <summary>A range with a NaN minimum, which RangeAttribute accepts.</summary>
     [Range(typeof(double), "NaN", "5")]
     public double NotANumberMin { get; set; }
