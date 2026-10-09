@@ -84,8 +84,16 @@ internal static class PolymorphismReader
         return ReadSwashbuckle(baseType, attributes);
     }
 
-    private static string Describe(DerivedTypeInfo derived) =>
-        $"{derived.Type.FullName}={Convert.ToString(derived.DiscriminatorValue, System.Globalization.CultureInfo.InvariantCulture)}";
+    /// <summary>
+    /// A derived type with its value, the value's type included: the integer <c>1</c> and the
+    /// string <c>"1"</c> are different discriminators on the wire.
+    /// </summary>
+    private static string Describe(DerivedTypeInfo derived) => derived.DiscriminatorValue switch
+    {
+        null       => $"{derived.Type.FullName}=(none)",
+        int number => $"{derived.Type.FullName}=int:{number.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+        var value  => $"{derived.Type.FullName}=string:{value}",
+    };
 
     private static PolymorphismInfo? ReadSwashbuckle(Type baseType, IList<System.Reflection.CustomAttributeData> attributes)
     {

@@ -56,6 +56,14 @@ public class PolymorphismAlternativesController : ControllerBase
     [HttpGet("sensor")]
     public ActionResult<Sensor> GetSensor() => throw new NotSupportedException();
 
+    /// <summary>A voucher (concrete base, sources disagree).</summary>
+    [HttpGet("voucher")]
+    public ActionResult<Voucher> GetVoucher() => throw new NotSupportedException();
+
+    /// <summary>A badge (integer versus string value in the two sources).</summary>
+    [HttpGet("badge")]
+    public ActionResult<Badge> GetBadge() => throw new NotSupportedException();
+
     /// <summary>A tree node (recursive hierarchy).</summary>
     [HttpGet("tree")]
     public ActionResult<TreeNode> GetTree() => throw new NotSupportedException();

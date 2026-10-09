@@ -267,6 +267,33 @@ public class PolymorphismAlternativesTests(PolymorphismAlternativesFixture fixtu
             .Which.Subjects.Should().Equal(typeof(Ticket).FullName);
     }
 
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    public void ConcreteBaseWithDisagreeingSources_TwoWarningsWithDifferentFeatures(OpenApiSpecVersion version)
+    {
+        var voucher = SchemasPrefix + Component(version, "/polymorphism-alt/voucher");
+        var atVoucher = fixture.Diagnostics[version].Where(d => d.Location == voucher).ToList();
+
+        atVoucher.Select(d => d.Code).Should().BeEquivalentTo(
+        [
+            ExtractionDiagnosticCodes.PolymorphismSourceDisagreement,
+            ExtractionDiagnosticCodes.PolymorphismDiscriminatorNotExpressible,
+        ]);
+        atVoucher.Select(d => d.Feature).Should().OnlyHaveUniqueItems();
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void IntegerVersusStringValue_IsADisagreement(OpenApiSpecVersion version)
+    {
+        var badge = SchemasPrefix + Component(version, "/polymorphism-alt/badge");
+
+        fixture.Diagnostics[version]
+            .Where(d => d.Code == ExtractionDiagnosticCodes.PolymorphismSourceDisagreement && d.Location == badge)
+            .Should().ContainSingle();
+    }
+
     [Fact]
     public void Warnings_NoneForUnionsReachableOnlyFromExcludedOperations()
     {

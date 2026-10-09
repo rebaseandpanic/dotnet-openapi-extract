@@ -845,7 +845,7 @@ public sealed class SchemaGenerator
                     Anchor   = new LossAnchor.Component(unionId),
                     Message  = $"{baseType.FullName}: [SwaggerDiscriminator]/[SwaggerSubType] disagree with " +
                                "[JsonPolymorphic]/[JsonDerivedType]; the System.Text.Json attributes define the wire and are used.",
-                    Feature  = "schema.discriminator",
+                    Feature  = "discriminator.source",
                     Subjects = [baseType.FullName ?? baseType.Name],
                 });
             }

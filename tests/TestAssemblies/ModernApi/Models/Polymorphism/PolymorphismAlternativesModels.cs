@@ -236,3 +236,35 @@ public sealed class Thermometer : Sensor
     /// <summary>Last reading.</summary>
     public double Celsius { get; set; }
 }
+
+/// <summary>A voucher; a concrete base whose Swashbuckle attributes disagree with the STJ ones.</summary>
+[JsonDerivedType(typeof(GiftVoucher), "gift")]
+[SwaggerSubType(typeof(GiftVoucher), DiscriminatorValue = "GIFT")]
+public class Voucher
+{
+    /// <summary>Voucher value.</summary>
+    public int Value { get; set; }
+}
+
+/// <summary>A gift voucher.</summary>
+public sealed class GiftVoucher : Voucher
+{
+    /// <summary>Recipient name.</summary>
+    public string Recipient { get; set; } = string.Empty;
+}
+
+/// <summary>A badge; STJ declares the integer 1, Swashbuckle the string "1".</summary>
+[JsonDerivedType(typeof(GoldBadge), 1)]
+[SwaggerSubType(typeof(GoldBadge), DiscriminatorValue = "1")]
+public abstract class Badge
+{
+    /// <summary>Badge title.</summary>
+    public string Title { get; set; } = string.Empty;
+}
+
+/// <summary>A gold badge.</summary>
+public sealed class GoldBadge : Badge
+{
+    /// <summary>Points awarded.</summary>
+    public int Points { get; set; }
+}
