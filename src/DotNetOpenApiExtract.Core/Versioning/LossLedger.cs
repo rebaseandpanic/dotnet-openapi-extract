@@ -46,6 +46,14 @@ internal abstract record LossAnchor
     /// references; its location is <c>#/components/schemas/{id}</c>.
     /// </summary>
     public sealed record Component(string Id) : LossAnchor;
+
+    /// <summary>
+    /// A node inside the output under <paramref name="Parent"/>, addressed by the unescaped segments
+    /// of its relative path (for example <c>responses</c>, <c>200</c>, <c>content</c>,
+    /// <c>application/x-ndjson</c> under an operation). It is reachable while its root anchor is; its
+    /// location is the JSON pointer of the node in the output of the target version.
+    /// </summary>
+    public sealed record Node(LossAnchor Parent, IReadOnlyList<string> Path) : LossAnchor;
 }
 
 /// <summary>

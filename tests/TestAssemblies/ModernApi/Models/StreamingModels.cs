@@ -23,3 +23,25 @@ public sealed class StreamItemSequence(IReadOnlyList<StreamItem> items) : IAsync
         }
     }
 }
+
+/// <summary>Error body of a streaming action.</summary>
+public class StreamError
+{
+    /// <summary>Error code.</summary>
+    public string Code { get; set; } = string.Empty;
+}
+
+/// <summary>A parcel; a concrete polymorphic base used only as a streamed element.</summary>
+[System.Text.Json.Serialization.JsonDerivedType(typeof(ExpressParcel), "express")]
+public class Parcel
+{
+    /// <summary>Weight in grams.</summary>
+    public int WeightGrams { get; set; }
+}
+
+/// <summary>An express parcel.</summary>
+public sealed class ExpressParcel : Parcel
+{
+    /// <summary>Delivery deadline in hours.</summary>
+    public int DeadlineHours { get; set; }
+}

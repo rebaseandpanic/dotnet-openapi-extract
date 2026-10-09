@@ -559,7 +559,7 @@ public sealed class OpenApiDocumentBuilder
                 var actionAttrs     = action.Method.GetCustomAttributesData();
                 var controllerAttrs = action.Controller.Type.GetCustomAttributesData();
 
-                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document);
+                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document, ledger);
                 ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
                 ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
@@ -680,7 +680,7 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Step 10: Global media types ──────────────────────────────────────
         var globalMediaTypes = GlobalMediaTypesExtractor.Extract(sourceContext, diagnostics.Report);
-        ApplyGlobalMediaTypes(builtOperations, globalMediaTypes);
+        ApplyGlobalMediaTypes(builtOperations, globalMediaTypes, schemaGenerator, ledger);
 
         // ── Step 11: Document-level tags metadata (descriptions + externalDocs) ─
         var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
@@ -830,7 +830,8 @@ public sealed class OpenApiDocumentBuilder
         DocumentationResolver docResolver,
         SchemaGenerator schemaGenerator,
         SecuritySchemeExtractionResult securityResult,
-        OpenApiDocument document)
+        OpenApiDocument document,
+        LossLedger ledger)
     {
         var docs = docResolver.ResolveOperation(action);
         var parameters = ParameterExtractor.ExtractParameters(action);
@@ -971,15 +972,8 @@ public sealed class OpenApiDocumentBuilder
             {
                 // Emit a Content section when there is a typed body, or when the content types
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
-                IOpenApiSchema? bodySchema = resp.BodyType != null
-                    ? schemaGenerator.GenerateSchema(resp.BodyType)
-                    : null;
-                apiResponse.Content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
-
-                foreach (var ct in resp.ContentTypes)
-                    apiResponse.Content[ct] = bodySchema != null
-                        ? new OpenApiMediaType { Schema = bodySchema }
-                        : new OpenApiMediaType();
+                apiResponse.Content = BuildResponseContent(
+                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -989,6 +983,81 @@ public sealed class OpenApiDocumentBuilder
         ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document);
 
         return operation;
+    }
+
+    // =========================================================================
+    // Response content by media type
+    // =========================================================================
+
+    /// <summary>Sequential media types whose items are JSON texts (spec 3.2 §4.14.3.1, as .NET formatters produce them).</summary>
+    private static readonly HashSet<string> SequentialJsonMediaTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/jsonl",
+        "application/x-ndjson",
+        "application/json-seq",
+    };
+
+    private const string EventStreamMediaType = "text/event-stream";
+
+    /// <summary>The media type without parameters (<c>application/x-ndjson; charset=utf-8</c> → <c>application/x-ndjson</c>).</summary>
+    private static string BaseMediaType(string contentType)
+    {
+        var separator = contentType.IndexOf(';');
+        return (separator < 0 ? contentType : contentType[..separator]).Trim();
+    }
+
+    /// <summary>
+    /// The content of one response, chosen per media type. When the body type is an asynchronous
+    /// sequence (<c>IAsyncEnumerable&lt;T&gt;</c>): a sequential JSON media type gets
+    /// <c>itemSchema: T</c> and no <c>schema</c>; <c>text/event-stream</c> gets no schema, because
+    /// standard MVC has no formatter for it (warning on the operation); any other media type gets
+    /// the body schema (an array of <c>T</c>). Other body types get the body schema everywhere.
+    /// </summary>
+    private static Dictionary<string, IOpenApiMediaType> BuildResponseContent(
+        IEnumerable<string> contentTypes,
+        Type? bodyType,
+        SchemaGenerator schemaGenerator,
+        LossLedger ledger,
+        OpenApiOperation operation)
+    {
+        var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+        Type? elementType = null;
+        var isSequence = bodyType != null && StreamingTypes.TryGetAsyncEnumerableElementType(bodyType, out elementType);
+        IOpenApiSchema? bodySchema = null;
+
+        foreach (var contentType in contentTypes)
+        {
+            var mediaType = BaseMediaType(contentType);
+            if (isSequence && SequentialJsonMediaTypes.Contains(mediaType))
+            {
+                content[contentType] = new OpenApiMediaType { ItemSchema = schemaGenerator.GenerateSchema(elementType!) };
+            }
+            else if (isSequence && string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
+            {
+                content[contentType] = new OpenApiMediaType();
+                ledger.Add(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.ResponseEventStreamWithoutFormatter,
+                    Anchor   = new LossAnchor.Operation(operation),
+                    Message  = $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
+                               "standard MVC has no server-sent events output formatter; a custom formatter or " +
+                               "ServerSentEventsResult<T> is needed. The media type is written without a schema.",
+                    Feature  = "mediaType.schema",
+                    Action   = DiagnosticAction.Omitted,
+                    Subjects = [elementType.FullName ?? elementType.Name],
+                });
+            }
+            else
+            {
+                bodySchema ??= bodyType != null ? schemaGenerator.GenerateSchema(bodyType) : null;
+                content[contentType] = bodySchema != null
+                    ? new OpenApiMediaType { Schema = bodySchema }
+                    : new OpenApiMediaType();
+            }
+        }
+
+        return content;
     }
 
     // =========================================================================
@@ -1585,7 +1654,9 @@ public sealed class OpenApiDocumentBuilder
             IList<System.Reflection.CustomAttributeData> ActionAttrs,
             IList<System.Reflection.CustomAttributeData> ControllerAttrs,
             OpenApiOperation Operation)> builtOperations,
-        GlobalMediaTypesExtractionResult globalMediaTypes)
+        GlobalMediaTypesExtractionResult globalMediaTypes,
+        SchemaGenerator schemaGenerator,
+        LossLedger ledger)
     {
         bool hasGlobalProduces = globalMediaTypes.ProducesContentTypes.Count > 0;
         bool hasGlobalConsumes = globalMediaTypes.ConsumesContentTypes.Count > 0;
@@ -1593,7 +1664,7 @@ public sealed class OpenApiDocumentBuilder
         if (!hasGlobalProduces && !hasGlobalConsumes)
             return;
 
-        foreach (var (_, actionAttrs, controllerAttrs, operation) in builtOperations)
+        foreach (var (action, actionAttrs, controllerAttrs, operation) in builtOperations)
         {
             // ── Produces (responses) ──────────────────────────────────────────
             if (hasGlobalProduces && operation.Responses != null)
@@ -1605,7 +1676,14 @@ public sealed class OpenApiDocumentBuilder
 
                 if (!hasPerActionProduces)
                 {
-                    foreach (var (_, responseInterface) in operation.Responses)
+                    // Body types per status, so each global media type gets its own form
+                    // (an asynchronous sequence differs between JSON and sequential media types).
+                    var bodyTypes = ResponseExtractor.ExtractResponses(action)
+                        .Where(r => r.BodyType != null)
+                        .GroupBy(r => r.StatusCode == ResponseExtractor.DefaultStatusCode ? "default" : r.StatusCode.ToString())
+                        .ToDictionary(g => g.Key, g => g.First().BodyType!, StringComparer.Ordinal);
+
+                    foreach (var (statusKey, responseInterface) in operation.Responses)
                     {
                         if (responseInterface is not OpenApiResponse response)
                             continue;
@@ -1614,10 +1692,16 @@ public sealed class OpenApiDocumentBuilder
                         if (response.Content is not { Count: > 0 })
                             continue;
 
-                        // Replace the content entries with the global content types.
-                        // We keep the existing schema from the first entry and create
-                        // a new OpenApiMediaType wrapper per content type — consistent
-                        // with BuildOperation which creates new instances per entry.
+                        // Replace the content entries with the global content types. A response
+                        // whose body type is known is rebuilt per media type; otherwise (e.g. an
+                        // injected ProblemDetails response) the schema of the first entry is kept.
+                        if (bodyTypes.TryGetValue(statusKey, out var bodyType))
+                        {
+                            response.Content = BuildResponseContent(
+                                globalMediaTypes.ProducesContentTypes, bodyType, schemaGenerator, ledger, operation);
+                            continue;
+                        }
+
                         var firstSchema = response.Content.Values.First().Schema;
 
                         response.Content.Clear();

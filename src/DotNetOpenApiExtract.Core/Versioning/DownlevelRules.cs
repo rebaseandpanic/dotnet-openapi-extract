@@ -19,6 +19,9 @@ internal static class DownlevelRules
 
             foreach (var (method, operation) in pathItem.Operations)
             {
+                foreach (var loss in ItemSchemaLosses(operation, targetVersion))
+                    yield return loss;
+
                 // An operation whose method has no Path Item field before 3.2 is written whole into
                 // x-oai-additionalOperations: one record for the operation covers its subtree.
                 if (OperationPlacement.SlotOf(method.Method, targetVersion) != OperationSlot.ExtensionAdditionalOperations)
@@ -40,4 +43,48 @@ internal static class DownlevelRules
             }
         }
     }
+
+    /// <summary>
+    /// <c>itemSchema</c> exists only since 3.2; for 3.0/3.1 the serializer writes it as
+    /// <c>x-oai-itemSchema</c>. One record per media type, anchored on the media type: it covers
+    /// every keyword inside the item schema.
+    /// </summary>
+    private static IEnumerable<PendingLoss> ItemSchemaLosses(OpenApiOperation operation, OpenApiSpecVersion targetVersion)
+    {
+        if (targetVersion == OpenApiSpecVersion.OpenApi3_2)
+            yield break;
+
+        var anchor = new LossAnchor.Operation(operation);
+
+        foreach (var (mediaTypeName, mediaType) in operation.RequestBody?.Content ?? new Dictionary<string, IOpenApiMediaType>())
+        {
+            if (mediaType.ItemSchema != null)
+                yield return ItemSchemaLoss(new LossAnchor.Node(anchor, ["requestBody", "content", mediaTypeName]), targetVersion);
+        }
+
+        foreach (var (statusKey, response) in operation.Responses ?? new OpenApiResponses())
+        {
+            foreach (var (mediaTypeName, mediaType) in response.Content ?? new Dictionary<string, IOpenApiMediaType>())
+            {
+                if (mediaType.ItemSchema != null)
+                    yield return ItemSchemaLoss(new LossAnchor.Node(anchor, ["responses", statusKey, "content", mediaTypeName]), targetVersion);
+            }
+        }
+    }
+
+    private static PendingLoss ItemSchemaLoss(LossAnchor.Node anchor, OpenApiSpecVersion targetVersion) => new()
+    {
+        Class           = LossClass.Degradation,
+        Code            = ExtractionDiagnosticCodes.MediaTypeItemSchemaMovedToExtension,
+        Anchor          = anchor,
+        Message         = $"itemSchema emitted as {ItemSchemaExtensionName} (requires 3.2); OpenAPI " +
+                          $"{TargetVersion.Describe(targetVersion)} tools do not see the schema of the sequence items.",
+        Feature         = "mediaType.itemSchema",
+        Action          = DiagnosticAction.MovedToExtension,
+        ExtensionName   = ItemSchemaExtensionName,
+        RequiredVersion = OpenApiSpecVersion.OpenApi3_2,
+    };
+
+    /// <summary>The extension the serializer writes <c>itemSchema</c> to before 3.2.</summary>
+    public const string ItemSchemaExtensionName = "x-oai-itemSchema";
 }

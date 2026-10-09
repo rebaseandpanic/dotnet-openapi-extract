@@ -101,6 +101,22 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string PolymorphismDiscriminatorNotExpressible = "polymorphism.discriminator-not-expressible";
 
+    /// <summary>
+    /// For a 3.0/3.1 target, the item schema of a sequential media type (<c>application/jsonl</c>,
+    /// <c>application/x-ndjson</c>, <c>application/json-seq</c>, <c>text/event-stream</c>) is written as
+    /// <c>x-oai-itemSchema</c>: <c>itemSchema</c> exists only since 3.2. One per media type, covering the
+    /// keywords inside. Location: the JSON pointer of the media type.
+    /// </summary>
+    public const string MediaTypeItemSchemaMovedToExtension = "media-type.item-schema-moved-to-extension";
+
+    /// <summary>
+    /// An action returns <c>IAsyncEnumerable&lt;T&gt;</c> and declares <c>text/event-stream</c>: standard
+    /// MVC has no server-sent events output formatter, so that media type is written without a schema
+    /// (a custom formatter or <c>ServerSentEventsResult&lt;T&gt;</c> is needed). In every version.
+    /// Location: the operation. Subjects: the element type.
+    /// </summary>
+    public const string ResponseEventStreamWithoutFormatter = "response.event-stream-without-formatter";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
