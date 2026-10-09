@@ -88,6 +88,8 @@ All notable changes to this project.
 
 - [BUGFIX] JSON options set in an expression-bodied lambda — `AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(...))`, `ConfigureHttpJsonOptions(o => o.SerializerOptions.NumberHandling = ...)` — were not read: only block lambdas were. Both forms are read now.
 
+- [BUGFIX] camelCase names follow System.Text.Json's `JsonNamingPolicy.CamelCase` for names that start with an acronym: the leading upper-case run is lowered (`IOStatus` → `ioStatus`, `XMLHttpRequest` → `xmlHttpRequest`, `HTML` → `html`); previously only the first letter was (`iOStatus`). This applies to property names and to enum members under a camelCase converter policy. OpenAPI 3.0 output changes for properties whose name starts with an acronym, which are now named as System.Text.Json writes them.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.

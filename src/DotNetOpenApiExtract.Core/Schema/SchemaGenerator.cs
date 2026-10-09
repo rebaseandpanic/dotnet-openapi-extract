@@ -2865,19 +2865,37 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Converts a PascalCase or camelCase identifier to camelCase.
-    /// Only lowercases the first character; the rest of the string is preserved as-is.
-    /// This matches the behavior of <c>JsonNamingPolicy.CamelCase</c> in System.Text.Json.
+    /// Converts a PascalCase identifier to camelCase with the algorithm of System.Text.Json's
+    /// <c>JsonNamingPolicy.CamelCase</c> (.NET 10, <c>JsonCamelCaseNamingPolicy.FixCasing</c>): a
+    /// leading run of upper-case letters is lowered, except the last one of the run when a lower-case
+    /// letter follows it (<c>IOStatus</c> → <c>ioStatus</c>, <c>XMLHttpRequest</c> →
+    /// <c>xmlHttpRequest</c>, <c>HTML</c> → <c>html</c>); a name that does not start upper-case is kept.
     /// </summary>
     private static string ToCamelCase(string name)
     {
-        if (string.IsNullOrEmpty(name))
+        if (string.IsNullOrEmpty(name) || !char.IsUpper(name[0]))
             return name;
 
-        if (char.IsLower(name[0]))
-            return name;
+        var chars = name.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (i == 1 && !char.IsUpper(chars[i]))
+                break;
 
-        return char.ToLowerInvariant(name[0]) + name[1..];
+            var hasNext = i + 1 < chars.Length;
+
+            // Stop when the next char is already lower-case; a following space lowers this one first.
+            if (i > 0 && hasNext && !char.IsUpper(chars[i + 1]))
+            {
+                if (chars[i + 1] == ' ')
+                    chars[i] = char.ToLowerInvariant(chars[i]);
+                break;
+            }
+
+            chars[i] = char.ToLowerInvariant(chars[i]);
+        }
+
+        return new string(chars);
     }
 
     /// <summary>

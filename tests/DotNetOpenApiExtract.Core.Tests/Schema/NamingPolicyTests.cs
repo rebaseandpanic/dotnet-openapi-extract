@@ -185,14 +185,14 @@ public sealed class NamingPolicyTests : IDisposable
     // ──────────────────────────────────────────────────────────────────────────
     // 20. Acronym handling — XMLHttpRequest with various policies
     // Fixed expected behavior: documented as-is to prevent regression.
-    // CamelCase: only first char lowered → xMLHttpRequest
+    // CamelCase: as System.Text.Json's JsonNamingPolicy.CamelCase → xmlHttpRequest
     // SnakeCaseLower: each transition lower→upper or UPPER→Lower inserts separator
     //                XMLHttpRequest: XML→Http transition = xml_http, Http→Request = _request
     //                → xml_http_request
     // ──────────────────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("XMLHttpRequest", JsonNamingPolicy.CamelCase,      "xMLHttpRequest")]
+    [InlineData("XMLHttpRequest", JsonNamingPolicy.CamelCase,      "xmlHttpRequest")]
     [InlineData("XMLHttpRequest", JsonNamingPolicy.SnakeCaseLower, "xml_http_request")]
     [InlineData("XMLHttpRequest", JsonNamingPolicy.KebabCaseLower, "xml-http-request")]
     [InlineData("XMLHttpRequest", JsonNamingPolicy.Preserve,       "XMLHttpRequest")]
