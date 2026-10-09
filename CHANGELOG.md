@@ -95,6 +95,8 @@ All notable changes to this project.
 
 - [BUGFIX] The scopes listed for an OAuth2 or OpenID Connect scheme in `AddSecurityRequirement` (`{ ref, ["read"] }` or `[ref] = ["read"]`) are written as the requirement's values; they were always `[]`. Other schemes keep `[]`. Scopes that cannot be resolved statically are written as `[]` with a warning (code `security.requirement-non-literal-scopes`). `SecuritySchemeExtractionResult` gets `GlobalRequirementEntries` (scheme name and scopes per requirement); `GlobalRequirements` keeps the names.
 
+- [FEATURE] `Type = SecuritySchemeType.MutualTLS` in `AddSecurityDefinition` is read; it was dropped silently. OpenAPI 3.1 and 3.2 get a `mutualTLS` scheme. OpenAPI 3.0 has no such type and the serializer would throw, so the scheme and its name in every requirement are removed, with one warning (code `security.mutual-tls-removed`, located at `#/components/securitySchemes/<name>`) that lists each requirement that was simplified or disappeared: the published auth contract changes.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.

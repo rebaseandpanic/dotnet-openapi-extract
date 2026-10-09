@@ -231,6 +231,15 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SecurityRequirementNonLiteralScopes = "security.requirement-non-literal-scopes";
 
+    /// <summary>
+    /// For a 3.0 target, a <c>mutualTLS</c> security scheme (OpenAPI 3.1) is removed together with its
+    /// name in every requirement: requirements naming other schemes too are simplified, requirements
+    /// naming only it disappear, so the published auth contract changes. One per scheme. Location:
+    /// <c>#/components/securitySchemes/{name}</c>. Subjects: the scheme name, then one entry per
+    /// affected requirement (<c>"{where}: {A, B} → {B}"</c> or <c>"{where}: {A} → removed"</c>).
+    /// </summary>
+    public const string SecurityMutualTlsRemoved = "security.mutual-tls-removed";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

@@ -774,7 +774,8 @@ public sealed class OpenApiDocumentBuilder
         // ── Step 7: Security schemes ─────────────────────────────────────────
         ApplySecuritySchemes(document, securityResult);
         RecordOmittedSecuritySchemes(securityResult, ledger);
-        OmitUndeclaredSecuritySchemes(document, diagnostics, securityResult.OmittedSchemes);
+        var removedMutualTls = RemoveMutualTlsBefore31(document, ledger);
+        OmitUndeclaredSecuritySchemes(document, diagnostics, [.. securityResult.OmittedSchemes, .. removedMutualTls]);
 
         // ── Step 8: ProblemDetails ──────────────────────────────────────────
         if (ProblemDetailsDetector.IsRegistered(sourceContext))
@@ -1734,6 +1735,71 @@ public sealed class OpenApiDocumentBuilder
             document.Security ??= new List<OpenApiSecurityRequirement>();
             document.Security.Add(requirement);
         }
+    }
+
+    /// <summary>
+    /// For a 3.0 target, removes the <c>mutualTLS</c> schemes, which OpenAPI 3.0 cannot express (the
+    /// serializer would throw). Before the removal one degradation warning per scheme records the change
+    /// of the auth contract — every requirement that names it, simplified or gone — owned by the document
+    /// and located at the removed scheme. The requirements themselves are cleaned afterwards by
+    /// <see cref="OmitUndeclaredSecuritySchemes"/>; the names removed here are returned so that it does
+    /// not report them a second time.
+    /// </summary>
+    private static IReadOnlyList<string> RemoveMutualTlsBefore31(OpenApiDocument document, LossLedger ledger)
+    {
+        if (ledger.TargetVersion != OpenApiSpecVersion.OpenApi3_0 || document.Components?.SecuritySchemes is not { } schemes)
+            return [];
+
+        var removed = schemes
+            .Where(s => s.Value is OpenApiSecurityScheme { Type: SecuritySchemeType.MutualTLS })
+            .Select(s => s.Key)
+            .ToList();
+
+        foreach (var name in removed)
+        {
+            var affected = new List<string>();
+            void Describe(IList<OpenApiSecurityRequirement>? requirements, string where)
+            {
+                for (var i = 0; requirements != null && i < requirements.Count; i++)
+                {
+                    var names = requirements[i].Keys.Select(k => k.Reference.Id ?? string.Empty).ToList();
+                    if (!names.Contains(name))
+                        continue;
+                    var rest = names.Where(n => n != name).ToList();
+                    affected.Add($"{where}/{i}: {{{string.Join(", ", names)}}} → " +
+                                 (rest.Count > 0 ? $"{{{string.Join(", ", rest)}}}" : "removed"));
+                }
+            }
+
+            Describe(document.Security, "#/security");
+            foreach (var (path, pathItemInterface) in document.Paths)
+            {
+                if (pathItemInterface is not OpenApiPathItem { Operations: not null } pathItem)
+                    continue;
+                foreach (var (method, operation) in pathItem.Operations)
+                    Describe(operation.Security, $"{method.Method.ToUpperInvariant()} {path} security");
+            }
+
+            ledger.Add(new PendingLoss
+            {
+                Class           = LossClass.Degradation,
+                Code            = ExtractionDiagnosticCodes.SecurityMutualTlsRemoved,
+                Anchor          = LossAnchor.Document.Instance,
+                Location        = $"#/components/securitySchemes/{Validation.JsonPointerHelper.EncodeSegment(name)}",
+                Message         = $"mutualTLS security scheme '{name}' is omitted (requires 3.1), and the auth contract changes: " +
+                                  (affected.Count == 0
+                                      ? "no requirement names it."
+                                      : string.Join("; ", affected) +
+                                        " (a requirement that is removed no longer demands authentication through it)."),
+                Feature         = "securityScheme.type",
+                Action          = DiagnosticAction.SemanticsChanged,
+                RequiredVersion = OpenApiSpecVersion.OpenApi3_1,
+                Subjects        = [name, .. affected],
+            });
+            schemes.Remove(name);
+        }
+
+        return removed;
     }
 
     /// <summary>

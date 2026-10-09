@@ -487,6 +487,7 @@ public static class SecuritySchemeExtractor
             "Http"          => SecuritySchemeType.Http,
             "OAuth2"        => SecuritySchemeType.OAuth2,
             "OpenIdConnect" => SecuritySchemeType.OpenIdConnect,
+            "MutualTLS"     => SecuritySchemeType.MutualTLS,
             _               => null,
         };
     }
