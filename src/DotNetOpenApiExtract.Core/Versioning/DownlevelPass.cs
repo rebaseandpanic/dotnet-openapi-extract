@@ -17,13 +17,15 @@ internal static class DownlevelPass
         ArgumentNullException.ThrowIfNull(ledger);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        if (ledger.Entries.Count == 0)
+        // Step 1: records written during the build plus model rules on the finished document.
+        var entries = ledger.Entries.Concat(DownlevelRules.Evaluate(document, ledger.TargetVersion)).ToList();
+        if (entries.Count == 0)
             return;
 
-        var operations = IndexOperations(document);
+        var operations = IndexOperations(document, ledger.TargetVersion);
 
         var located = new List<(int Rank, int Order, ExtractionDiagnostic Diagnostic)>();
-        foreach (var entry in ledger.Entries)
+        foreach (var entry in entries)
         {
             // Reachability: a record whose anchor is not in the finished document is dropped.
             if (!TryLocate(entry.Anchor, operations, out var rank, out var order, out var location))
@@ -57,7 +59,13 @@ internal static class DownlevelPass
         }
     }
 
-    private static Dictionary<OpenApiOperation, (int Order, string Location)> IndexOperations(OpenApiDocument document)
+    /// <summary>
+    /// Every operation of the finished document with its location in the output: <c>METHOD /path</c>
+    /// where the operation keeps a Path Item field (or 3.2 <c>additionalOperations</c>), the JSON
+    /// pointer into <c>x-oai-additionalOperations</c> where the serializer moves it for 3.0/3.1.
+    /// </summary>
+    private static Dictionary<OpenApiOperation, (int Order, string Location)> IndexOperations(
+        OpenApiDocument document, OpenApiSpecVersion version)
     {
         var index = new Dictionary<OpenApiOperation, (int, string)>(ReferenceEqualityComparer.Instance);
         var order = 0;
@@ -67,11 +75,22 @@ internal static class DownlevelPass
                 continue;
 
             foreach (var (method, operation) in pathItem.Operations)
-                index[operation] = (order++, $"{method.Method.ToUpperInvariant()} {path}");
+            {
+                var location = OperationPlacement.SlotOf(method.Method, version) == OperationSlot.ExtensionAdditionalOperations
+                    ? Validation.JsonPointerHelper.ForOperation(path, method.Method, version)
+                    : $"{OperationKeyMethod(method)} {path}";
+                index[operation] = (order++, location);
+            }
         }
 
         return index;
     }
+
+    /// <summary>Standard methods in upper case; others keep the literal written to the output.</summary>
+    private static string OperationKeyMethod(HttpMethod method) =>
+        OperationPlacement.SlotOf(method.Method, OpenApiSpecVersion.OpenApi3_2) == OperationSlot.OwnField
+            ? method.Method.ToUpperInvariant()
+            : method.Method;
 
     private static bool TryLocate(
         LossAnchor anchor,

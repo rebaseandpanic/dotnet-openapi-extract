@@ -20,6 +20,23 @@ internal static class JsonPointerHelper
         => $"#/paths/{EncodeSegment(path)}/{method.ToLowerInvariant()}";
 
     /// <summary>
+    /// Builds a JSON Pointer for an operation as it is written for <paramref name="version"/>:
+    /// <c>#/paths/{path}/{method}</c> for a method with its own field,
+    /// <c>#/paths/{path}/additionalOperations/{METHOD}</c> in 3.2 and
+    /// <c>#/paths/{path}/x-oai-additionalOperations/{METHOD}</c> in 3.0/3.1 for any other method
+    /// (the method keeps its capitalization there).
+    /// </summary>
+    public static string ForOperation(string path, string method, Microsoft.OpenApi.OpenApiSpecVersion version)
+        => Versioning.OperationPlacement.SlotOf(method, version) switch
+        {
+            Versioning.OperationSlot.AdditionalOperations
+                => $"#/paths/{EncodeSegment(path)}/additionalOperations/{EncodeSegment(method)}",
+            Versioning.OperationSlot.ExtensionAdditionalOperations
+                => $"#/paths/{EncodeSegment(path)}/{Versioning.OperationPlacement.ExtensionName}/{EncodeSegment(method)}",
+            _ => ForOperation(path, method),
+        };
+
+    /// <summary>
     /// Builds a JSON Pointer for a parameter on an operation.
     /// </summary>
     public static string ForParameter(string path, string method, string paramName)

@@ -68,7 +68,9 @@ public class AcceptVerbsDiscoveryTests(HttpMethodsFixture fixture) : IClassFixtu
 
         paths.ContainsKey("/http-methods/empty").Should().BeFalse();
         paths.ContainsKey("/http-methods/custom-query").Should().BeFalse();
-        paths.Select(p => p.Value!.AsObject())
+        // No method is guessed for the custom attribute: no QUERY anywhere under this controller.
+        paths.Where(p => p.Key.StartsWith("/http-methods/", StringComparison.Ordinal))
+            .Select(p => p.Value!.AsObject())
             .Should().NotContain(item => item.ContainsKey("query") || item.ContainsKey("x-oai-additionalOperations")
                                          || item.ContainsKey("additionalOperations"));
     }

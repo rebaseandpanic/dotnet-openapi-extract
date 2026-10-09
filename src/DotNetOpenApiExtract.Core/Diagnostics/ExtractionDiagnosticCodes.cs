@@ -67,6 +67,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string OperationPathMethodConflict = "operation.path-method-conflict";
 
+    /// <summary>
+    /// For a 3.0/3.1 target, an operation whose method has no Path Item field there (QUERY, or a
+    /// non-standard method) is written whole into <c>x-oai-additionalOperations</c>, invisible to
+    /// tools of that version. One per operation. Location: the JSON pointer of the moved operation.
+    /// </summary>
+    public const string OperationMovedToAdditionalOperations = "operation.moved-to-additional-operations";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
