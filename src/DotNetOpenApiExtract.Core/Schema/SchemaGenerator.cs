@@ -62,7 +62,7 @@ public sealed class SchemaGenerator
             ["System.Int32"]         = (JsonSchemaType.Integer, "int32"),
             ["System.UInt32"]        = (JsonSchemaType.Integer, "int64"), // values above Int32.MaxValue
             ["System.Int64"]         = (JsonSchemaType.Integer, "int64"),
-            ["System.UInt64"]        = (JsonSchemaType.Integer, "int64"),
+            ["System.UInt64"]        = (JsonSchemaType.Integer, null), // no format holds ulong.MaxValue
 
             // Number types
             ["System.Single"]        = (JsonSchemaType.Number, "float"),

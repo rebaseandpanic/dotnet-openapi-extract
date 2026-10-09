@@ -77,7 +77,8 @@ public class ObjectAndLongEnumSchemaTests(LooseValuesFixture fixture) : IClassFi
         var plain = Property(version, "plainUlong");
 
         huge["type"]!.GetValue<string>().Should().Be(plain["type"]!.GetValue<string>());
-        huge["format"]!.GetValue<string>().Should().Be(plain["format"]!.GetValue<string>());
+        huge["format"].Should().BeNull(because: "no OpenAPI format holds ulong.MaxValue (int64 does not)");
+        plain["format"].Should().BeNull(because: "the same form as a ulong property");
         huge["enum"]!.AsArray().Select(v => v!.ToJsonString()).Should().Equal("0", "18446744073709551615");
         fixture.Text[version].Should().Contain("18446744073709551615", because: "the value is written as a number lexeme without loss");
     }

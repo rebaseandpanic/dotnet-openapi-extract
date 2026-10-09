@@ -502,7 +502,7 @@ Polymorphism (`[JsonPolymorphic]` with `TypeDiscriminatorPropertyName`, `IgnoreU
 
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
-| `format: int32` / `int64` | 3.0 | `byte`, `sbyte`, `short`, `ushort`, `int` → `int32`; `uint`, `long`, `ulong` → `int64` (`uint` values exceed the `int32` range) | written | = | = | — | `schema.property-format` | supported | — |
+| `format: int32` / `int64` | 3.0 | `byte`, `sbyte`, `short`, `ushort`, `int` → `int32`; `uint`, `long` → `int64` (`uint` values exceed the `int32` range); `ulong` → no `format` (its values exceed `int64`), also for enums backed by `ulong` | written | = | = | — | `schema.property-format` | supported | — |
 | `format: float` / `double` | 3.0 | `float` → `float`; `double`, `decimal` → `double` | written | = | = | — | `schema.property-format` | supported | — |
 | `format: date-time` / `date` / `time` / `duration` | 3.0 | `DateTime`, `DateTimeOffset` → `date-time`; `DateOnly` → `date`; `TimeOnly` → `time`; `TimeSpan` → `duration`; registry converters (`IsoDateTimeConverter`, `UnixDateTimeConverter`, …) | written | = | = | — | `schema.property-format` | supported | — |
 | `format: uuid` / `uri` | 3.0 | `Guid` → `uuid`; `Uri` and `[Url]` → `uri` | written | = | = | — | `schema.property-format` | supported | — |
