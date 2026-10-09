@@ -147,6 +147,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SchemaUnknownKeyConverter = "schema.unknown-key-converter";
 
+    /// <summary>
+    /// A value of <c>[AllowedValues]</c> / <c>[DeniedValues]</c> is not a value of the property's JSON
+    /// type (a string on an integer, …): that attribute's constraint is not written. Location: the
+    /// property. Subjects: <c>Type.Property</c>.
+    /// </summary>
+    public const string SchemaValueNotConvertible = "schema.value-not-convertible";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

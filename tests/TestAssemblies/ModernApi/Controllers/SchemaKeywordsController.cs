@@ -48,4 +48,8 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Dictionary keys.</summary>
     [HttpGet("dictionaries")]
     public ActionResult<DictionaryModel> Dictionaries() => new DictionaryModel();
+
+    /// <summary>Allowed and denied values.</summary>
+    [HttpGet("allowed-values")]
+    public ActionResult<AllowedValuesModel> AllowedValues() => new AllowedValuesModel();
 }

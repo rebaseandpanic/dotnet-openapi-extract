@@ -201,3 +201,60 @@ public class DictionaryModel
     [MaxLength(5)]
     public Dictionary<string, int> Limited { get; set; } = [];
 }
+
+/// <summary>Shipping speed.</summary>
+public enum ShippingSpeed
+{
+    /// <summary>Standard.</summary>
+    Standard = 0,
+
+    /// <summary>Express.</summary>
+    Express = 1,
+
+    /// <summary>Overnight.</summary>
+    Overnight = 2,
+}
+
+/// <summary>A nested object for a reference with allowed values.</summary>
+public class AllowedTarget
+{
+    /// <summary>Label.</summary>
+    public string Label { get; set; } = string.Empty;
+}
+
+/// <summary>Allowed and denied values.</summary>
+public class AllowedValuesModel
+{
+    /// <summary>Allowed strings, with a length limit.</summary>
+    [AllowedValues("red", "green")]
+    [MaxLength(10)]
+    public string Color { get; set; } = "red";
+
+    /// <summary>Allowed integers.</summary>
+    [AllowedValues(1, 2)]
+    public int Level { get; set; }
+
+    /// <summary>One allowed string.</summary>
+    [AllowedValues("only")]
+    public string Single { get; set; } = "only";
+
+    /// <summary>One allowed integer.</summary>
+    [AllowedValues(7)]
+    public int Lucky { get; set; }
+
+    /// <summary>Denied strings.</summary>
+    [DeniedValues("admin", "root")]
+    public string UserName { get; set; } = string.Empty;
+
+    /// <summary>Allowed members of an enum type with its own enum.</summary>
+    [AllowedValues(ShippingSpeed.Standard, ShippingSpeed.Express)]
+    public ShippingSpeed Speed { get; set; }
+
+    /// <summary>A string where an integer is expected.</summary>
+    [AllowedValues("one", "two")]
+    public int Mismatched { get; set; }
+
+    /// <summary>A reference with an allowed value, which goes into the reference's allOf wrapper.</summary>
+    [AllowedValues("x")]
+    public AllowedTarget Target { get; set; } = new();
+}

@@ -767,6 +767,8 @@ public sealed class SchemaGenerator
                 ApplyRange(inlinePropSchema, propAttrData, propInfo, serializedName, componentId);
             }
 
+            propSchema = ApplyAllowedAndDeniedValues(propSchema, propAttrData, propInfo, serializedName, componentId);
+
             properties[serializedName] = propSchema;
 
             // Mark as required if annotated or non-nullable (NRT).
@@ -1350,6 +1352,179 @@ public sealed class SchemaGenerator
             var text = AttributeHelper.GetConstructorArgument<string>(desc, 0);
             if (!string.IsNullOrEmpty(text)) schema.Description = text;
         }
+    }
+
+    /// <summary>
+    /// <c>[AllowedValues]</c> and <c>[DeniedValues]</c> on a property, combined with the schema's own
+    /// constraints by logical AND. Allowed values: <c>enum</c> (one value: <c>const</c> for a string in
+    /// 3.1+, otherwise a one-element <c>enum</c>), as a sibling keyword where the schema has no
+    /// <c>enum</c> of its own; where it has (an enum type), or the schema is the <c>allOf</c> wrapper of
+    /// a reference, the allowed values are a separate element of <c>allOf</c>: the type's own
+    /// <c>enum</c> is kept, no intersection is computed. Denied values: <c>not: {enum}</c> as a sibling.
+    /// Values not convertible to the schema's JSON type give a warning and no constraint.
+    /// </summary>
+    private IOpenApiSchema ApplyAllowedAndDeniedValues(
+        IOpenApiSchema propSchema, IList<CustomAttributeData> attrData, PropertyInfo property, string serializedName, string componentId)
+    {
+        var allowed = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.AllowedValues);
+        var denied = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DeniedValues);
+        if ((allowed == null && denied == null) || propSchema is not OpenApiSchema schema)
+            return propSchema;
+
+        var isWrapper = schema.AllOf is { Count: > 0 } && schema.AllOf[0] is OpenApiSchemaReference;
+        var jsonType = isWrapper ? null : schema.Type;
+        var propertyType = property.PropertyType;
+        var enumType = propertyType.IsEnum
+            ? propertyType
+            : IsNullableValueType(propertyType) && propertyType.GetGenericArguments()[0].IsEnum
+                ? propertyType.GetGenericArguments()[0]
+                : null;
+
+        IOpenApiSchema result = schema;
+
+        if (allowed != null && ConvertValues(allowed, jsonType, enumType, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        {
+            var constraint = allowedValues.Count == 1 ? SingleValueConstraint(allowedValues[0]) : new OpenApiSchema { Enum = allowedValues };
+            if (isWrapper)
+            {
+                schema.AllOf!.Add(constraint);
+            }
+            else if (schema.Enum is { Count: > 0 } || !schema.Type.HasValue)
+            {
+                // The schema's own enum stays whole (and a composite such as the nullable form of a
+                // reference stays as it is); the allowed values are a second schema to satisfy.
+                result = new OpenApiSchema { AllOf = [schema, constraint] };
+            }
+            else if (constraint.Const != null)
+            {
+                schema.Const = constraint.Const;
+            }
+            else
+            {
+                schema.Enum = constraint.Enum;
+            }
+        }
+
+        if (denied != null && ConvertValues(denied, jsonType, enumType, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+            ((OpenApiSchema)result).Not = new OpenApiSchema { Enum = deniedValues };
+
+        return result;
+    }
+
+    /// <summary>One allowed value: <c>const</c> for a string in 3.1+, otherwise a one-element <c>enum</c>.</summary>
+    private OpenApiSchema SingleValueConstraint(JsonNode? value)
+    {
+        if (_options.OpenApiVersion != OpenApiSpecVersion.OpenApi3_0 && value is JsonValue v && v.TryGetValue<string>(out var text))
+            return new OpenApiSchema { Const = text };
+        return new OpenApiSchema { Enum = [value] };
+    }
+
+    /// <summary>
+    /// The attribute's values as JSON values of the schema's type (<paramref name="jsonType"/>; any type
+    /// when <see langword="null"/>, a reference wrapper), or <see langword="null"/> with a warning when
+    /// one does not convert: numbers stay numbers, enum members become the schema's names or integers.
+    /// </summary>
+    private List<JsonNode?>? ConvertValues(
+        CustomAttributeData attribute, JsonSchemaType? jsonType, Type? enumType, PropertyInfo property,
+        string serializedName, string componentId, string attributeName)
+    {
+        var arguments = attribute.ConstructorArguments.Count == 1
+                        && attribute.ConstructorArguments[0].Value is IReadOnlyCollection<CustomAttributeTypedArgument> values
+            ? values
+            : (IReadOnlyCollection<CustomAttributeTypedArgument>)attribute.ConstructorArguments;
+
+        var result = new List<JsonNode?>();
+        foreach (var argument in arguments)
+        {
+            if (!TryConvertValue(argument, jsonType, enumType, out var node))
+            {
+                var typeName = property.DeclaringType?.FullName ?? componentId;
+                RecordLoss(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.SchemaValueNotConvertible,
+                    Anchor   = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]),
+                    Message  = $"[{attributeName}] on {typeName}.{property.Name} has the value {argument.Value ?? "null"}, " +
+                               "which is not a value of the property's JSON type: the constraint is not written.",
+                    Feature  = "schema.enum",
+                    Action   = DiagnosticAction.Omitted,
+                    Subjects = [$"{typeName}.{property.Name}"],
+                });
+                return null;
+            }
+
+            result.Add(node);
+        }
+
+        return result;
+    }
+
+    private static readonly HashSet<string> IntegralTypes = new(StringComparer.Ordinal)
+    {
+        "System.Byte", "System.SByte", "System.Int16", "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
+    };
+
+    private static bool TryConvertValue(CustomAttributeTypedArgument argument, JsonSchemaType? jsonType, Type? enumType, out JsonNode? node)
+    {
+        node = null;
+        bool Allows(JsonSchemaType t) => jsonType == null || (jsonType.Value & t) != 0;
+
+        var value = argument.Value;
+        if (value == null)
+            return jsonType == null || Allows(JsonSchemaType.Null);
+
+        if (argument.ArgumentType.IsEnum)
+        {
+            var field = argument.ArgumentType.GetFields(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(f => Equals(f.GetRawConstantValue(), value));
+            if (jsonType.HasValue && (jsonType.Value & JsonSchemaType.String) != 0 && field != null)
+            {
+                node = JsonValue.Create(field.Name);
+                return true;
+            }
+
+            if (Allows(JsonSchemaType.Integer))
+            {
+                node = JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture));
+                return true;
+            }
+
+            return false;
+        }
+
+        switch (value)
+        {
+            case string text when Allows(JsonSchemaType.String) && enumType == null:
+                node = JsonValue.Create(text);
+                return true;
+            case string text when enumType != null && jsonType.HasValue && (jsonType.Value & JsonSchemaType.String) != 0
+                                  && enumType.GetField(text) != null:
+                node = JsonValue.Create(text);
+                return true;
+            case bool flag when Allows(JsonSchemaType.Boolean):
+                node = JsonValue.Create(flag);
+                return true;
+        }
+
+        var typeName = argument.ArgumentType.FullName ?? string.Empty;
+        if (IntegralTypes.Contains(typeName) && (Allows(JsonSchemaType.Integer) || Allows(JsonSchemaType.Number)))
+        {
+            node = typeName == "System.UInt64"
+                ? JsonValue.Create(Convert.ToUInt64(value, CultureInfo.InvariantCulture))
+                : JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture));
+            return true;
+        }
+
+        if (typeName is "System.Double" or "System.Single" && Allows(JsonSchemaType.Number))
+        {
+            var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+            if (!double.IsFinite(number))
+                return false;
+            node = JsonValue.Create(number);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2014,6 +2189,8 @@ public sealed class SchemaGenerator
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MaxLength)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MinLength)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Range)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.AllowedValues)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.DeniedValues)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.RegularExpression)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.EmailAddress)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Url)
