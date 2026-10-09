@@ -23,7 +23,10 @@ public sealed class XmlDocEntry
     public IReadOnlyDictionary<string, string> Responses { get; init; } =
         new Dictionary<string, string>();
 
-    /// <summary>The text of the first &lt;example&gt;, if present.</summary>
+    /// <summary>
+    /// The text of the first &lt;example&gt;, if present: white space inside a line is kept, each line is
+    /// trimmed at its ends and blank leading and trailing lines are dropped.
+    /// </summary>
     public string? Example { get; init; }
 
     /// <summary>How many &lt;example&gt; elements the member has; only the first is used.</summary>
@@ -254,7 +257,7 @@ public sealed class XmlDocParser
     {
         var summary = GetInnerText(member.Element("summary"));
         var remarks = GetInnerText(member.Element("remarks"));
-        var example = GetInnerText(member.Element("example"));
+        var example = GetExampleText(member.Element("example"));
         var exampleCount = member.Elements("example").Count();
 
         var parameters = new Dictionary<string, string>();
@@ -306,6 +309,25 @@ public sealed class XmlDocParser
         text = WhitespaceRegex.Replace(text.Trim(), " ");
 
         return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    /// <summary>
+    /// The text of an <c>&lt;example&gt;</c> as data: white space inside a line is kept as written
+    /// (<c>"a  b"</c> stays two spaces); only the XML formatting is removed — each line is trimmed at
+    /// both ends (the indentation the compiler copies from <c>///</c> comments), blank lines before
+    /// and after the text are dropped, and lines are joined with <c>\n</c>.
+    /// </summary>
+    private static string? GetExampleText(XElement? element)
+    {
+        if (element == null) return null;
+
+        var sb = new System.Text.StringBuilder();
+        AppendInnerText(element, sb);
+        var lines = sb.ToString().Replace("\r\n", "\n").Split('\n').Select(line => line.Trim()).ToList();
+        while (lines.Count > 0 && lines[0].Length == 0) lines.RemoveAt(0);
+        while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+
+        return lines.Count == 0 ? null : string.Join("\n", lines);
     }
 
     private static void AppendInnerText(XElement element, System.Text.StringBuilder sb)

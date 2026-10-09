@@ -91,6 +91,9 @@ public class SchemaExampleTests(SchemaExampleFixture fixture) : IClassFixture<Sc
             data.Add(version, "withoutSummary", "7");
             data.Add(version, "inherited", "17");
             data.Add(version, "tint", "\"ruby\"");
+            data.Add(version, "spaced", "\"two  spaces\"");
+            data.Add(version, "spacedObject", "{\"text\": \"a  b\"}");
+            data.Add(version, "multiLine", "{\"a\": 1}");
         }
         return data;
     }

@@ -74,6 +74,22 @@ public class ExampleModel : ExampleBase
     [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
     public int Lenient { get; set; }
 
+    /// <summary>A string whose example keeps its inner spaces.</summary>
+    /// <example>two  spaces</example>
+    public string Spaced { get; set; } = string.Empty;
+
+    /// <summary>An object whose string value keeps its inner spaces.</summary>
+    /// <example>{"text": "a  b"}</example>
+    public Dictionary<string, string> SpacedObject { get; set; } = [];
+
+    /// <summary>An example over several lines.</summary>
+    /// <example>
+    /// {
+    ///   "a": 1
+    /// }
+    /// </example>
+    public Dictionary<string, int> MultiLine { get; set; } = [];
+
     /// <summary>A string enum.</summary>
     /// <example>ruby</example>
     public StjTint Tint { get; set; }
