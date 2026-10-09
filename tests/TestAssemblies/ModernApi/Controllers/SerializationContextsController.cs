@@ -50,6 +50,10 @@ public class SerializationContextsController : ControllerBase
     [HttpGet("mvc-rebate")]
     public ActionResult<Rebate> MvcRebate() => new PercentRebate { RebateCode = "C", DiscountPercent = 10 };
 
+    /// <summary>Customer profile returned as a typed result, serialized with the HTTP options.</summary>
+    [HttpGet("result-customer")]
+    public Ok<CustomerProfile> ResultCustomer() => TypedResults.Ok(new CustomerProfile { DisplayName = "Ann", LoyaltyPoints = 5 });
+
     /// <summary>Customer profiles as server-sent events.</summary>
     [HttpGet("sse-customers")]
     public ServerSentEventsResult<CustomerProfile> SseCustomers() => TypedResults.ServerSentEvents(Customers());

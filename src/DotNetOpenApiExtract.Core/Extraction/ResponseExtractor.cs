@@ -33,6 +33,19 @@ public sealed class ResponseInfo
     /// for example, SSE endpoints that declare <c>[Produces("text/event-stream")]</c> with no body.
     /// </summary>
     public bool ContentTypesExplicit { get; init; }
+
+    /// <summary>
+    /// True when the body is written by a typed <c>IResult</c> (<c>Ok&lt;T&gt;</c>, <c>Results&lt;…&gt;</c>
+    /// variants, …): ASP.NET Core serializes it with the HTTP JSON options
+    /// (<c>ConfigureHttpJsonOptions</c>), not the MVC ones, and ignores <c>[Produces]</c>.
+    /// </summary>
+    public bool BodyFromHttpResult { get; init; }
+
+    /// <summary>
+    /// The action returns an <c>IResult</c> whose status code is not statically known (untyped
+    /// <c>IResult</c>, a user-defined result, …): the response is written without a schema.
+    /// </summary>
+    internal bool UnknownResultStatus { get; init; }
 }
 
 /// <summary>
@@ -96,6 +109,10 @@ public static class ResponseExtractor
             ? null
             : signatureType;
 
+        // A typed IResult declares its own responses; explicit declarations win per status code.
+        if (signatureType != null && TypedResults.IsResult(signatureType))
+            return MergeWithResultResponses(declared.Select(d => d.Response).ToList(), signatureType);
+
         if (declared.Count == 0 && producesType == null)
             return InferFromReturnType(signatureType, defaultContentTypes, contentTypesExplicit);
 
@@ -128,6 +145,54 @@ public static class ResponseExtractor
                 ContentTypes = defaultContentTypes,
                 ContentTypesExplicit = contentTypesExplicit,
             });
+        }
+
+        return responses;
+    }
+
+    /// <summary>
+    /// The declared responses (their bodies, too, are written by the result, in the HTTP context)
+    /// followed by the responses the typed result <paramref name="resultType"/> writes, for the status
+    /// codes not declared. A result whose status is not statically known
+    /// adds a 200 response without a body, flagged so the caller can report it, unless something
+    /// declares a response.
+    /// </summary>
+    private static IReadOnlyList<ResponseInfo> MergeWithResultResponses(List<ResponseInfo> declared, Type resultType)
+    {
+        // Whatever an IResult action declares is still written by the result, with the HTTP JSON options.
+        var responses = declared
+            .Select(r => r.BodyType == null || r.BodyFromHttpResult ? r : new ResponseInfo
+            {
+                StatusCode           = r.StatusCode,
+                BodyType             = r.BodyType,
+                Description          = r.Description,
+                ContentTypes         = r.ContentTypes,
+                ContentTypesExplicit = r.ContentTypesExplicit,
+                BodyFromHttpResult   = true,
+            })
+            .ToList();
+        var codes = declared.Select(r => r.StatusCode).ToHashSet();
+
+        var inferred = TypedResults.Responses(resultType);
+        if (inferred == null)
+        {
+            if (responses.Count == 0)
+            {
+                responses.Add(new ResponseInfo
+                {
+                    StatusCode          = 200,
+                    ContentTypes        = [],
+                    UnknownResultStatus = true,
+                });
+            }
+
+            return responses;
+        }
+
+        foreach (var response in inferred)
+        {
+            if (codes.Add(response.StatusCode))
+                responses.Add(response);
         }
 
         return responses;

@@ -1074,12 +1074,16 @@ public sealed class OpenApiDocumentBuilder
 
             var apiResponse = new OpenApiResponse { Description = description };
 
+            if (resp.UnknownResultStatus)
+                RecordUnknownResultStatus(ledger, operation, action.Method.ReturnType);
+
             if (resp.ContentTypes.Count > 0 && (resp.BodyType != null || resp.ContentTypesExplicit))
             {
                 // Emit a Content section when there is a typed body, or when the content types
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
-                apiResponse.Content = BuildResponseContent(
-                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots);
+                apiResponse.Content = resp.BodyFromHttpResult
+                    ? BuildHttpResultContent(resp.ContentTypes, resp.BodyType!, httpSlots)
+                    : BuildResponseContent(resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -1094,6 +1098,46 @@ public sealed class OpenApiDocumentBuilder
     // =========================================================================
     // Response content by media type
     // =========================================================================
+
+    /// <summary>
+    /// The content of a typed result's body (<c>Ok&lt;T&gt;</c> and the like): the media types the result
+    /// writes, with the schema of <paramref name="bodyType"/> in the HTTP serialization context,
+    /// filled in after the operation loop.
+    /// </summary>
+    private static Dictionary<string, IOpenApiMediaType> BuildHttpResultContent(
+        IEnumerable<string> contentTypes, Type bodyType, List<Action<SchemaGenerator>> httpSlots)
+    {
+        var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+        foreach (var contentType in contentTypes)
+        {
+            var mediaType = new OpenApiMediaType();
+            content[contentType] = mediaType;
+            httpSlots.Add(httpGenerator => mediaType.Schema = httpGenerator.GenerateSchema(bodyType));
+        }
+
+        return content;
+    }
+
+    /// <summary>
+    /// An action returning an <c>IResult</c> whose status is not statically known gets a 200 response
+    /// without a schema; one warning on the operation says so.
+    /// </summary>
+    private static void RecordUnknownResultStatus(LossLedger ledger, OpenApiOperation operation, Type returnType)
+    {
+        var name = TypeDisplayName(returnType);
+        ledger.Add(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.ResponseResultStatusUnknown,
+            Anchor   = new LossAnchor.Operation(operation),
+            Message  = $"the action returns {name}, whose status code and body are not statically known: " +
+                       "written as a 200 response without a schema. Return a typed result (Ok<T>, Results<…>) " +
+                       "or declare [ProducesResponseType].",
+            Feature  = "responses",
+            Action   = DiagnosticAction.Omitted,
+            Subjects = [name],
+        });
+    }
 
     /// <summary>Sequential media types whose items are JSON texts (spec 3.2 §4.14.3.1, as .NET formatters produce them).</summary>
     private static readonly HashSet<string> SequentialJsonMediaTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -1799,8 +1843,9 @@ public sealed class OpenApiDocumentBuilder
                 {
                     // Body types per status, so each global media type gets its own form
                     // (an asynchronous sequence differs between JSON and sequential media types).
+                    // Typed results write their own content type: [Produces] does not apply to them.
                     var bodyTypes = ResponseExtractor.ExtractResponses(action)
-                        .Where(r => r.BodyType != null)
+                        .Where(r => r.BodyType != null && !r.BodyFromHttpResult)
                         .GroupBy(r => r.StatusCode == ResponseExtractor.DefaultStatusCode ? "default" : r.StatusCode.ToString())
                         .ToDictionary(g => g.Key, g => g.First().BodyType!, StringComparer.Ordinal);
 

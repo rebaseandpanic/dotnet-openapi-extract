@@ -124,6 +124,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SerializationContextsSharedTypes = "serialization-contexts.shared-types";
 
+    /// <summary>
+    /// An action returns an <c>IResult</c> whose status code is not statically known (an untyped
+    /// <c>IResult</c>, a user-defined result, <c>JsonHttpResult&lt;T&gt;</c>, …) and declares no response:
+    /// it is written as a 200 response without a schema. Location: the operation. Subjects: the return type.
+    /// </summary>
+    public const string ResponseResultStatusUnknown = "response.result-status-unknown";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
