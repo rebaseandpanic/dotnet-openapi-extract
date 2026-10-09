@@ -186,4 +186,19 @@ public class SchemaExampleTests(SchemaExampleFixture fixture) : IClassFixture<Sc
         fixture.Diagnostics[version].Where(d => d.Location == twiceBroken).Select(d => d.Code)
             .Should().BeEquivalentTo([ExampleMultiple, ExampleNotParsable]);
     }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void PolymorphicBaseExample_IsOnTheUnion_NotOnItsVariants(OpenApiSpecVersion version)
+    {
+        var union = Component(version, "ExampleShape");
+        union.ContainsKey("oneOf").Should().BeTrue(because: "the base is a union component");
+        Example(union, version).Should().Be(Json("{\"kind\": \"circle\", \"radius\": 2}"));
+        Example(Component(version, "ExampleCircleAsExampleShape"), version).Should().BeNull();
+        fixture.Diagnostics[version].Should().NotContain(d => d.Location == "#/components/schemas/ExampleShape");
+
+        Example(Component(version, "ExampleBrokenShape"), version).Should().BeNull();
+        fixture.Diagnostics[version].Where(d => d.Location == "#/components/schemas/ExampleBrokenShape").Select(d => d.Code)
+            .Should().BeEquivalentTo([ExampleMultiple, ExampleNotParsable]);
+    }
 }

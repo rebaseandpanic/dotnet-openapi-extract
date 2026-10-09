@@ -152,3 +152,34 @@ public class NumberPlacementModel
     [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
     public List<int> Items { get; set; } = [];
 }
+
+/// <summary>A polymorphic base with an example of the union.</summary>
+/// <example>{"kind": "circle", "radius": 2}</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(ExampleCircle), "circle")]
+public abstract class ExampleShape
+{
+}
+
+/// <summary>A circle.</summary>
+public sealed class ExampleCircle : ExampleShape
+{
+    /// <summary>Radius.</summary>
+    public int Radius { get; set; }
+}
+
+/// <summary>A polymorphic base whose examples cannot be written.</summary>
+/// <example>[1,</example>
+/// <example>{}</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(ExampleBrokenSquare), "square")]
+public abstract class ExampleBrokenShape
+{
+}
+
+/// <summary>A square.</summary>
+public sealed class ExampleBrokenSquare : ExampleBrokenShape
+{
+    /// <summary>Side.</summary>
+    public int Side { get; set; }
+}

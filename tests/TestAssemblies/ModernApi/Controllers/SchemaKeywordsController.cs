@@ -133,4 +133,12 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>[Length] next to the other length attributes.</summary>
     [HttpGet("length-intersection")]
     public ActionResult<LengthIntersectionModel> LengthIntersection() => new LengthIntersectionModel();
+
+    /// <summary>A polymorphic base with an example.</summary>
+    [HttpGet("example-shape")]
+    public ActionResult<ExampleShape> ExampleShape() => new ExampleCircle();
+
+    /// <summary>A polymorphic base whose examples cannot be written.</summary>
+    [HttpGet("example-broken-shape")]
+    public ActionResult<ExampleBrokenShape> ExampleBrokenShape() => new ExampleBrokenSquare();
 }

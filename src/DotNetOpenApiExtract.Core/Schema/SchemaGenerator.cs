@@ -1070,6 +1070,9 @@ public sealed class SchemaGenerator
             _schemas[unionId] = union;
             _schemaIdToType[unionId] = baseType;
 
+            // The base's XML example describes the union (any alternative); variants do not copy it.
+            ApplyTypeExample(union, baseType, unionId);
+
             var alternatives = new List<IOpenApiSchema>();
             var mapping = new Dictionary<string, OpenApiSchemaReference>(StringComparer.Ordinal);
             var mappedValues = new List<object>();
@@ -1185,8 +1188,8 @@ public sealed class SchemaGenerator
             var schema = new OpenApiSchema { Type = JsonSchemaType.Object };
             _schemas[directId] = schema;
             _schemaIdToType[directId] = type;
+            // The type's example belongs to its union component, not to this direct-use object.
             PopulateObjectSchema(type, schema, directId);
-            ApplyTypeExample(schema, type, directId);
             return new OpenApiSchemaReference(directId, null);
         }
         finally
