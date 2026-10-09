@@ -1020,6 +1020,9 @@ public sealed class OpenApiDocumentBuilder
             .Where(p => p.Location == OurParameterLocation.Form)
             .ToList();
 
+        // [Consumes] on the action, else on the controller; global filters are applied later.
+        var consumes = ResolveConsumesContentTypes(actionAttrs) ?? ResolveConsumesContentTypes(controllerAttrs);
+
         if (bodyParam != null)
         {
             var bodySchema = schemaGenerator.GenerateSchema(bodyParam.Type);
@@ -1027,10 +1030,7 @@ public sealed class OpenApiDocumentBuilder
             {
                 Required = bodyParam.IsRequired,
                 Description = bodyParam.Description,
-                Content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal)
-                {
-                    ["application/json"] = new OpenApiMediaType { Schema = bodySchema },
-                },
+                Content = RequestContent(consumes ?? ["application/json"], bodySchema),
             };
         }
         else if (formParams.Count > 0)
@@ -1050,10 +1050,7 @@ public sealed class OpenApiDocumentBuilder
 
             operation.RequestBody = new OpenApiRequestBody
             {
-                Content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal)
-                {
-                    ["multipart/form-data"] = new OpenApiMediaType { Schema = formSchema },
-                },
+                Content = RequestContent(consumes ?? ["multipart/form-data"], formSchema),
             };
         }
 
@@ -1093,6 +1090,47 @@ public sealed class OpenApiDocumentBuilder
         ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document);
 
         return operation;
+    }
+
+    // =========================================================================
+    // Request body media types
+    // =========================================================================
+
+    /// <summary>
+    /// The media types of the first <c>[Consumes]</c> in <paramref name="attributes"/>, from both
+    /// constructors (<c>(string, params string[])</c> and <c>(Type, string, params string[])</c>);
+    /// <see langword="null"/> when there is none or it names no media type.
+    /// </summary>
+    private static IReadOnlyList<string>? ResolveConsumesContentTypes(IList<System.Reflection.CustomAttributeData> attributes)
+    {
+        var consumes = AttributeHelper.GetAttribute(attributes, AttributeHelper.Names.Consumes);
+        if (consumes == null)
+            return null;
+
+        var result = new List<string>();
+        foreach (var argument in consumes.ConstructorArguments)
+        {
+            switch (argument.Value)
+            {
+                case string single when !string.IsNullOrWhiteSpace(single):
+                    result.Add(single);
+                    break;
+                case IReadOnlyCollection<System.Reflection.CustomAttributeTypedArgument> many:
+                    result.AddRange(many.Select(m => m.Value).OfType<string>().Where(m => !string.IsNullOrWhiteSpace(m)));
+                    break;
+            }
+        }
+
+        return result.Count > 0 ? result : null;
+    }
+
+    /// <summary>One media type entry per content type, all with <paramref name="schema"/>.</summary>
+    private static Dictionary<string, IOpenApiMediaType> RequestContent(IEnumerable<string> contentTypes, IOpenApiSchema schema)
+    {
+        var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+        foreach (var contentType in contentTypes)
+            content[contentType] = new OpenApiMediaType { Schema = schema };
+        return content;
     }
 
     // =========================================================================

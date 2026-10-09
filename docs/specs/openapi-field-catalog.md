@@ -271,10 +271,10 @@ Each section covers one OpenAPI object. Each row is one field path. Rows for a f
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
 | `requestBody.description` | 3.0 | `[SwaggerRequestBody("…")]` / `[SwaggerRequestBody(Description = …)]` → `[SwaggerParameter]` → `[Description]` on the `[FromBody]` parameter | written | = | = | — | `operation.request-body-description` | supported | — |
-| `requestBody.content` (body) | 3.0 | `[FromBody]`, or `[ApiController]` inference → always the `application/json` key; global `[Consumes]` from `AddControllers(o => o.Filters.Add(new ConsumesAttribute(...)))` replaces the key | written | = | = | — | — | supported | — |
-| `requestBody.content` from action/controller `[Consumes]` | 3.0 | `[Consumes("application/xml")]` on the action or controller | media types of the body taken from `[Consumes]`: action wins over controller, controller wins over global | = | = | — | — | bug: ignored, still `application/json` (verified); stage 1 | stage-1 |
+| `requestBody.content` (body) | 3.0 | `[FromBody]`, or `[ApiController]` inference → the `application/json` key unless `[Consumes]` declares media types (next row); global `[Consumes]` from `AddControllers(o => o.Filters.Add(new ConsumesAttribute(...)))` replaces the key | written | = | = | — | — | supported | — |
+| `requestBody.content` from action/controller `[Consumes]` | 3.0 | `[Consumes("application/xml")]` on the action or controller | media types of the body taken from `[Consumes]`: action wins over controller, controller wins over global | = | = | — | — | supported | — |
 | `requestBody.content` (form) | 3.0 | `[FromForm]` parameters, `IFormFile`, `IFormFileCollection` → a synthetic object under `multipart/form-data` | written | = | = | — | — | supported | — |
-| `requestBody.content` form media type from `[Consumes]` | 3.0 | `[Consumes("application/x-www-form-urlencoded")]` etc. on the action or controller | form media type from `[Consumes]`; without `[Consumes]` `multipart/form-data` as today | = | = | — | — | bug: always `multipart/form-data` (verified); stage 1 | stage-1 |
+| `requestBody.content` form media type from `[Consumes]` | 3.0 | `[Consumes("application/x-www-form-urlencoded")]` etc. on the action or controller | form media type from `[Consumes]`; without `[Consumes]` `multipart/form-data` as today | = | = | — | — | supported | — |
 | `requestBody.required` | 3.0 | body: parameter required logic (§12); form body: not set | written | = | = | — | — | supported | — |
 | `requestBody.x-*` | 3.0 | — | never | never | never | — | — | not planned: no code source | — |
 

@@ -148,6 +148,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - JSON serializer options: `PropertyNamingPolicy`, `DictionaryKeyPolicy`, `DefaultIgnoreCondition`, `NumberHandling`, global `Converters.Add(...)`. Read separately per serialization context, as ASP.NET Core applies them: controller bodies follow `AddControllers().AddJsonOptions(...)` only; `ConfigureHttpJsonOptions(...)` configures minimal APIs, typed `IResult` bodies and server-sent events data and never reaches controllers. When the two differ in naming policy, ignore condition, number handling or converters, a type used in both contexts gets a second component `{Id}Http` described by the HTTP options, and one warning names those types
 - Global response headers from middleware (`app.Use(...)`, `UseMiddleware<T>`) — `Response.Headers.Append/Add/TryAdd` and indexer assignments
 - Global `[Consumes]` / `[Produces]` from MVC filter registrations
+- Request body media types from `[Consumes]` (action, then controller, then a global filter; default `application/json`); a form body uses its `[Consumes]` media type (e.g. `application/x-www-form-urlencoded`), default `multipart/form-data`
 - Document-level tags with descriptions + `externalDocs` from `c.AddTag(...)`
 - FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`)
 - In-project `const string` values via `SemanticModel.GetConstantValue`
