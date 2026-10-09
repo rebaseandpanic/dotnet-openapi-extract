@@ -71,6 +71,11 @@ public class SchemaKeywordsController : ControllerBase
         [FromQuery, System.ComponentModel.DefaultValue(typeof(Guid), "0f8fad5b-d9cb-469f-a165-70867728950e")] Guid id,
         [FromQuery, System.ComponentModel.DefaultValue(typeof(int), "many")] int broken,
         [FromQuery, System.ComponentModel.DefaultValue(5)] int literal,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(ShippingSpeed), "Express")] ShippingSpeed speed,
+        [FromQuery, System.ComponentModel.DefaultValue(ShippingSpeed.Overnight)] ShippingSpeed literalSpeed,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(DateTime), "01/02/2024")] DateTime since,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(TimeSpan), "1:02:03")] TimeSpan timeout,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(Uri), "https://example.com")] Uri? home,
         [FromQuery] int page = 1) => Ok();
 
     /// <summary>Allowed and denied ulong enum members.</summary>

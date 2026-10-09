@@ -1629,7 +1629,11 @@ public sealed class SchemaGenerator
         if (attribute == null)
             return;
 
-        var result = DefaultValueConverter.FromAttribute(attribute);
+        // The JSON type of the value: the schema's own, or the numeric branch of a number union.
+        var valueType = schema.Type is { } own && own != JsonSchemaType.Null
+            ? own
+            : NumberUnionBranches(schema)?.Number.Type ?? (schema.AllOf is [OpenApiSchema first, ..] ? first.Type : null);
+        var result = DefaultValueConverter.FromAttribute(attribute, valueType);
         if (result.HasValue)
         {
             schema.Default = result.Value;

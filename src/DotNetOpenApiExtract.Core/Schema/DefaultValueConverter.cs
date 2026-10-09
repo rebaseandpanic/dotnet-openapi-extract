@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.OpenApi;
 using DotNetOpenApiExtract.Core.Loading;
 
 namespace DotNetOpenApiExtract.Core.Schema;
@@ -11,7 +13,9 @@ namespace DotNetOpenApiExtract.Core.Schema;
 /// </summary>
 /// <remarks>
 /// <c>[DefaultValue(Type, string)]</c> is converted to the type in the invariant culture: numbers
-/// become JSON numbers, <c>bool</c> a boolean, <c>Guid</c> and other text-represented types a string.
+/// become JSON numbers, <c>bool</c> a boolean, <c>Guid</c> a string, dates and times the string
+/// System.Text.Json writes for them (RFC 3339), an enum its name or number by the schema's form.
+/// A type the converter does not know gives no value, with a reason.
 /// A literal (<c>[DefaultValue(5)]</c>, <c>int page = 1</c>) keeps its JSON type.
 /// </remarks>
 internal static class DefaultValueConverter
@@ -19,18 +23,45 @@ internal static class DefaultValueConverter
     /// <summary>The outcome: the JSON value, or the reason it could not be converted.</summary>
     public readonly record struct Result(bool HasValue, JsonNode? Value, string? Error);
 
-    /// <summary>Converts the <c>[DefaultValue]</c> attribute <paramref name="attribute"/>.</summary>
-    public static Result FromAttribute(CustomAttributeData attribute)
+    /// <summary>
+    /// Converts the <c>[DefaultValue]</c> attribute <paramref name="attribute"/>. <paramref name="schemaType"/>
+    /// is the JSON type of the schema the default goes on: an enum default is the member's name when
+    /// the enum is written as strings, its number otherwise.
+    /// </summary>
+    public static Result FromAttribute(CustomAttributeData attribute, JsonSchemaType? schemaType)
     {
         var args = attribute.ConstructorArguments;
         if (args.Count == 2 && args[0].Value is Type type && args[1].Value is string text)
-            return FromText(type, text);
+            return FromText(type, text, schemaType);
 
-        if (args.Count == 1)
-            return args[0].Value is { } literal ? new Result(true, FromLiteral(literal), null) : new Result(false, null, null);
+        if (args.Count == 1 && args[0].Value is { } literal)
+        {
+            if (args[0].ArgumentType.IsEnum)
+                return FromEnumValue(args[0].ArgumentType, literal, schemaType);
+            return new Result(true, FromLiteral(literal), null);
+        }
 
         return new Result(false, null, null);
     }
+
+    private static bool WritesStrings(JsonSchemaType? schemaType) =>
+        schemaType.HasValue && (schemaType.Value & JsonSchemaType.String) != 0;
+
+    /// <summary>An enum member's raw value: its name for a string enum schema, else its number.</summary>
+    private static Result FromEnumValue(Type enumType, object raw, JsonSchemaType? schemaType)
+    {
+        if (!WritesStrings(schemaType))
+            return new Result(true, SchemaGenerator.IntegralValue(raw), null);
+
+        var field = enumType.GetFields(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(f => Equals(f.GetRawConstantValue(), raw));
+        return field != null
+            ? new Result(true, JsonValue.Create(field.Name), null)
+            : new Result(false, null, $"{raw} is not a named member of {enumType.Name}");
+    }
+
+    /// <summary>The value as System.Text.Json writes it (a JSON string for dates and times).</summary>
+    private static JsonNode Wire<T>(T value) =>
+        JsonValue.Create(JsonSerializer.Deserialize<string>(JsonSerializer.Serialize(value))!);
 
     /// <summary>
     /// The JSON value of a literal: numbers stay numbers, <c>bool</c> a boolean, everything else
@@ -54,8 +85,25 @@ internal static class DefaultValueConverter
         _           => JsonValue.Create(Convert.ToString(literal, CultureInfo.InvariantCulture)),
     };
 
-    private static Result FromText(Type type, string text)
+    /// <summary>Types whose text the converter reads; others are reported, never guessed.</summary>
+    private static readonly HashSet<string> Known = new(StringComparer.Ordinal)
     {
+        "System.Decimal", "System.Double", "System.Single", "System.Int32", "System.Int64", "System.Int16",
+        "System.Byte", "System.SByte", "System.UInt16", "System.UInt32", "System.UInt64", "System.Boolean",
+        "System.String", "System.Guid", "System.DateTime", "System.DateTimeOffset", "System.DateOnly",
+        "System.TimeOnly", "System.TimeSpan", "System.Char",
+    };
+
+    private static Result FromText(Type type, string text, JsonSchemaType? schemaType)
+    {
+        if (type.IsEnum)
+        {
+            var field = type.GetField(text, BindingFlags.Public | BindingFlags.Static);
+            return field == null
+                ? new Result(false, null, $"\"{text}\" is not a member of {type.Name}")
+                : FromEnumValue(type, field.GetRawConstantValue()!, schemaType);
+        }
+
         var culture = CultureInfo.InvariantCulture;
         var name = type.FullName ?? type.Name;
 
@@ -75,15 +123,20 @@ internal static class DefaultValueConverter
             "System.Boolean" => bool.TryParse(text, out var flag) ? JsonValue.Create(flag) : null,
             "System.String"  => JsonValue.Create(text),
             "System.Guid"    => Guid.TryParse(text, out var guid) ? JsonValue.Create(guid.ToString("D")) : null,
-            "System.DateTime" => DateTime.TryParse(text, culture, DateTimeStyles.RoundtripKind, out _) ? JsonValue.Create(text) : null,
-            "System.DateTimeOffset" => DateTimeOffset.TryParse(text, culture, DateTimeStyles.None, out _) ? JsonValue.Create(text) : null,
-            "System.TimeSpan" => TimeSpan.TryParse(text, culture, out _) ? JsonValue.Create(text) : null,
-            _ when type.IsEnum => type.GetField(text, BindingFlags.Public | BindingFlags.Static) != null ? JsonValue.Create(text) : null,
-            _ => JsonValue.Create(text),
+            "System.DateTime" => DateTime.TryParse(text, culture, DateTimeStyles.RoundtripKind, out var dt) ? Wire(dt) : null,
+            "System.DateTimeOffset" => DateTimeOffset.TryParse(text, culture, DateTimeStyles.None, out var dto) ? Wire(dto) : null,
+            "System.DateOnly" => DateOnly.TryParse(text, culture, out var date) ? Wire(date) : null,
+            "System.TimeOnly" => TimeOnly.TryParse(text, culture, out var time) ? Wire(time) : null,
+            "System.TimeSpan" => TimeSpan.TryParse(text, culture, out var span) ? Wire(span) : null,
+            "System.Char"     => text.Length == 1 ? JsonValue.Create(text) : null,
+            _ => null,
         };
 
-        return value != null
-            ? new Result(true, value, null)
-            : new Result(false, null, $"\"{text}\" is not a valid {type.Name}");
+        if (value != null)
+            return new Result(true, value, null);
+
+        return Known.Contains(name)
+            ? new Result(false, null, $"\"{text}\" is not a valid {type.Name}")
+            : new Result(false, null, $"values of {type.FullName} are not converted from text by the extractor");
     }
 }

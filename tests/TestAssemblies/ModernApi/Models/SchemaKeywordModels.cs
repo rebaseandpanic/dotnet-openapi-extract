@@ -339,6 +339,31 @@ public class DefaultValuesModel
     /// <summary>A literal default.</summary>
     [System.ComponentModel.DefaultValue(5)]
     public int Literal { get; set; } = 5;
+
+    /// <summary>An enum default by name on a numeric enum.</summary>
+    [System.ComponentModel.DefaultValue(typeof(ShippingSpeed), "Express")]
+    public ShippingSpeed Speed { get; set; } = ShippingSpeed.Express;
+
+    /// <summary>An enum literal default on a numeric enum.</summary>
+    [System.ComponentModel.DefaultValue(ShippingSpeed.Overnight)]
+    public ShippingSpeed LiteralSpeed { get; set; } = ShippingSpeed.Overnight;
+
+    /// <summary>An enum default on an enum written as strings.</summary>
+    [System.ComponentModel.DefaultValue(typeof(ShippingSpeed), "Express")]
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+    public ShippingSpeed NamedSpeed { get; set; } = ShippingSpeed.Express;
+
+    /// <summary>A date default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(DateTime), "01/02/2024")]
+    public DateTime Since { get; set; }
+
+    /// <summary>A time span default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(TimeSpan), "1:02:03")]
+    public TimeSpan Timeout { get; set; }
+
+    /// <summary>A default of a type the extractor does not convert.</summary>
+    [System.ComponentModel.DefaultValue(typeof(Uri), "https://example.com")]
+    public Uri? Home { get; set; }
 }
 
 /// <summary>Allowed and denied values on members of an enum over ulong.</summary>

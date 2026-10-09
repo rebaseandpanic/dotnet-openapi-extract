@@ -67,6 +67,10 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
                 data.Add(version, "greeting", "\"hello\"");
                 data.Add(version, "id", "\"0f8fad5b-d9cb-469f-a165-70867728950e\"");
                 data.Add(version, "literal", "5");
+                data.Add(version, "speed", "1");
+                data.Add(version, "literalSpeed", "2");
+                data.Add(version, "since", "\"2024-01-02T00:00:00\"");
+                data.Add(version, "timeout", "\"01:02:03\"");
             }
             return data;
         }
@@ -109,8 +113,8 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
 
         var warnings = diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible).ToList();
         warnings.Where(d => d.Location == "#/components/schemas/DefaultValuesModel/properties/broken").Should().ContainSingle();
-        warnings.Where(d => d.Location == "GET /keywords/parameter-defaults").Should().ContainSingle()
-            .Which.Subjects.Should().Equal("broken");
+        warnings.Where(d => d.Location == "GET /keywords/parameter-defaults" && d.Subjects.SequenceEqual(new[] { "broken" }))
+            .Should().ContainSingle();
     }
 
     [Theory]
@@ -121,4 +125,26 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
     }
 
     public static TheoryData<OpenApiSpecVersion> AllVersions => [.. VersionedDocumentHarness.Versions];
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void EnumDefault_OnAStringEnum_IsTheName(OpenApiSpecVersion version)
+    {
+        PropertyDefault(fixture.Builds[version].Document, "namedSpeed")!.ToJsonString().Should().Be("\"Express\"");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void DefaultOfATypeTheExtractorDoesNotConvert_IsLeftOut_WithOneWarningPerPlace(OpenApiSpecVersion version)
+    {
+        var (_, document, diagnostics) = fixture.Builds[version];
+
+        PropertyDefault(document, "home").Should().BeNull();
+        ParameterDefault(document, "home").Should().BeNull();
+        diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible
+                               && d.Location == "#/components/schemas/DefaultValuesModel/properties/home").Should().ContainSingle();
+        diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible
+                               && d.Location == "GET /keywords/parameter-defaults" && d.Subjects.SequenceEqual(new[] { "home" }))
+            .Should().ContainSingle();
+    }
 }

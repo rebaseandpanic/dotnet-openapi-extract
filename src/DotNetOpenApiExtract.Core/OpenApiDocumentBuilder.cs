@@ -981,7 +981,7 @@ public sealed class OpenApiDocumentBuilder
             {
                 if (param.DefaultValueAttribute != null)
                 {
-                    var converted = DefaultValueConverter.FromAttribute(param.DefaultValueAttribute);
+                    var converted = DefaultValueConverter.FromAttribute(param.DefaultValueAttribute, mutableParamSchema.Type);
                     if (converted.HasValue)
                         mutableParamSchema.Default = converted.Value;
                     else if (converted.Error != null)

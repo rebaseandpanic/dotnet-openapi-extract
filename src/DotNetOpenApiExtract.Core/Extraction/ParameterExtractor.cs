@@ -514,7 +514,7 @@ public static class ParameterExtractor
     {
         if (attribute.ConstructorArguments is [{ Value: Type }, { Value: string }])
         {
-            var converted = Schema.DefaultValueConverter.FromAttribute(attribute);
+            var converted = Schema.DefaultValueConverter.FromAttribute(attribute, schemaType: null);
             if (!converted.HasValue || converted.Value is not System.Text.Json.Nodes.JsonValue value)
                 return null;
             return value.GetValue<object>();
