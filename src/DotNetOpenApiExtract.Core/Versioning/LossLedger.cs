@@ -48,6 +48,14 @@ internal abstract record LossAnchor
     public sealed record Component(string Id) : LossAnchor;
 
     /// <summary>
+    /// The first media type of an operation's request body, as the finished document has it (a
+    /// global <c>[Consumes]</c> may replace the keys after the body is built). It is reachable while
+    /// the operation is and the body has content; its location is
+    /// <c>…/requestBody/content/{first media type}</c>.
+    /// </summary>
+    public sealed record RequestBodyContent(OpenApiOperation Target) : LossAnchor;
+
+    /// <summary>
     /// A node inside the output under <paramref name="Parent"/>, addressed by the unescaped segments
     /// of its relative path (for example <c>responses</c>, <c>200</c>, <c>content</c>,
     /// <c>application/x-ndjson</c> under an operation). It is reachable while its root anchor is; its

@@ -187,6 +187,13 @@ internal static class DownlevelPass
                 place = new Located(1, found.Order, found.Location, Segments(found.Pointer));
                 return true;
 
+            case LossAnchor.RequestBodyContent { Target: var bodyOperation }
+                when operations.TryGetValue(bodyOperation, out var bodyFound)
+                     && bodyOperation.RequestBody?.Content is { Count: > 0 } content:
+                var bodySegments = Segments(bodyFound.Pointer).Concat(["requestBody", "content", content.Keys.First()]).ToArray();
+                place = new Located(1, bodyFound.Order, Pointer(bodySegments), bodySegments);
+                return true;
+
             case LossAnchor.Component { Id: var id } when components.TryGetValue(id, out var componentOrder):
                 var schemaPointer = Validation.JsonPointerHelper.ForSchema(id);
                 place = new Located(2, componentOrder, schemaPointer, Segments(schemaPointer));

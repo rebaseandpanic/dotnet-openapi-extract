@@ -59,4 +59,9 @@ public class ParameterAttributesController : ControllerBase
         [FromForm, MaxLength(3)] string[]? tags,
         [FromForm, SwaggerParameter(Required = false)] string note,
         [FromForm] int? optional) => Ok();
+
+    /// <summary>A form field whose constraint and example cannot be written.</summary>
+    /// <param name="count" example="many">A count.</param>
+    [HttpPost("form-unwritable")]
+    public IActionResult FormUnwritable([FromForm, AllowedValues("many")] int count) => Ok();
 }

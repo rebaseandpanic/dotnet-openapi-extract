@@ -1133,7 +1133,6 @@ public sealed class OpenApiDocumentBuilder
             // The form's example: an object of the fields that have an example, by their names in the form.
             var formExample = new JsonObject();
             var unparsableFields = new List<string>();
-            var formMediaType = (consumes ?? ["multipart/form-data"])[0];
             var requiredFields = new HashSet<string>(StringComparer.Ordinal);
             foreach (var fp in formParams)
             {
@@ -1143,8 +1142,8 @@ public sealed class OpenApiDocumentBuilder
                     schemaGenerator.GenerateBoundValueSchema(fp.Type), fieldReflection.GetCustomAttributesData(), fp.Type,
                     fieldReflection.Member.DeclaringType?.FullName ?? string.Empty,
                     $"{fieldReflection.Member.Name}({fieldReflection.Name})",
-                    new LossAnchor.Node(new LossAnchor.Operation(operation),
-                        ["requestBody", "content", formMediaType, "schema", "properties", fp.Name]));
+                    // Located at the media type the finished document has (a global [Consumes] may replace it).
+                    new LossAnchor.Node(new LossAnchor.RequestBodyContent(operation), ["schema", "properties", fp.Name]));
                 formSchema.Properties![fp.Name] = fpSchema;
                 if (fp.IsRequired)
                     requiredFields.Add(fp.Name);

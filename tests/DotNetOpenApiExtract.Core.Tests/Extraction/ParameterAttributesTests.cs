@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core.Diagnostics;
 using DotNetOpenApiExtract.Core.Tests.Harness;
+using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.OpenApi;
 using Xunit;
 
@@ -170,5 +171,48 @@ public class ParameterAttributesTests(ParameterAttributesFixture fixture) : ICla
         Keywords(properties["tags"]!.AsObject()).Select(k => $"{k.Key}={k.Value}").Should().BeEquivalentTo(["maxItems=3"]);
         form["required"]!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo(["title", "pages"],
             because: "[SwaggerParameter(Required = false)] makes note optional; nullable fields are optional");
+    }
+
+    /// <summary>The node a JSON pointer (<c>#/a/b~1c</c>) names in <paramref name="root"/>, or <see langword="null"/>.</summary>
+    private static JsonNode? Resolve(JsonNode root, string pointer) =>
+        pointer.TrimStart('#').Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal))
+            .Aggregate((JsonNode?)root, (node, segment) => node is JsonObject o ? o[segment] : null);
+
+    [Fact]
+    public void FormFieldWarnings_PointAtTheMediaTypeOfTheFinishedDocument()
+    {
+        using var tempDir = new TempDirectory();
+        File.WriteAllText(Path.Combine(tempDir.Path, "Program.cs"),
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddControllers(o => o.Filters.Add(new ConsumesAttribute("application/x-www-form-urlencoded")));
+            var app = builder.Build();
+            app.MapControllers();
+            app.Run();
+            """);
+        var options = VersionedDocumentHarness.ModernApiOptions();
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+        {
+            AssemblyPath = options.AssemblyPath,
+            XmlPath      = options.XmlPath,
+            SourceRoot   = tempDir.Path,
+            OnDiagnostic = onDiagnostic,
+        });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_0, CancellationToken.None)
+            .GetAwaiter().GetResult())!;
+
+        const string operation = "#/paths/~1parameter-attributes~1form-unwritable/post";
+        json["paths"]!["/parameter-attributes/form-unwritable"]!["post"]!["requestBody"]!["content"]!.AsObject()
+            .Select(c => c.Key).Should().Equal(["application/x-www-form-urlencoded"], because: "the global [Consumes] replaced the form's media type");
+
+        var fieldWarning = diagnostics.Should().ContainSingle(d =>
+            d.Code == ExtractionDiagnosticCodes.SchemaValueNotConvertible && d.Location!.StartsWith(operation, StringComparison.Ordinal)).Which;
+        fieldWarning.Location.Should().Be($"{operation}/requestBody/content/application~1x-www-form-urlencoded/schema/properties/count");
+        Resolve(json, fieldWarning.Location!).Should().NotBeNull();
+
+        var exampleWarning = diagnostics.Should().ContainSingle(d =>
+            d.Code == ExtractionDiagnosticCodes.ParameterExampleNotParsable && d.Location!.StartsWith(operation, StringComparison.Ordinal)).Which;
+        Resolve(json, exampleWarning.Location!).Should().NotBeNull();
     }
 }
