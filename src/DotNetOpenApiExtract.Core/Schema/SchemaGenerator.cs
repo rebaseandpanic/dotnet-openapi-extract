@@ -413,7 +413,7 @@ public sealed class SchemaGenerator
     {
         // A string converter on the property names the members; otherwise the type's converters do.
         var naming = propertyNaming ?? TypeEnumNaming(enumType);
-        bool asString = naming.HasValue;
+        bool asString = naming != null;
 
         var fields = enumType.GetFields(BindingFlags.Public | BindingFlags.Static);
 
@@ -422,7 +422,7 @@ public sealed class SchemaGenerator
         if (asString)
         {
             var enumValues = fields
-                .Select(f => (JsonNode)JsonValue.Create(EnumWireName(f, naming!.Value))!)
+                .Select(f => (JsonNode)JsonValue.Create(EnumWireName(f, naming!))!)
                 .ToList();
 
             schema = new OpenApiSchema
@@ -541,9 +541,9 @@ public sealed class SchemaGenerator
 
             // Determine the value representation for the bullet.
             string valueRepresentation;
-            if (naming.HasValue)
+            if (naming != null)
             {
-                valueRepresentation = EnumWireName(fields[i], naming.Value);
+                valueRepresentation = EnumWireName(fields[i], naming);
             }
             else
             {
@@ -587,12 +587,12 @@ public sealed class SchemaGenerator
         EnumWireNaming? naming = null;
         if (GetConverterHintForType(enumType, enumType.GetCustomAttributesData()) is { SchemaType: JsonSchemaType.String } typeHint)
             naming = typeHint.EnumNaming;
-        else if (GlobalEnumConverter() is { } globalHint)
-            naming = globalHint.EnumNaming;
+        else if (GlobalEnumConverter() is { } global)
+            naming = global.Hint.EnumNaming with { Policy = global.Policy };
         else if (_options.EnumAsString)
             naming = EnumWireNaming.JsonStringEnumMemberName;
 
-        return naming.HasValue && _bindingByMemberName ? EnumWireNaming.MemberName : naming;
+        return naming != null && _bindingByMemberName ? EnumWireNaming.MemberName : naming;
     }
 
     /// <summary>
@@ -614,21 +614,27 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>The name of the enum member <paramref name="field"/> on the wire under <paramref name="naming"/>.</summary>
+    /// <remarks>The member attribute the converter reads wins; otherwise its naming policy is applied.</remarks>
     internal static string EnumWireName(FieldInfo field, EnumWireNaming naming)
     {
-        var attributeName = naming switch
+        var attributeName = naming.Rename switch
         {
-            EnumWireNaming.JsonStringEnumMemberName => AttributeHelper.Names.JsonStringEnumMemberName,
-            EnumWireNaming.EnumMemberValue          => AttributeHelper.Names.EnumMember,
-            _                                       => null,
+            EnumMemberRename.JsonStringEnumMemberName => AttributeHelper.Names.JsonStringEnumMemberName,
+            EnumMemberRename.EnumMemberValue          => AttributeHelper.Names.EnumMember,
+            _                                         => null,
         };
-        if (attributeName == null || AttributeHelper.GetAttribute(field, attributeName) is not { } attribute)
-            return field.Name;
+        if (attributeName != null && AttributeHelper.GetAttribute(field, attributeName) is { } attribute)
+        {
+            var renamed = naming.Rename == EnumMemberRename.JsonStringEnumMemberName
+                ? AttributeHelper.GetConstructorArgument<string>(attribute, 0)
+                : AttributeHelper.GetNamedArgument<string>(attribute, "Value");
+            if (renamed != null)
+                return renamed;
+        }
 
-        var name = naming == EnumWireNaming.JsonStringEnumMemberName
-            ? AttributeHelper.GetConstructorArgument<string>(attribute, 0)
-            : AttributeHelper.GetNamedArgument<string>(attribute, "Value");
-        return name ?? field.Name;
+        return naming.Policy is { } policy and not JsonNamingPolicy.Preserve
+            ? ApplyNamingPolicy(field.Name, policy)
+            : field.Name;
     }
 
     /// <summary>
@@ -723,14 +729,14 @@ public sealed class SchemaGenerator
     /// that applies to enum types, as System.Text.Json picks the first converter that can convert;
     /// <see langword="null"/> when there is none.
     /// </summary>
-    private ConverterSchemaHint? GlobalEnumConverter()
+    private (ConverterSchemaHint Hint, JsonNamingPolicy? Policy)? GlobalEnumConverter()
     {
-        foreach (var name in _options.GlobalConverterTypeNames)
+        for (var i = 0; i < _options.GlobalConverterTypeNames.Count; i++)
         {
-            var hint = JsonConverterRegistry.TryGet(name);
+            var hint = JsonConverterRegistry.TryGet(_options.GlobalConverterTypeNames[i]);
             if (hint == null) continue;
             if (JsonConverterRegistry.AppliesToType(hint, isEnum: true, targetTypeFullName: null))
-                return hint;
+                return (hint, i < _options.GlobalConverterEnumNamingPolicies.Count ? _options.GlobalConverterEnumNamingPolicies[i] : null);
         }
 
         return null;
@@ -2979,6 +2985,14 @@ public sealed class SchemaOptions
     /// converter-specific schema transformations.
     /// </summary>
     public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
+
+    /// <summary>
+    /// The enum naming policy of each global converter, by position: entry <c>i</c> belongs to
+    /// <see cref="GlobalConverterTypeNames"/>[<c>i</c>]; <see langword="null"/> (or a missing entry)
+    /// means none. It is applied to the member names a string-enum converter writes, after the member
+    /// attribute the converter reads (<c>new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)</c>).
+    /// </summary>
+    public IReadOnlyList<JsonNamingPolicy?> GlobalConverterEnumNamingPolicies { get; init; } = [];
 
     /// <summary>
     /// When <see langword="true"/> (default), the generator builds a markdown-formatted

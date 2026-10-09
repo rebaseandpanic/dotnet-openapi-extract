@@ -369,7 +369,8 @@ public sealed class OpenApiDocumentBuilder
             || (mvc.DefaultIgnoreCondition ?? JsonIgnoreCondition.Never) != (http.DefaultIgnoreCondition ?? JsonIgnoreCondition.Never)
             || (mvc.NumberHandling ?? JsonNumberHandling.Strict) != (http.NumberHandling ?? JsonNumberHandling.Strict)
             || !new HashSet<string>(mvc.GlobalConverterTypeNames, StringComparer.Ordinal)
-                .SetEquals(http.GlobalConverterTypeNames);
+                .SetEquals(http.GlobalConverterTypeNames)
+            || !mvc.GlobalConverterEnumNamingPolicies.SequenceEqual(http.GlobalConverterEnumNamingPolicies);
     }
 
     /// <summary>
@@ -464,6 +465,7 @@ public sealed class OpenApiDocumentBuilder
             DefaultIgnoreCondition   = jsonOptions.Mvc.DefaultIgnoreCondition,
             NumberHandling           = jsonOptions.Mvc.NumberHandling,
             GlobalConverterTypeNames = jsonOptions.Mvc.GlobalConverterTypeNames,
+            GlobalConverterEnumNamingPolicies = jsonOptions.Mvc.GlobalConverterEnumNamingPolicies,
             EnumAutoDescription      = options.EnumAutoDescription,
             EnumVarnames             = options.EnumVarnames,
             OpenApiVersion           = options.OpenApiVersion,
@@ -657,6 +659,7 @@ public sealed class OpenApiDocumentBuilder
                 DefaultIgnoreCondition   = jsonOptions.Http.DefaultIgnoreCondition,
                 NumberHandling           = jsonOptions.Http.NumberHandling,
                 GlobalConverterTypeNames = jsonOptions.Http.GlobalConverterTypeNames,
+                GlobalConverterEnumNamingPolicies = jsonOptions.Http.GlobalConverterEnumNamingPolicies,
                 EnumAutoDescription      = options.EnumAutoDescription,
                 EnumVarnames             = options.EnumVarnames,
                 OpenApiVersion           = options.OpenApiVersion,

@@ -30,8 +30,9 @@ internal static class DefaultValueConverter
     /// number otherwise.
     /// </summary>
     public static Result FromAttribute(
-        CustomAttributeData attribute, JsonSchemaType? schemaType, EnumWireNaming enumNaming = EnumWireNaming.MemberName)
+        CustomAttributeData attribute, JsonSchemaType? schemaType, EnumWireNaming? enumNaming = null)
     {
+        enumNaming ??= EnumWireNaming.MemberName;
         var args = attribute.ConstructorArguments;
         if (args.Count == 2 && args[0].Value is Type type && args[1].Value is string text)
             return FromText(type, text, schemaType, enumNaming);

@@ -261,24 +261,37 @@ public sealed record ConverterSchemaHint
 
     /// <summary>
     /// For a converter that writes enums as strings: the member attribute that renames a member on
-    /// the wire. The converters in the registry are known without a naming policy (an attribute
-    /// cannot pass one; a global converter is known by its type).
+    /// the wire. A naming policy comes only with a global registration (an attribute cannot pass
+    /// one), see <see cref="SchemaOptions.GlobalConverterEnumNamingPolicies"/>.
     /// </summary>
     internal EnumWireNaming EnumNaming { get; init; } = EnumWireNaming.MemberName;
 }
 
-/// <summary>How a string-enum converter names a member on the wire.</summary>
-internal enum EnumWireNaming
+/// <summary>The member attribute a string-enum converter reads to rename a member on the wire.</summary>
+internal enum EnumMemberRename
 {
-    /// <summary>The member's name.</summary>
-    MemberName,
+    /// <summary>None: the converter writes the member's name.</summary>
+    None,
 
-    /// <summary>
-    /// System.Text.Json: <c>[JsonStringEnumMemberName]</c>, else the member's name;
-    /// <c>[EnumMember]</c> is ignored.
-    /// </summary>
+    /// <summary>System.Text.Json: <c>[JsonStringEnumMemberName]</c>; <c>[EnumMember]</c> is ignored.</summary>
     JsonStringEnumMemberName,
 
-    /// <summary>Newtonsoft.Json: <c>[EnumMember(Value)]</c>, else the member's name.</summary>
+    /// <summary>Newtonsoft.Json: <c>[EnumMember(Value)]</c>.</summary>
     EnumMemberValue,
+}
+
+/// <summary>
+/// How a string-enum converter names a member on the wire: the member attribute it reads, else its
+/// naming policy applied to the member's name, else the member's name.
+/// </summary>
+internal sealed record EnumWireNaming(EnumMemberRename Rename, JsonNamingPolicy? Policy = null)
+{
+    /// <summary>The member's name, unchanged.</summary>
+    public static EnumWireNaming MemberName { get; } = new(EnumMemberRename.None);
+
+    /// <summary>System.Text.Json's string converter without a naming policy.</summary>
+    public static EnumWireNaming JsonStringEnumMemberName { get; } = new(EnumMemberRename.JsonStringEnumMemberName);
+
+    /// <summary>Newtonsoft.Json's string converter without a naming strategy.</summary>
+    public static EnumWireNaming EnumMemberValue { get; } = new(EnumMemberRename.EnumMemberValue);
 }

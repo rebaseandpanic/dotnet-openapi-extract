@@ -36,6 +36,16 @@ public sealed class JsonContextOptions
     public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
 
     /// <summary>
+    /// The enum naming policy passed to each converter of <see cref="GlobalConverterTypeNames"/>, by
+    /// position: System.Text.Json's <c>new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)</c>
+    /// (also the generic form), Newtonsoft's <c>new StringEnumConverter(camelCaseText: true)</c> or a
+    /// <c>NamingStrategy</c> (<c>CamelCaseNamingStrategy</c>, <c>SnakeCaseNamingStrategy</c>,
+    /// <c>KebabCaseNamingStrategy</c>). <see langword="null"/> when none is passed or it is not
+    /// recognised (that gives a warning).
+    /// </summary>
+    public IReadOnlyList<JsonNamingPolicy?> GlobalConverterEnumNamingPolicies { get; init; } = [];
+
+    /// <summary>
     /// <see langword="true"/> when at least one of the options above was detected for this context.
     /// </summary>
     public bool IsConfigured =>
@@ -179,6 +189,7 @@ public static class JsonOptionsExtractor
         JsonIgnoreCondition? defaultIgnoreCondition = null;
         JsonNumberHandling? numberHandling = null;
         var converterTypeNames = new List<string>();
+        var converterPolicies = new List<JsonNamingPolicy?>();
 
         foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
         {
@@ -191,6 +202,7 @@ public static class JsonOptionsExtractor
                 ref defaultIgnoreCondition,
                 ref numberHandling,
                 converterTypeNames,
+                converterPolicies,
                 context,
                 onDiagnostic);
         }
@@ -202,6 +214,7 @@ public static class JsonOptionsExtractor
             DefaultIgnoreCondition   = defaultIgnoreCondition,
             NumberHandling           = numberHandling,
             GlobalConverterTypeNames = converterTypeNames,
+            GlobalConverterEnumNamingPolicies = converterPolicies,
         };
     }
 
@@ -247,6 +260,7 @@ public static class JsonOptionsExtractor
         ref JsonIgnoreCondition? defaultIgnoreCondition,
         ref JsonNumberHandling? numberHandling,
         List<string> converterTypeNames,
+        List<JsonNamingPolicy?> converterPolicies,
         SourceAnalysisContext context,
         Action<ExtractionDiagnostic>? onDiagnostic)
     {
@@ -328,12 +342,27 @@ public static class JsonOptionsExtractor
                 arg = paren.Expression;
 
             string? converterTypeName = null;
+            JsonNamingPolicy? converterPolicy = null;
 
             if (arg is ObjectCreationExpressionSyntax objCreation)
             {
                 // Try semantic model first for FQN
                 converterTypeName = TryGetFqnFromSemanticModel(objCreation.Type, context)
                     ?? GetUnqualifiedTypeName(objCreation.Type);
+                if (!string.IsNullOrEmpty(converterTypeName))
+                {
+                    converterPolicy = ParseConverterEnumNamingPolicy(objCreation, converterTypeName!, out var unknown);
+                    if (unknown != null)
+                    {
+                        DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                        {
+                            Code     = ExtractionDiagnosticCodes.JsonOptionsUnknownConverterNamingPolicy,
+                            Message  = $"JsonOptions.Converters.Add({converterTypeName}): the naming policy {unknown} cannot be " +
+                                       "determined statically; enum members are described by their names.",
+                            Subjects = [converterTypeName!, unknown],
+                        });
+                    }
+                }
             }
             else if (arg is ImplicitObjectCreationExpressionSyntax)
             {
@@ -347,7 +376,10 @@ public static class JsonOptionsExtractor
             }
 
             if (!string.IsNullOrEmpty(converterTypeName))
+            {
                 converterTypeNames.Add(converterTypeName!);
+                converterPolicies.Add(converterPolicy);
+            }
         }
     }
 
@@ -384,6 +416,101 @@ public static class JsonOptionsExtractor
     // ──────────────────────────────────────────────────────────────────────────
     // Value parsers
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The enum naming policy given to a string-enum converter's constructor or initializer:
+    /// System.Text.Json's <c>JsonStringEnumConverter(namingPolicy)</c>; Newtonsoft's
+    /// <c>StringEnumConverter(camelCaseText: true)</c>, a <c>NamingStrategy</c> instance or type, or
+    /// <c>{ NamingStrategy = …, CamelCaseText = true }</c>. <see langword="null"/> when none is given,
+    /// for other converters, and when the expression is not recognised — then
+    /// <paramref name="unknown"/> holds its text.
+    /// </summary>
+    private static JsonNamingPolicy? ParseConverterEnumNamingPolicy(
+        ObjectCreationExpressionSyntax creation, string converterTypeName, out string? unknown)
+    {
+        unknown = null;
+        var shortName = converterTypeName.Split('[')[0].Split('`')[0];
+        shortName = shortName[(shortName.LastIndexOf('.') + 1)..];
+        var arguments = creation.ArgumentList?.Arguments ?? default;
+
+        if (shortName == "JsonStringEnumConverter")
+        {
+            var policyArgument = arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.Text == "namingPolicy")
+                ?? arguments.FirstOrDefault(a => a.NameColon == null);
+            if (policyArgument == null)
+                return null;
+
+            var policy = ParseNamingPolicy(policyArgument.Expression);
+            if (policy == null)
+                unknown = policyArgument.Expression.ToString();
+            return policy is JsonNamingPolicy.Preserve ? null : policy;
+        }
+
+        if (shortName != "StringEnumConverter")
+            return null;
+
+        JsonNamingPolicy? result = null;
+        foreach (var argument in arguments)
+        {
+            var name = argument.NameColon?.Name.Identifier.Text;
+            if (name == "allowIntegerValues" || name == "namingStrategyParameters")
+                continue;
+            if (argument.Expression is LiteralExpressionSyntax literal
+                && (literal.IsKind(SyntaxKind.TrueLiteralExpression) || literal.IsKind(SyntaxKind.FalseLiteralExpression)))
+            {
+                // camelCaseText is the only leading bool; a later bool is allowIntegerValues.
+                if (name == "camelCaseText" || (name == null && argument == arguments[0]))
+                    result = literal.IsKind(SyntaxKind.TrueLiteralExpression) ? JsonNamingPolicy.CamelCase : result;
+                continue;
+            }
+
+            if (NamingStrategy(argument.Expression, ref unknown) is { } strategy)
+                result = strategy;
+        }
+
+        if (creation.Initializer != null)
+        {
+            foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+            {
+                var property = (assignment.Left as IdentifierNameSyntax)?.Identifier.Text;
+                if (property == "NamingStrategy" && NamingStrategy(assignment.Right, ref unknown) is { } strategy)
+                    result = strategy;
+                else if (property == "CamelCaseText" && assignment.Right is LiteralExpressionSyntax flag)
+                    result = flag.IsKind(SyntaxKind.TrueLiteralExpression) ? JsonNamingPolicy.CamelCase : result;
+                else if (property is "NamingStrategy" or "CamelCaseText")
+                    unknown ??= assignment.Right.ToString();
+            }
+        }
+
+        return result is JsonNamingPolicy.Preserve ? null : result;
+    }
+
+    /// <summary>
+    /// A Newtonsoft naming strategy given as <c>new XNamingStrategy(…)</c> or <c>typeof(XNamingStrategy)</c>;
+    /// <see langword="null"/> with <paramref name="unknown"/> set when the expression is another one.
+    /// </summary>
+    private static JsonNamingPolicy? NamingStrategy(ExpressionSyntax expression, ref string? unknown)
+    {
+        var type = expression switch
+        {
+            ObjectCreationExpressionSyntax created => created.Type,
+            TypeOfExpressionSyntax typeOf => typeOf.Type,
+            _ => null,
+        };
+        var name = type?.ToString();
+        name = name?[(name.LastIndexOf('.') + 1)..];
+        JsonNamingPolicy? policy = name switch
+        {
+            "CamelCaseNamingStrategy" => JsonNamingPolicy.CamelCase,
+            "SnakeCaseNamingStrategy" => JsonNamingPolicy.SnakeCaseLower,
+            "KebabCaseNamingStrategy" => JsonNamingPolicy.KebabCaseLower,
+            "DefaultNamingStrategy"   => JsonNamingPolicy.Preserve,
+            _                         => null,
+        };
+        if (policy == null)
+            unknown ??= expression.ToString();
+        return policy;
+    }
 
     /// <summary>
     /// Parses a naming policy from a member-access or null-literal expression.

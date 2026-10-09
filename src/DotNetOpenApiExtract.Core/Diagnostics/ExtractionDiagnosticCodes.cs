@@ -33,6 +33,13 @@ public static class ExtractionDiagnosticCodes
     /// <summary>A JSON options setting is assigned a non-literal value and is ignored. Subjects: the setting name.</summary>
     public const string JsonOptionsNonLiteralSetting = "json-options.non-literal-setting";
 
+    /// <summary>
+    /// A string-enum converter is registered with a naming policy (or Newtonsoft naming strategy) that
+    /// cannot be read statically; its enum members are described by their names. Subjects: the
+    /// converter type and the expression.
+    /// </summary>
+    public const string JsonOptionsUnknownConverterNamingPolicy = "json-options.unknown-converter-naming-policy";
+
     /// <summary><c>JsonOptions.Converters.Add(new())</c>: the converter type cannot be determined statically and is skipped.</summary>
     public const string JsonOptionsUntypedConverter = "json-options.untyped-converter";
 
