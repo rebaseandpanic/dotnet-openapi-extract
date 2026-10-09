@@ -10,7 +10,7 @@ namespace DotNetOpenApiExtract.Core.Tests.Conformance;
 /// <summary>Outcome of validating one instance against one schema.</summary>
 /// <param name="IsValid">Whether the instance satisfies the schema.</param>
 /// <param name="Errors">Evaluator messages for a failed validation; empty when valid.</param>
-internal sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Errors);
+public sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Errors);
 
 /// <summary>
 /// Validates JSON instances against schemas of a serialized OpenAPI 3.1/3.2 document with a real
@@ -33,7 +33,7 @@ internal sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Err
 /// only 3.1 and 3.2 documents are accepted.
 /// </para>
 /// </remarks>
-internal sealed class SchemaConformance
+public sealed class SchemaConformance
 {
     private const string ComponentsPrefix = "#/components/schemas/";
     private const string DefsPrefix = "#/$defs/";
