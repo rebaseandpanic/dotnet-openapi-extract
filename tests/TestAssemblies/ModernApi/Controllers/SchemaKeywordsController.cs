@@ -52,4 +52,8 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Allowed and denied values.</summary>
     [HttpGet("allowed-values")]
     public ActionResult<AllowedValuesModel> AllowedValues() => new AllowedValuesModel();
+
+    /// <summary>Unconstrained values and 64-bit enums.</summary>
+    [HttpGet("loose-values")]
+    public ActionResult<LooseValuesModel> LooseValues() => new LooseValuesModel();
 }

@@ -258,3 +258,45 @@ public class AllowedValuesModel
     [AllowedValues("x")]
     public AllowedTarget Target { get; set; } = new();
 }
+
+/// <summary>An enum over long.</summary>
+public enum WideCode : long
+{
+    /// <summary>Smallest.</summary>
+    Smallest = long.MinValue,
+
+    /// <summary>Largest.</summary>
+    Largest = long.MaxValue,
+}
+
+/// <summary>An enum over ulong.</summary>
+public enum HugeCode : ulong
+{
+    /// <summary>Zero.</summary>
+    Zero = 0,
+
+    /// <summary>Largest.</summary>
+    Largest = ulong.MaxValue,
+}
+
+/// <summary>Unconstrained values and enums over 64-bit integers.</summary>
+public class LooseValuesModel
+{
+    /// <summary>Any JSON value.</summary>
+    public object Anything { get; set; } = new();
+
+    /// <summary>Any JSON value, dynamically typed.</summary>
+    public dynamic Dynamic { get; set; } = new object();
+
+    /// <summary>An enum over long.</summary>
+    public WideCode Wide { get; set; }
+
+    /// <summary>An enum over ulong.</summary>
+    public HugeCode Huge { get; set; }
+
+    /// <summary>A long, for comparison.</summary>
+    public long PlainLong { get; set; }
+
+    /// <summary>A ulong, for comparison.</summary>
+    public ulong PlainUlong { get; set; }
+}

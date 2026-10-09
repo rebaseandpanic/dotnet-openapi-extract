@@ -82,7 +82,7 @@ public sealed class SchemaGenerator
             ["System.Uri"]           = (JsonSchemaType.String, "uri"),
 
             // object / dynamic → empty schema (any type)
-            ["System.Object"]        = (JsonSchemaType.Object, null),
+            ["System.Object"]        = (JsonSchemaType.Object, null), // written unconstrained: {} (see below)
         };
 
     // FullName prefix for Nullable<T>
@@ -259,6 +259,11 @@ public sealed class SchemaGenerator
 
         // --- 4. Primitive types ---
         var fullName = type.FullName ?? string.Empty;
+
+        // object / dynamic hold any JSON value: an unconstrained schema.
+        if (fullName == "System.Object")
+            return new OpenApiSchema();
+
         if (PrimitiveMap.TryGetValue(fullName, out var primitive))
         {
             // Check if a globally-registered converter overrides the default primitive schema.
@@ -407,13 +412,15 @@ public sealed class SchemaGenerator
         {
             // Numeric enum: collect underlying integer values
             var enumValues = fields
-                .Select(f => (JsonNode)JsonValue.Create(GetEnumFieldIntValue(f))!)
+                .Select(EnumFieldValue)
                 .ToList();
 
+            // type / format as for a property of the underlying type (long / ulong values unclipped).
+            var underlying = EnumUnderlyingTypeName(enumType);
             schema = new OpenApiSchema
             {
                 Type = JsonSchemaType.Integer,
-                Format = "int32",
+                Format = PrimitiveMap.TryGetValue(underlying, out var primitive) ? primitive.Format : "int32",
                 Enum = enumValues,
             };
         }
@@ -517,7 +524,7 @@ public sealed class SchemaGenerator
             }
             else
             {
-                valueRepresentation = GetEnumFieldIntValue(fields[i]).ToString();
+                valueRepresentation = EnumFieldValue(fields[i])!.ToJsonString();
             }
 
             if (sb.Length > 0)
@@ -550,31 +557,38 @@ public sealed class SchemaGenerator
     /// Reads the integer value of an enum field using the RawConstantValue metadata.
     /// Falls back to field order index when the metadata is not available.
     /// </summary>
-    private static int GetEnumFieldIntValue(FieldInfo field)
+    /// <summary>
+    /// The value of an enum member as a JSON number, without loss for every underlying type
+    /// (<c>long</c> and <c>ulong</c> included).
+    /// </summary>
+    private static JsonNode EnumFieldValue(FieldInfo field)
     {
+        object? raw;
         try
         {
-            var raw = field.GetRawConstantValue();
-            return raw switch
-            {
-                int i    => i,
-                uint u   => (int)u,
-                long l   => (int)l,
-                ulong ul => (int)ul,
-                short s  => s,
-                ushort us => us,
-                byte b   => b,
-                sbyte sb => sb,
-                _        => 0,
-            };
+            raw = field.GetRawConstantValue();
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                        or NotSupportedException
-                                        or BadImageFormatException)
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or BadImageFormatException)
         {
-            return 0;
+            raw = null;
         }
+
+        // Microsoft.OpenApi writes no ulong value: a ulong above long.MaxValue goes through decimal,
+        // which holds it exactly.
+        return raw switch
+        {
+            ulong ul when ul > long.MaxValue => JsonValue.Create((decimal)ul),
+            null     => JsonValue.Create(0),
+            _        => Convert.ToInt64(raw, CultureInfo.InvariantCulture) is var number && number is >= int.MinValue and <= int.MaxValue
+                ? JsonValue.Create((int)number) // as before for values an int holds
+                : JsonValue.Create(number),
+        };
     }
+
+    /// <summary>Full name of the underlying type of <paramref name="enumType"/> (from its <c>value__</c> field).</summary>
+    private static string EnumUnderlyingTypeName(Type enumType) =>
+        enumType.GetField("value__", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.FieldType.FullName
+        ?? "System.Int32";
 
     /// <summary>
     /// Returns the <see cref="ConverterSchemaHint"/> for the converter declared on <paramref name="type"/>
@@ -1540,8 +1554,9 @@ public sealed class SchemaGenerator
         var typeName = argument.ArgumentType.FullName ?? string.Empty;
         if (IntegralTypes.Contains(typeName) && (Allows(JsonSchemaType.Integer) || Allows(JsonSchemaType.Number)))
         {
+            // Microsoft.OpenApi writes no ulong value: through decimal, which holds it exactly.
             node = typeName == "System.UInt64"
-                ? JsonValue.Create(Convert.ToUInt64(value, CultureInfo.InvariantCulture))
+                ? JsonValue.Create((decimal)Convert.ToUInt64(value, CultureInfo.InvariantCulture))
                 : JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture));
             return true;
         }
