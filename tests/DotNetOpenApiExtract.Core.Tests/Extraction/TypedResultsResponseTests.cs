@@ -223,6 +223,30 @@ public class TypedResultsResponseTests(TypedResultsFixture fixture) : IClassFixt
 
     [Theory]
     [MemberData(nameof(AllVersions))]
+    public void StreamingBodiesDeclaredOnAResultAction_FollowTheStreamingRules(OpenApiSpecVersion version)
+    {
+        var document = fixture.Builds[version].Document;
+        var itemKey = version == OpenApiSpecVersion.OpenApi3_2 ? "itemSchema" : "x-oai-itemSchema";
+
+        var sse = Responses(document, "/typed-results/declared-sse")["200"]!["content"]!.AsObject();
+        sse.Select(p => p.Key).Should().Equal("text/event-stream");
+        sse["text/event-stream"]!.AsObject().Select(p => p.Key).Should().Equal(itemKey);
+        sse["text/event-stream"]![itemKey]!["required"]!.AsArray().Select(r => r!.GetValue<string>()).Should().Equal("data");
+
+        var ndjson = Responses(document, "/typed-results/declared-ndjson")["200"]!["content"]!.AsObject();
+        ndjson.Select(p => p.Key).Should().Equal("application/x-ndjson");
+        ndjson["application/x-ndjson"]![itemKey]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ResultItem");
+
+        var json = Responses(document, "/typed-results/declared-sequence")["200"]!["content"]!["application/json"]!["schema"]!;
+        json["type"]!.GetValue<string>().Should().Be("array");
+        json["items"]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ResultItem");
+
+        document["components"]!["schemas"]!.AsObject().Select(p => p.Key).Should().NotContain(
+            k => k.Contains("ServerSentEvents", StringComparison.Ordinal) || k.Contains("IAsyncEnumerable", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
     public void ResultOfUnknownStatus_WithADeclaredResponse_UsesItWithoutWarning(OpenApiSpecVersion version)
     {
         var build = fixture.Builds[version];

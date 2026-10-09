@@ -92,6 +92,27 @@ public class TypedResultsController : ControllerBase
     [Produces(typeof(ProducedResultItem))]
     public Ok<ResultItem> DeclaredOverProduces() => TypedResults.Ok(Item);
 
+    /// <summary>Server-sent events declared on an untyped result.</summary>
+    [HttpGet("declared-sse")]
+    [ProducesResponseType(typeof(ServerSentEventsResult<ResultItem>), StatusCodes.Status200OK)]
+    public IResult DeclaredSse() => TypedResults.ServerSentEvents(Items());
+
+    /// <summary>A sequence declared as newline-delimited JSON on an untyped result.</summary>
+    [HttpGet("declared-ndjson")]
+    [ProducesResponseType(typeof(IAsyncEnumerable<ResultItem>), StatusCodes.Status200OK, "application/x-ndjson")]
+    public IResult DeclaredNdjson() => Results.Ok(Items());
+
+    /// <summary>A sequence declared as JSON on an untyped result.</summary>
+    [HttpGet("declared-sequence")]
+    [ProducesResponseType(typeof(IAsyncEnumerable<ResultItem>), StatusCodes.Status200OK)]
+    public IResult DeclaredSequence() => Results.Ok(Items());
+
+    private static async IAsyncEnumerable<ResultItem> Items()
+    {
+        await Task.Yield();
+        yield return Item;
+    }
+
     /// <summary>An untyped result with a declared response.</summary>
     [HttpGet("untyped-declared")]
     [ProducesResponseType(typeof(ResultItem), StatusCodes.Status200OK)]

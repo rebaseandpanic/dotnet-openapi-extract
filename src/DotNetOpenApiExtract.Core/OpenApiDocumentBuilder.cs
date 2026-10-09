@@ -1076,9 +1076,9 @@ public sealed class OpenApiDocumentBuilder
             {
                 // Emit a Content section when there is a typed body, or when the content types
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
-                apiResponse.Content = resp.BodyFromHttpResult
-                    ? BuildHttpResultContent(resp.ContentTypes, resp.BodyType!, httpSlots)
-                    : BuildResponseContent(resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots);
+                apiResponse.Content = BuildResponseContent(
+                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots,
+                    httpContext: resp.BodyFromHttpResult);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -1139,25 +1139,6 @@ public sealed class OpenApiDocumentBuilder
     // =========================================================================
 
     /// <summary>
-    /// The content of a typed result's body (<c>Ok&lt;T&gt;</c> and the like): the media types the result
-    /// writes, with the schema of <paramref name="bodyType"/> in the HTTP serialization context,
-    /// filled in after the operation loop.
-    /// </summary>
-    private static Dictionary<string, IOpenApiMediaType> BuildHttpResultContent(
-        IEnumerable<string> contentTypes, Type bodyType, List<Action<SchemaGenerator>> httpSlots)
-    {
-        var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
-        foreach (var contentType in contentTypes)
-        {
-            var mediaType = new OpenApiMediaType();
-            content[contentType] = mediaType;
-            httpSlots.Add(httpGenerator => mediaType.Schema = httpGenerator.GenerateSchema(bodyType));
-        }
-
-        return content;
-    }
-
-    /// <summary>
     /// One warning on the operation naming the results whose status is not statically known (the
     /// action's <c>IResult</c> itself or variants of its <c>Results&lt;…&gt;</c>): their responses are
     /// missing from the document; when no response is known at all, a 200 without a schema stands in.
@@ -1213,9 +1194,20 @@ public sealed class OpenApiDocumentBuilder
         SchemaGenerator schemaGenerator,
         LossLedger ledger,
         OpenApiOperation operation,
-        List<Action<SchemaGenerator>>? httpSlots)
+        List<Action<SchemaGenerator>>? httpSlots,
+        bool httpContext = false)
     {
         var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+
+        // Bodies written by a typed result are described in the HTTP context, whose schemas are
+        // generated after the operation loop; MVC bodies right away.
+        void WithGenerator(Action<SchemaGenerator> fill)
+        {
+            if (httpContext)
+                httpSlots!.Add(fill);
+            else
+                fill(schemaGenerator);
+        }
 
         // ServerSentEventsResult<T> writes text/event-stream itself, whatever is declared; its
         // events are described by itemSchema, the data in the HTTP serialization context, which is
@@ -1237,7 +1229,9 @@ public sealed class OpenApiDocumentBuilder
             var mediaType = BaseMediaType(contentType);
             if (isSequence && SequentialJsonMediaTypes.Contains(mediaType))
             {
-                content[contentType] = new OpenApiMediaType { ItemSchema = schemaGenerator.GenerateSchema(elementType!) };
+                var sequential = new OpenApiMediaType();
+                content[contentType] = sequential;
+                WithGenerator(generator => sequential.ItemSchema = generator.GenerateSchema(elementType!));
             }
             else if (isSequence && string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
             {
@@ -1247,9 +1241,13 @@ public sealed class OpenApiDocumentBuilder
                     Class    = LossClass.Source,
                     Code     = ExtractionDiagnosticCodes.ResponseEventStreamWithoutFormatter,
                     Anchor   = new LossAnchor.Operation(operation),
-                    Message  = $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
-                               "standard MVC has no server-sent events output formatter; a custom formatter or " +
-                               "ServerSentEventsResult<T> is needed. The media type is written without a schema.",
+                    Message  = httpContext
+                        ? $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
+                          "a JSON result writes the sequence as a JSON array, not as server-sent events; " +
+                          "ServerSentEventsResult<T> is needed. The media type is written without a schema."
+                        : $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
+                          "standard MVC has no server-sent events output formatter; a custom formatter or " +
+                          "ServerSentEventsResult<T> is needed. The media type is written without a schema.",
                     Feature  = "mediaType.schema",
                     Action   = DiagnosticAction.Omitted,
                     Subjects = [elementType.FullName ?? elementType.Name],
@@ -1257,10 +1255,10 @@ public sealed class OpenApiDocumentBuilder
             }
             else
             {
-                bodySchema ??= bodyType != null ? schemaGenerator.GenerateSchema(bodyType) : null;
-                content[contentType] = bodySchema != null
-                    ? new OpenApiMediaType { Schema = bodySchema }
-                    : new OpenApiMediaType();
+                var plain = new OpenApiMediaType();
+                content[contentType] = plain;
+                if (bodyType != null)
+                    WithGenerator(generator => plain.Schema = bodySchema ??= generator.GenerateSchema(bodyType));
             }
         }
 
