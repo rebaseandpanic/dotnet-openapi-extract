@@ -25,6 +25,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DotNetOpenApiExtract.Core\DotNetOpenApiExtract.Core.csproj" />
+    <!-- Built so that CLI tests can run DotNetOpenApiExtract.Cli.dll as a process; not referenced as an assembly. -->
+    <ProjectReference Include="..\..\src\DotNetOpenApiExtract.Cli\DotNetOpenApiExtract.Cli.csproj" ReferenceOutputAssembly="false" />
+    <!-- Referenced as an assembly: tests serialize its types with the real System.Text.Json and run its results. -->
+    <ProjectReference Include="..\TestAssemblies\ModernApi\ModernApi.csproj" />
   </ItemGroup>
 
 </Project>

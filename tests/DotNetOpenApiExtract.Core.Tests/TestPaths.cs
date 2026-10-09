@@ -28,12 +28,33 @@ internal static class TestPaths
     public static string BareMinimalApiDll   => FindFixtureDll("BareMinimalApi");
 
     /// <summary>
+    /// Path to the ModernApi test fixture DLL: the constructs OpenAPI 3.1/3.2 output depends on.
+    /// SampleApi stays the 3.0 regression baseline.
+    /// </summary>
+    public static string ModernApiDll        => FindFixtureDll("ModernApi");
+
+    public static string ModernApiXml        => Path.ChangeExtension(ModernApiDll, ".xml");
+
+    /// <summary>
+    /// Path to the built CLI (<c>src/DotNetOpenApiExtract.Cli/bin/**/DotNetOpenApiExtract.Cli.dll</c>),
+    /// resolved by the same convention as the fixtures.
+    /// </summary>
+    public static string CliDll =>
+        FindBuiltDll(Path.Combine(SolutionRoot, "src", "DotNetOpenApiExtract.Cli"), "DotNetOpenApiExtract.Cli");
+
+    /// <summary>
     /// Resolves a fixture DLL by convention: <c>tests/TestAssemblies/{name}/bin/**/{name}.dll</c>.
     /// Prefers Debug over Release, newest TFM.
     /// </summary>
-    private static string FindFixtureDll(string name)
+    private static string FindFixtureDll(string name) =>
+        FindBuiltDll(Path.Combine(SolutionRoot, "tests", "TestAssemblies", name), name);
+
+    /// <summary>
+    /// Resolves <c>{projectDir}/bin/**/{name}.dll</c>. Prefers Debug over Release, newest TFM.
+    /// </summary>
+    private static string FindBuiltDll(string projectDir, string name)
     {
-        var baseDir = Path.Combine(SolutionRoot, "tests", "TestAssemblies", name, "bin");
+        var baseDir = Path.Combine(projectDir, "bin");
         if (!Directory.Exists(baseDir))
             throw new DirectoryNotFoundException(
                 $"{name} bin directory not found: {baseDir}. Build {name} first.");
