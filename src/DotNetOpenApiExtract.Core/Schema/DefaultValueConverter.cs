@@ -47,6 +47,13 @@ internal static class DefaultValueConverter
     private static bool WritesStrings(JsonSchemaType? schemaType) =>
         schemaType.HasValue && (schemaType.Value & JsonSchemaType.String) != 0;
 
+    /// <summary>
+    /// A C# default of an enum parameter (its raw underlying value), in the form of the enum's schema:
+    /// the member's name for a string enum, else its number.
+    /// </summary>
+    public static Result FromEnumDefault(Type enumType, object raw, JsonSchemaType? schemaType) =>
+        FromEnumValue(enumType, raw, schemaType);
+
     /// <summary>An enum member's raw value: its name for a string enum schema, else its number.</summary>
     private static Result FromEnumValue(Type enumType, object raw, JsonSchemaType? schemaType)
     {

@@ -377,3 +377,22 @@ public class HugeCodeValuesModel
     [DeniedValues(HugeCode.Largest)]
     public HugeCode DeniedHuge { get; set; }
 }
+
+/// <summary>A delivery mode written as strings.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum DeliveryMode
+{
+    /// <summary>Pickup.</summary>
+    Pickup = 0,
+
+    /// <summary>Courier.</summary>
+    Courier = 1,
+}
+
+/// <summary>Enum defaults in both forms.</summary>
+public class EnumDefaultsModel
+{
+    /// <summary>A literal default of a string enum.</summary>
+    [System.ComponentModel.DefaultValue(DeliveryMode.Courier)]
+    public DeliveryMode Mode { get; set; } = DeliveryMode.Courier;
+}

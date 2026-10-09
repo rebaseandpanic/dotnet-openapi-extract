@@ -148,4 +148,20 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
             .Should().ContainSingle(because: "one warning per place: the operation names every parameter")
             .Which.Subjects.Should().BeEquivalentTo(["broken", "home"]);
     }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void EnumDefaults_FollowTheEnumForm_OnPropertyAndOnCSharpParameterDefault(OpenApiSpecVersion version)
+    {
+        var document = fixture.Builds[version].Document;
+
+        document["components"]!["schemas"]!["EnumDefaultsModel"]!["properties"]!["mode"]!["default"]!.ToJsonString()
+            .Should().Be("\"Courier\"", because: "the enum is written as strings");
+
+        var parameters = document["paths"]!["/keywords/enum-defaults"]!["get"]!["parameters"]!.AsArray();
+        parameters.Single(p => p!["name"]!.GetValue<string>() == "mode")!["schema"]!["default"]!.ToJsonString()
+            .Should().Be("\"Courier\"", because: "a C# default of a string enum is its name");
+        parameters.Single(p => p!["name"]!.GetValue<string>() == "speed")!["schema"]!["default"]!.ToJsonString()
+            .Should().Be("2", because: "a C# default of a numeric enum stays its number");
+    }
 }

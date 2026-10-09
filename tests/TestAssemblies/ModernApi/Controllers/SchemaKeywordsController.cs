@@ -81,4 +81,10 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Allowed and denied ulong enum members.</summary>
     [HttpGet("huge-code-values")]
     public ActionResult<HugeCodeValuesModel> HugeCodeValues() => new HugeCodeValuesModel();
+
+    /// <summary>Enum defaults on a property and on parameters.</summary>
+    [HttpGet("enum-defaults")]
+    public ActionResult<EnumDefaultsModel> EnumDefaults(
+        [FromQuery] DeliveryMode mode = DeliveryMode.Courier,
+        [FromQuery] ShippingSpeed speed = ShippingSpeed.Overnight) => new EnumDefaultsModel();
 }

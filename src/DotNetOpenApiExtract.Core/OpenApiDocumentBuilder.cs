@@ -991,7 +991,21 @@ public sealed class OpenApiDocumentBuilder
                 }
                 else if (param.DefaultValue is not null)
                 {
-                    mutableParamSchema.Default = DefaultValueConverter.FromLiteral(param.DefaultValue);
+                    // An enum parameter's C# default is its raw value: written in the enum schema's form.
+                    var enumType = param.Type.IsEnum ? param.Type
+                        : param.Type.IsGenericType && param.Type.GetGenericTypeDefinition().FullName == "System.Nullable`1"
+                          && param.Type.GetGenericArguments()[0].IsEnum ? param.Type.GetGenericArguments()[0]
+                        : null;
+                    if (enumType != null)
+                    {
+                        var converted = DefaultValueConverter.FromEnumDefault(enumType, param.DefaultValue, mutableParamSchema.Type);
+                        if (converted.HasValue)
+                            mutableParamSchema.Default = converted.Value;
+                    }
+                    else
+                    {
+                        mutableParamSchema.Default = DefaultValueConverter.FromLiteral(param.DefaultValue);
+                    }
                 }
             }
 
