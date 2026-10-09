@@ -35,6 +35,8 @@ public sealed class SchemaGenerator
     private readonly List<PendingLoss> _pendingLosses = []; // direct generation: delivered at the end of the public call
     private LossLedger? _ledger; // document build: the build's ledger
     private int _generationDepth; // public GenerateSchema nesting, to find the end of the outermost call
+    private bool _hasNumberHandlingScope; // a property or type sets the number handling for the schema being generated
+    private JsonNumberHandling _numberHandlingScope;
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
     // GetCustomAttributesData() scans on the same type when processing its properties.
@@ -58,7 +60,7 @@ public sealed class SchemaGenerator
             ["System.Int16"]         = (JsonSchemaType.Integer, "int32"),
             ["System.UInt16"]        = (JsonSchemaType.Integer, "int32"),
             ["System.Int32"]         = (JsonSchemaType.Integer, "int32"),
-            ["System.UInt32"]        = (JsonSchemaType.Integer, "int32"),
+            ["System.UInt32"]        = (JsonSchemaType.Integer, "int64"), // values above Int32.MaxValue
             ["System.Int64"]         = (JsonSchemaType.Integer, "int64"),
             ["System.UInt64"]        = (JsonSchemaType.Integer, "int64"),
 
@@ -66,6 +68,7 @@ public sealed class SchemaGenerator
             ["System.Single"]        = (JsonSchemaType.Number, "float"),
             ["System.Double"]        = (JsonSchemaType.Number, "double"),
             ["System.Decimal"]       = (JsonSchemaType.Number, "double"),
+            ["System.Half"]          = (JsonSchemaType.Number, "float"),
 
             // Date/time types
             ["System.DateTime"]      = (JsonSchemaType.String, "date-time"),
@@ -240,8 +243,10 @@ public sealed class SchemaGenerator
         // --- 3. Nullable<T> → unwrap, generate for T, add Null to type flags ---
         if (IsNullableValueType(type))
         {
-            var inner = type.GetGenericArguments()[0];
-            return MakeNullable(GenerateSchema(inner));
+            var inner = GenerateSchema(type.GetGenericArguments()[0]);
+            return inner is OpenApiSchema { Type: null, AnyOf.Count: > 0 } union
+                ? VersionedSchemaForms.NullableUnion(union, _options.OpenApiVersion)
+                : MakeNullable(inner);
         }
 
         // --- 3b. BCL JSON container types (JsonElement, JsonNode, JObject, etc.) ---
@@ -271,11 +276,11 @@ public sealed class SchemaGenerator
             if (primitive.Format != null)
                 schema.Format = primitive.Format;
 
-            // Apply global NumberHandling to numeric types only
+            // Number handling (property > type > global) applies to numeric types only
             if (primitive.SchemaType == JsonSchemaType.Integer
                 || primitive.SchemaType == JsonSchemaType.Number)
             {
-                return ApplyNumberHandling(schema, _options.NumberHandling);
+                return ApplyNumberHandling(schema, fullName, EffectiveNumberHandling);
             }
 
             return schema;
@@ -352,7 +357,17 @@ public sealed class SchemaGenerator
         }
 
         // --- 8. Complex types (class, struct, record, interface) ---
-        return GenerateComplexSchema(type);
+        // A property's number handling does not reach the members of a nested object.
+        var (hadScope, scope) = (_hasNumberHandlingScope, _numberHandlingScope);
+        _hasNumberHandlingScope = false;
+        try
+        {
+            return GenerateComplexSchema(type);
+        }
+        finally
+        {
+            (_hasNumberHandlingScope, _numberHandlingScope) = (hadScope, scope);
+        }
     }
 
     // =========================================================================
@@ -708,6 +723,9 @@ public sealed class SchemaGenerator
         // is not a property of its own but makes the object open to any additional value.
         var extensionData = ExtensionDataProperty(type, allProperties);
 
+        // [JsonNumberHandling] on the type applies to its members unless they declare their own.
+        var typeNumberHandling = NumberHandlingAttribute(type.GetCustomAttributesData());
+
         var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
         var required = new HashSet<string>(StringComparer.Ordinal);
 
@@ -728,8 +746,21 @@ public sealed class SchemaGenerator
             // Determine the serialized property name.
             var serializedName = ResolvePropertyName(propAttrData, propName);
 
-            // Generate the property schema.
-            var propSchema = GenerateSchema(propType);
+            // Generate the property schema, with the number handling of the property, else of
+            // the type, else the global one (System.Text.Json's precedence).
+            var handling = NumberHandlingAttribute(propAttrData) ?? typeNumberHandling;
+            IOpenApiSchema propSchema;
+            var (hadScope, scope) = (_hasNumberHandlingScope, _numberHandlingScope);
+            if (handling.HasValue)
+                (_hasNumberHandlingScope, _numberHandlingScope) = (true, handling.Value);
+            try
+            {
+                propSchema = GenerateSchema(propType);
+            }
+            finally
+            {
+                (_hasNumberHandlingScope, _numberHandlingScope) = (hadScope, scope);
+            }
 
             // Apply property-level [JsonConverter] override.
             // This handles cases such as [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -1581,6 +1612,10 @@ public sealed class SchemaGenerator
             });
         }
 
+        // With number handling the number is the first branch of an anyOf: the range constrains it only.
+        if (!schema.Type.HasValue && schema.AnyOf is [OpenApiSchema numberBranch, ..])
+            schema = numberBranch;
+
         if (!schema.Type.HasValue
             || (schema.Type.Value & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)
             return; // a range constrains only the numeric branch
@@ -2204,67 +2239,73 @@ public sealed class SchemaGenerator
     // NumberHandling schema modification
     // =========================================================================
 
-    /// <summary>
-    /// Wraps a numeric schema to reflect global <see cref="JsonNumberHandling"/> settings.
-    /// <list type="bullet">
-    ///   <item>
-    ///     <see cref="JsonNumberHandling.WriteAsString"/> — the schema type becomes <c>string</c>
-    ///     with the original format preserved.
-    ///   </item>
-    ///   <item>
-    ///     <see cref="JsonNumberHandling.AllowReadingFromString"/> — wraps in
-    ///     <c>anyOf: [{original}, {type: string, pattern: "^-?\\d+(\\.\\d+)?$"}]</c>
-    ///     to express that the field can be read from either a number or a string.
-    ///     This shape is valid for both OpenAPI 3.0 and 3.1.
-    ///   </item>
-    /// </list>
-    /// Returns the schema unchanged when <paramref name="handling"/> is
-    /// <see cref="JsonNumberHandling.Strict"/> (0) or null.
-    /// </summary>
-    /// <remarks>
-    /// When both <c>WriteAsString</c> and <c>AllowReadingFromString</c> are set simultaneously,
-    /// <c>WriteAsString</c> takes precedence: the schema becomes <c>{type: string, format: &lt;original&gt;}</c>.
-    /// Rationale: the wire format is string in both directions, so no <c>anyOf</c> union is needed.
-    /// </remarks>
-    private static IOpenApiSchema ApplyNumberHandling(IOpenApiSchema schema, JsonNumberHandling? handling)
+    /// <summary>The number handling in force: the property's or type's, else the global option.</summary>
+    private JsonNumberHandling? EffectiveNumberHandling =>
+        _hasNumberHandlingScope ? _numberHandlingScope : _options.NumberHandling;
+
+    /// <summary>The value of <c>[JsonNumberHandling]</c> in <paramref name="attrData"/>, if any.</summary>
+    private static JsonNumberHandling? NumberHandlingAttribute(IList<CustomAttributeData> attrData)
     {
-        if (handling == null || handling.Value == JsonNumberHandling.Strict)
-            return schema;
+        var attribute = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.JsonNumberHandling);
+        return attribute is { ConstructorArguments: [{ Value: int flags }] } ? (JsonNumberHandling)flags : null;
+    }
 
-        if (schema is not OpenApiSchema concrete)
-            return schema; // cannot modify $ref schemas inline
+    private static readonly HashSet<string> FloatingPointTypes = new(StringComparer.Ordinal)
+    {
+        "System.Single", "System.Double", "System.Half",
+    };
 
-        // WriteAsString: the number is written (and read) as a JSON string.
-        if ((handling.Value & JsonNumberHandling.WriteAsString) != 0)
+    /// <summary>A numeric string System.Text.Json reads for an integer: optional sign, digits (leading zeros allowed).</summary>
+    internal const string IntegerStringPattern = "^[+-]?[0-9]+$";
+
+    /// <summary>
+    /// A numeric string System.Text.Json reads for <c>float</c>, <c>double</c>, <c>decimal</c> and <c>Half</c>:
+    /// optional sign, digits with an optional fraction (<c>.5</c> and <c>1.</c> included), optional exponent.
+    /// </summary>
+    internal const string FractionalStringPattern = "^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$";
+
+    /// <summary>
+    /// A numeric string System.Text.Json reads for <c>Half</c>, which it parses with
+    /// <c>NumberStyles.Float | AllowThousands</c> (measured on STJ 10): the fractional grammar plus
+    /// surrounding white space and group separators in the integer part.
+    /// </summary>
+    internal const string HalfStringPattern = "^\\s*[+-]?([0-9][0-9,]*\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?\\s*$";
+
+    /// <summary>
+    /// The schema of a number under <paramref name="handling"/>: the union of what System.Text.Json 10
+    /// writes and what it reads. <c>AllowReadingFromString</c> and/or <c>WriteAsString</c> → <c>anyOf</c>
+    /// [number, numeric string]; for <c>float</c> / <c>double</c> / <c>Half</c>, any of those two flags or
+    /// <c>AllowNamedFloatingPointLiterals</c> adds the branch <c>enum: ["NaN", "Infinity", "-Infinity"]</c>.
+    /// Without flags (or <c>Strict</c>) the number schema itself.
+    /// </summary>
+    private static IOpenApiSchema ApplyNumberHandling(OpenApiSchema number, string typeFullName, JsonNumberHandling? handling)
+    {
+        if (handling is null or JsonNumberHandling.Strict)
+            return number;
+
+        var stringFlags = handling.Value & (JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.WriteAsString);
+        var isFloatingPoint = FloatingPointTypes.Contains(typeFullName);
+        var named = isFloatingPoint && (stringFlags != 0 || (handling.Value & JsonNumberHandling.AllowNamedFloatingPointLiterals) != 0);
+        if (stringFlags == 0 && !named)
+            return number;
+
+        var branches = new List<IOpenApiSchema> { number };
+        if (stringFlags != 0)
         {
-            var stringSchema = new OpenApiSchema
+            var fractional = isFloatingPoint || typeFullName == "System.Decimal";
+            branches.Add(new OpenApiSchema
             {
-                Type   = JsonSchemaType.String,
-                Format = concrete.Format,
-            };
-            return stringSchema;
+                Type    = JsonSchemaType.String,
+                Pattern = typeFullName == "System.Half" ? HalfStringPattern
+                    : fractional ? FractionalStringPattern
+                    : IntegerStringPattern,
+            });
         }
 
-        // AllowReadingFromString: the number can be read from either a JSON number or a JSON string.
-        // We express this as anyOf: [{number schema}, {string + pattern}]
-        // which is compatible with both OpenAPI 3.0 and 3.1.
-        if ((handling.Value & JsonNumberHandling.AllowReadingFromString) != 0)
-        {
-            return new OpenApiSchema
-            {
-                AnyOf = new List<IOpenApiSchema>
-                {
-                    concrete,
-                    new OpenApiSchema
-                    {
-                        Type    = JsonSchemaType.String,
-                        Pattern = @"^-?\d+(\.\d+)?$",
-                    },
-                },
-            };
-        }
+        if (named)
+            branches.Add(new OpenApiSchema { Enum = [JsonValue.Create("NaN"), JsonValue.Create("Infinity"), JsonValue.Create("-Infinity")] });
 
-        return schema;
+        return new OpenApiSchema { AnyOf = branches };
     }
 
     // =========================================================================

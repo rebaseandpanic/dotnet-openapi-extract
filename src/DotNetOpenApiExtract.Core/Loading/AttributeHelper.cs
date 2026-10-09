@@ -171,6 +171,7 @@ public static class AttributeHelper
         public const string ProducesResponseType = "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute";
         public const string Produces = "Microsoft.AspNetCore.Mvc.ProducesAttribute";
         public const string Base64String = "System.ComponentModel.DataAnnotations.Base64StringAttribute";
+        public const string JsonNumberHandling = "System.Text.Json.Serialization.JsonNumberHandlingAttribute";
         public const string AllowedValues = "System.ComponentModel.DataAnnotations.AllowedValuesAttribute";
         public const string DeniedValues = "System.ComponentModel.DataAnnotations.DeniedValuesAttribute";
         public const string Consumes = "Microsoft.AspNetCore.Mvc.ConsumesAttribute";

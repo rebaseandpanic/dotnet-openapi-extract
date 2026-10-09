@@ -40,4 +40,18 @@ internal static class VersionedSchemaForms
         version == OpenApiSpecVersion.OpenApi3_0
             ? new OpenApiSchema { Type = JsonSchemaType.String, Format = "byte" }
             : new OpenApiSchema { Type = JsonSchemaType.String, ContentEncoding = "base64" };
+
+    /// <summary>
+    /// The nullable form of an <c>anyOf</c> union, by version: 3.0 marks the union itself
+    /// <c>nullable: true</c> (the library writes a <c>null</c> type that way); 3.1+ adds a
+    /// <c>{type: "null"}</c> branch, since a sibling <c>type: "null"</c> would require both.
+    /// </summary>
+    public static OpenApiSchema NullableUnion(OpenApiSchema union, OpenApiSpecVersion version)
+    {
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            union.Type = JsonSchemaType.Null;
+        else
+            union.AnyOf!.Add(new OpenApiSchema { Type = JsonSchemaType.Null });
+        return union;
+    }
 }

@@ -143,62 +143,42 @@ public sealed class JsonOptionBehaviorTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 23. NumberHandling = WriteAsString → integer schema has type string
+    // 23. NumberHandling = WriteAsString → STJ writes a string and reads only a number:
+    //     anyOf [number, numeric string]
     // ──────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void NumberHandling_WriteAsString_SchemaIsString()
+    public void NumberHandling_WriteAsString_SchemaIsNumberOrNumericString()
     {
-        var gen = new SchemaGenerator(new SchemaOptions
-        {
-            NamingPolicy = JsonNamingPolicy.CamelCase,
-            NumberHandling = JsonNumberHandling.WriteAsString,
-        });
-
-        var type = _loader.Assembly.GetType("SampleApi.Models.AllPrimitivesModel");
-        if (type == null)
-        {
-            // Test the static helper directly
-            var intSchema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32" };
-            var result = InvokeApplyNumberHandling(intSchema, JsonNumberHandling.WriteAsString);
-
-            result.Should().BeOfType<OpenApiSchema>()
-                .Which.Type.Should().HaveFlag(JsonSchemaType.String,
-                    because: "WriteAsString converts the schema type to string");
-            return;
-        }
-
-        gen.GenerateSchema(type);
-        var schema = gen.Schemas[type.Name];
-
-        schema.Properties.Should().ContainKey("intProp");
-        var intPropSchema = schema.Properties!["intProp"] as OpenApiSchema;
-        intPropSchema.Should().NotBeNull();
-        intPropSchema!.Type.Should().HaveFlag(JsonSchemaType.String,
-            because: "WriteAsString produces type: string for integer properties");
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // I1. NumberHandling combined flags — WriteAsString | AllowReadingFromString
-    // ──────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void NumberHandling_WriteAsStringAndAllowReadingFromString_WriteAsStringWins()
-    {
-        // When both flags are set, WriteAsString takes precedence: the schema becomes
-        // {type: string} — no anyOf union is needed because the wire format is string
-        // in both directions.
-        var options = new SchemaOptions
-        {
-            NumberHandling = JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString,
-        };
-        var generator = new SchemaGenerator(options);
+        var generator = new SchemaGenerator(new SchemaOptions { NumberHandling = JsonNumberHandling.WriteAsString });
 
         var schema = (OpenApiSchema)generator.GenerateSchema(typeof(int));
 
-        schema.Type.Should().Be(JsonSchemaType.String);
-        (schema.AnyOf?.Count ?? 0).Should().Be(0,
-            because: "WriteAsString wins — no anyOf union should be produced");
+        schema.AnyOf.Should().HaveCount(2);
+        ((OpenApiSchema)schema.AnyOf![0]).Type.Should().Be(JsonSchemaType.Integer);
+        var numericString = (OpenApiSchema)schema.AnyOf[1];
+        numericString.Type.Should().Be(JsonSchemaType.String);
+        numericString.Pattern.Should().Be("^[+-]?[0-9]+$");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // I1. NumberHandling combined flags — WriteAsString | AllowReadingFromString:
+    //     the same union of what is written (a string) and what is read (number or string)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void NumberHandling_WriteAsStringAndAllowReadingFromString_SchemaIsNumberOrNumericString()
+    {
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            NumberHandling = JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString,
+        });
+
+        var schema = (OpenApiSchema)generator.GenerateSchema(typeof(int));
+
+        schema.AnyOf.Should().HaveCount(2);
+        ((OpenApiSchema)schema.AnyOf![0]).Type.Should().Be(JsonSchemaType.Integer);
+        ((OpenApiSchema)schema.AnyOf[1]).Pattern.Should().Be("^[+-]?[0-9]+$");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
