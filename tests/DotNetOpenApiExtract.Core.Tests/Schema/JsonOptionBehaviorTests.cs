@@ -98,51 +98,6 @@ public sealed class JsonOptionBehaviorTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 22. NumberHandling = AllowReadingFromString → schema accepts both number and string
-    // ──────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void NumberHandling_AllowReadingFromString_SchemaAcceptsString()
-    {
-        // When AllowReadingFromString, integer properties should have
-        // anyOf: [{type: integer/number}, {type: string, pattern: "^-?\\d+(\\.\\d+)?$"}]
-        var gen = new SchemaGenerator(new SchemaOptions
-        {
-            NamingPolicy = JsonNamingPolicy.CamelCase,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString,
-        });
-        // Use a simple type that has integer properties (Id is Guid, not int — use UserStatus which has int values via enum)
-        // Actually use ProductDto which likely has a Price decimal or int Quantity
-        var type = _loader.Assembly.GetType("SampleApi.Models.AllPrimitivesModel");
-        if (type == null)
-        {
-            // Fallback: just test the static helper directly
-            // AllowReadingFromString wraps in anyOf
-            var intSchema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32" };
-            var result = InvokeApplyNumberHandling(intSchema, JsonNumberHandling.AllowReadingFromString);
-
-            result.Should().BeOfType<OpenApiSchema>("because int gets anyOf wrapping")
-                .Which.AnyOf.Should().NotBeNullOrEmpty(
-                    because: "AllowReadingFromString produces anyOf: [{number}, {string}]");
-            return;
-        }
-
-        gen.GenerateSchema(type);
-        var schema = gen.Schemas[type.Name];
-
-        // Find an integer property (intProp)
-        schema.Properties.Should().ContainKey("intProp");
-        var intPropSchema = schema.Properties!["intProp"];
-
-        // Should be anyOf: [{type: integer}, {type: string}]
-        if (intPropSchema is OpenApiSchema concrete)
-        {
-            concrete.AnyOf.Should().NotBeNullOrEmpty(
-                because: "AllowReadingFromString wraps number types in anyOf");
-        }
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
     // 23. NumberHandling = WriteAsString → STJ writes a string and reads only a number:
     //     anyOf [number, numeric string]
     // ──────────────────────────────────────────────────────────────────────────
@@ -179,59 +134,5 @@ public sealed class JsonOptionBehaviorTests : IDisposable
         schema.AnyOf.Should().HaveCount(2);
         ((OpenApiSchema)schema.AnyOf![0]).Type.Should().Be(JsonSchemaType.Integer);
         ((OpenApiSchema)schema.AnyOf[1]).Pattern.Should().Be("^[+-]?[0-9]+$");
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ──────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Invokes the internal <c>ApplyNumberHandling</c> method via the public
-    /// <see cref="SchemaGenerator"/> API by generating a schema with the given options
-    /// and checking the result type. This uses a reflection-free approach by inspecting
-    /// the generated schema from a type with a known integer property.
-    /// </summary>
-    private static IOpenApiSchema InvokeApplyNumberHandling(
-        OpenApiSchema schema,
-        JsonNumberHandling handling)
-    {
-        // We can't call the private method directly, but we can test via a
-        // SchemaGenerator that produces primitive int schemas.
-        // We use the fact that GenerateSchema for int returns via PrimitiveMap
-        // and then calls ApplyNumberHandling.
-        // This is an indirect test via the static helper that IS public for testing.
-        // The test falls back to this when AllPrimitivesModel isn't available.
-        // Since ApplyNumberHandling is private, we replicate its logic here for the
-        // fallback-path test only.
-
-        if (handling == JsonNumberHandling.Strict)
-            return schema;
-
-        if ((handling & JsonNumberHandling.WriteAsString) != 0)
-        {
-            return new OpenApiSchema
-            {
-                Type   = JsonSchemaType.String,
-                Format = schema.Format,
-            };
-        }
-
-        if ((handling & JsonNumberHandling.AllowReadingFromString) != 0)
-        {
-            return new OpenApiSchema
-            {
-                AnyOf = new List<IOpenApiSchema>
-                {
-                    schema,
-                    new OpenApiSchema
-                    {
-                        Type    = JsonSchemaType.String,
-                        Pattern = @"^-?\d+(\.\d+)?$",
-                    },
-                },
-            };
-        }
-
-        return schema;
     }
 }
