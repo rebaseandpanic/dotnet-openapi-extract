@@ -175,6 +175,16 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SchemaExampleMultiple = "schema.example-multiple";
 
+    /// <summary>
+    /// The XML <c>example</c> of an action parameter (<c>&lt;param name="x" example="…"&gt;</c>) does not
+    /// parse as a value of its schema: a path, query or header parameter gets no <c>example</c>, a body
+    /// no media type <c>example</c>, a form field is left out of the form's example. Location: the
+    /// parameter, or the request body (one per body, naming every form field that failed). Subjects:
+    /// the parameter's name in the document (the C# name for a body) and the example text, a pair per
+    /// form field.
+    /// </summary>
+    public const string ParameterExampleNotParsable = "parameter.example-not-parsable";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

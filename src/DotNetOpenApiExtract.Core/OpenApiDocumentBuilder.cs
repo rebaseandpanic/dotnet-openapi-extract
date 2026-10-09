@@ -1010,6 +1010,8 @@ public sealed class OpenApiDocumentBuilder
                 }
             }
 
+            // XML <param> is keyed by the C# name, also when Name= renames the parameter.
+            var cSharpName = param.ReflectionParameter.Name ?? param.Name;
             var openApiParam = new OpenApiParameter
             {
                 Name = param.Name,
@@ -1017,10 +1019,20 @@ public sealed class OpenApiDocumentBuilder
                 Required = param.IsRequired,
                 Schema = paramSchema,
                 Description = param.Description
-                    ?? docs.ParameterDescriptions.GetValueOrDefault(param.Name),
+                    ?? docs.ParameterDescriptions.GetValueOrDefault(cSharpName),
             };
 
             operation.Parameters ??= new List<IOpenApiParameter>();
+            if (docs.ParameterExamples.TryGetValue(cSharpName, out var paramExample))
+            {
+                if (schemaGenerator.TryParseExample(paramSchema, paramExample, out var exampleValue))
+                    openApiParam.Example = exampleValue;
+                else
+                    RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation),
+                        ["parameters", operation.Parameters.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)]),
+                        $"parameter {param.Name}", [param.Name, paramExample]);
+            }
+
             operation.Parameters.Add(openApiParam);
         }
 
@@ -1054,11 +1066,20 @@ public sealed class OpenApiDocumentBuilder
         if (bodyParam != null)
         {
             var bodySchema = schemaGenerator.GenerateSchema(bodyParam.Type);
+
+            // <param example> of a body is the example of the request body's media types.
+            JsonNode? bodyExample = null;
+            var bodyName = bodyParam.ReflectionParameter.Name ?? bodyParam.Name;
+            if (docs.ParameterExamples.TryGetValue(bodyName, out var bodyExampleText)
+                && !schemaGenerator.TryParseExample(bodySchema, bodyExampleText, out bodyExample))
+                RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation), ["requestBody"]),
+                    $"body parameter {bodyName}", [bodyName, bodyExampleText]);
+
             operation.RequestBody = new OpenApiRequestBody
             {
                 Required = bodyParam.IsRequired,
                 Description = bodyParam.Description,
-                Content = RequestContent(consumes ?? ["application/json"], bodySchema),
+                Content = RequestContent(consumes ?? ["application/json"], bodySchema, bodyExample),
             };
         }
         else if (formParams.Count > 0)
@@ -1070,15 +1091,30 @@ public sealed class OpenApiDocumentBuilder
                 Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal),
             };
 
+            // The form's example: an object of the fields that have an example, by their names in the form.
+            var formExample = new JsonObject();
+            var unparsableFields = new List<string>();
             foreach (var fp in formParams)
             {
                 var fpSchema = schemaGenerator.GenerateBoundValueSchema(fp.Type);
                 formSchema.Properties![fp.Name] = fpSchema;
+
+                if (docs.ParameterExamples.TryGetValue(fp.ReflectionParameter.Name ?? fp.Name, out var fieldExample))
+                {
+                    if (schemaGenerator.TryParseExample(fpSchema, fieldExample, out var fieldValue))
+                        formExample[fp.Name] = JsonNullSentinel.IsJsonNullSentinel(fieldValue) ? null : fieldValue; // the sentinel is shared and cannot get a parent
+                    else
+                        unparsableFields.AddRange([fp.Name, fieldExample]);
+                }
             }
+
+            if (unparsableFields.Count > 0)
+                RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation), ["requestBody"]),
+                    "form field " + string.Join(", ", unparsableFields.Where((_, i) => i % 2 == 0)), unparsableFields);
 
             operation.RequestBody = new OpenApiRequestBody
             {
-                Content = RequestContent(consumes ?? ["multipart/form-data"], formSchema),
+                Content = RequestContent(consumes ?? ["multipart/form-data"], formSchema, formExample.Count > 0 ? formExample : null),
             };
         }
 
@@ -1154,13 +1190,31 @@ public sealed class OpenApiDocumentBuilder
     }
 
     /// <summary>One media type entry per content type, all with <paramref name="schema"/>.</summary>
-    private static Dictionary<string, IOpenApiMediaType> RequestContent(IEnumerable<string> contentTypes, IOpenApiSchema schema)
+    private static Dictionary<string, IOpenApiMediaType> RequestContent(
+        IEnumerable<string> contentTypes, IOpenApiSchema schema, JsonNode? example = null)
     {
         var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
         foreach (var contentType in contentTypes)
-            content[contentType] = new OpenApiMediaType { Schema = schema };
+            content[contentType] = new OpenApiMediaType { Schema = schema, Example = example };
         return content;
     }
+
+    /// <summary>
+    /// One warning (class «source») for XML parameter examples that do not parse as values of their
+    /// schemas: <paramref name="subjects"/> names each element with its example text.
+    /// </summary>
+    private static void RecordUnparsableParameterExample(
+        LossLedger ledger, LossAnchor anchor, string elements, IReadOnlyList<string> subjects) =>
+        ledger.Add(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.ParameterExampleNotParsable,
+            Anchor   = anchor,
+            Message  = $"The XML example of {elements} is not a value of its schema: no example is written for it.",
+            Feature  = "parameter.example",
+            Action   = DiagnosticAction.Omitted,
+            Subjects = subjects,
+        });
 
     // =========================================================================
     // Response content by media type
@@ -1983,11 +2037,11 @@ public sealed class OpenApiDocumentBuilder
 
                 if (!hasPerActionConsumes)
                 {
-                    var firstSchema = operation.RequestBody.Content.Values.First().Schema;
+                    var first = operation.RequestBody.Content.Values.First();
 
                     operation.RequestBody.Content.Clear();
                     foreach (var ct in globalMediaTypes.ConsumesContentTypes)
-                        operation.RequestBody.Content[ct] = new OpenApiMediaType { Schema = firstSchema };
+                        operation.RequestBody.Content[ct] = new OpenApiMediaType { Schema = first.Schema, Example = first.Example };
                 }
             }
         }

@@ -1920,10 +1920,6 @@ public sealed class SchemaGenerator
     private (OpenApiSchema Place, JsonSchemaType? Type, bool Nullable) ExampleTarget(OpenApiSchema schema)
     {
         static bool HasNull(JsonSchemaType? type) => type.HasValue && (type.Value & JsonSchemaType.Null) != 0;
-        static JsonSchemaType? WithoutNull(JsonSchemaType? type) =>
-            type.HasValue && (type.Value & ~JsonSchemaType.Null) != 0 ? type.Value & ~JsonSchemaType.Null : null;
-        JsonSchemaType? ComponentType(OpenApiSchemaReference reference) =>
-            reference.Reference.Id is { } id && _schemas.TryGetValue(id, out var component) ? WithoutNull(component.Type) : null;
 
         var nullBranch = schema.AnyOf?.Any(b => b is OpenApiSchema { Type: JsonSchemaType.Null }) == true;
 
@@ -1937,6 +1933,31 @@ public sealed class SchemaGenerator
             return (schema, ComponentType(nullableRef), true);
 
         return (schema, WithoutNull(schema.Type), HasNull(schema.Type));
+    }
+
+    /// <summary>The JSON type of a schema without its <c>null</c> flag; <see langword="null"/> when it has no other.</summary>
+    private static JsonSchemaType? WithoutNull(JsonSchemaType? type) =>
+        type.HasValue && (type.Value & ~JsonSchemaType.Null) != 0 ? type.Value & ~JsonSchemaType.Null : null;
+
+    /// <summary>The JSON type of the component a reference points to, if it is one of this generator's.</summary>
+    private JsonSchemaType? ComponentType(OpenApiSchemaReference reference) =>
+        reference.Reference.Id is { } id && _schemas.TryGetValue(id, out var component) ? WithoutNull(component.Type) : null;
+
+    /// <summary>
+    /// Parses an XML example <paramref name="text"/> as a value of <paramref name="schema"/> (a
+    /// parameter's or a request body's schema, a reference included) by the rules of property
+    /// examples; <see langword="false"/> when it does not parse.
+    /// </summary>
+    internal bool TryParseExample(IOpenApiSchema schema, string text, out JsonNode? value)
+    {
+        var (type, nullable) = schema switch
+        {
+            OpenApiSchemaReference reference => (ComponentType(reference), false),
+            OpenApiSchema inline => ExampleTarget(inline) is var target ? (target.Type, target.Nullable) : default,
+            _ => (null, false),
+        };
+        value = ParseExample(text, type, nullable);
+        return value != null;
     }
 
     /// <summary>

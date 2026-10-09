@@ -24,8 +24,15 @@ public sealed class OperationDocumentation
     /// <summary>Whether the operation is deprecated.</summary>
     public bool Deprecated { get; init; }
 
-    /// <summary>Parameter descriptions by parameter name.</summary>
+    /// <summary>Parameter descriptions by C# parameter name.</summary>
     public IReadOnlyDictionary<string, string> ParameterDescriptions { get; init; } =
+        new Dictionary<string, string>();
+
+    /// <summary>
+    /// XML parameter examples (<c>&lt;param name="x" example="…"&gt;</c>) by C# parameter name, as
+    /// written in the XML.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ParameterExamples { get; init; } =
         new Dictionary<string, string>();
 
     /// <summary>Response descriptions by status code string (e.g. "200").</summary>
@@ -207,6 +214,7 @@ public sealed class DocumentationResolver
             Tags = tags,
             Deprecated = deprecated,
             ParameterDescriptions = paramDescriptions,
+            ParameterExamples = xmlDoc?.ParameterExamples ?? new Dictionary<string, string>(),
             ResponseDescriptions = responseDescriptions,
         };
     }

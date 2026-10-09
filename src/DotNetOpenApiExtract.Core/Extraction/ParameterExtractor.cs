@@ -237,12 +237,14 @@ public static class ParameterExtractor
     /// </summary>
     private static string ResolveName(System.Reflection.ParameterInfo param, ParameterLocation location)
     {
-        // Only [FromRoute], [FromQuery], and [FromHeader] support a Name override.
+        // [FromRoute], [FromQuery], [FromHeader] and [FromForm] support a Name override (the name of
+        // the route value, query key, header or form field); a body has no name on the wire.
         string? attrName = location switch
         {
             ParameterLocation.Path => GetNameFromBindingAttribute(param, AttributeHelper.Names.FromRoute),
             ParameterLocation.Query => GetNameFromBindingAttribute(param, AttributeHelper.Names.FromQuery),
             ParameterLocation.Header => GetNameFromBindingAttribute(param, AttributeHelper.Names.FromHeader),
+            ParameterLocation.Form => GetNameFromBindingAttribute(param, AttributeHelper.Names.FromForm),
             _ => null,
         };
 
