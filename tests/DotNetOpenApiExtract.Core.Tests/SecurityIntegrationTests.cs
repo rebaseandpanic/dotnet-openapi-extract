@@ -428,9 +428,10 @@ public class SecurityIntegrationTests
 
         var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
         {
-            AssemblyPath = TestPaths.SampleApiDll,
-            XmlPath      = TestPaths.SampleApiXml,
-            SourceRoot   = tempDir.Path,
+            AssemblyPath   = TestPaths.SampleApiDll,
+            XmlPath        = TestPaths.SampleApiXml,
+            SourceRoot     = tempDir.Path,
+            OpenApiVersion = version,
         });
 
         var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
@@ -459,9 +460,10 @@ public class SecurityIntegrationTests
 
         var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
         {
-            AssemblyPath = TestPaths.SampleApiDll,
-            XmlPath      = TestPaths.SampleApiXml,
-            SourceRoot   = tempDir.Path,
+            AssemblyPath   = TestPaths.SampleApiDll,
+            XmlPath        = TestPaths.SampleApiXml,
+            SourceRoot     = tempDir.Path,
+            OpenApiVersion = version,
         });
 
         var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);

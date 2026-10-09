@@ -7,6 +7,7 @@ using DotNetOpenApiExtract.Core.Schema;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 using DotNetOpenApiExtract.Core.Validation;
+using DotNetOpenApiExtract.Core.Versioning;
 using Microsoft.CodeAnalysis;
 
 // Alias to resolve ambiguity: our ParameterLocation vs Microsoft.OpenApi.ParameterLocation
@@ -186,6 +187,26 @@ public sealed class OpenApiDocumentOptions
     /// Corresponds to the <c>--no-enum-varnames</c> CLI flag (which disables the feature).
     /// </summary>
     public bool EnumVarnames { get; init; } = true;
+
+    /// <summary>
+    /// The OpenAPI version the document is built for: <see cref="OpenApiSpecVersion.OpenApi3_0"/>
+    /// (default), <see cref="OpenApiSpecVersion.OpenApi3_1"/> or <see cref="OpenApiSpecVersion.OpenApi3_2"/>.
+    /// Corresponds to the <c>--openapi-version</c> CLI flag.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The version is a build parameter, not a serialization detail: the document is built for
+    /// this version and must be serialized into the same version. Serializing it into another
+    /// version is not supported.
+    /// </para>
+    /// <para>
+    /// Any other value (<see cref="OpenApiSpecVersion.OpenApi2_0"/> or a value outside the enum)
+    /// makes <see cref="OpenApiDocumentBuilder.Build"/> and
+    /// <see cref="OpenApiDocumentBuilder.BuildWithValidation"/> throw
+    /// <see cref="OpenApiConfigurationException"/> before the assembly is loaded.
+    /// </para>
+    /// </remarks>
+    public OpenApiSpecVersion OpenApiVersion { get; init; } = TargetVersion.Default;
 }
 
 /// <summary>
@@ -219,6 +240,10 @@ public sealed class OpenApiDocumentBuilder
     /// Thrown when the assembly specified by <see cref="OpenApiDocumentOptions.AssemblyPath"/>
     /// does not exist on disk.
     /// </exception>
+    /// <exception cref="OpenApiConfigurationException">
+    /// Thrown before the assembly is loaded when <see cref="OpenApiDocumentOptions.OpenApiVersion"/>
+    /// is not 3.0, 3.1 or 3.2.
+    /// </exception>
     /// <summary>
     /// Internal build result used by both <see cref="Build"/> and <see cref="BuildWithValidation"/>.
     /// </summary>
@@ -237,6 +262,16 @@ public sealed class OpenApiDocumentBuilder
     /// <param name="validationContext">Validation options. CLR bindings are populated automatically.</param>
     /// <param name="validationResult">Receives the validation result after building.</param>
     /// <returns>The fully-populated <see cref="OpenApiDocument"/>.</returns>
+    /// <remarks>
+    /// Validation runs for the version the document is built for. When
+    /// <see cref="ValidationContext.OpenApiSpecVersion"/> is <see langword="null"/>, it is taken from
+    /// <see cref="OpenApiDocumentOptions.OpenApiVersion"/>.
+    /// </remarks>
+    /// <exception cref="OpenApiConfigurationException">
+    /// Thrown before the assembly is loaded when <see cref="OpenApiDocumentOptions.OpenApiVersion"/>
+    /// is not 3.0, 3.1 or 3.2, or when <see cref="ValidationContext.OpenApiSpecVersion"/> names a
+    /// different explicit version.
+    /// </exception>
     public static OpenApiDocument BuildWithValidation(
         OpenApiDocumentOptions options,
         ValidationContext validationContext,
@@ -244,6 +279,10 @@ public sealed class OpenApiDocumentBuilder
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(validationContext);
+
+        TargetVersion.EnsureSupported(options.OpenApiVersion, nameof(OpenApiDocumentOptions.OpenApiVersion));
+        var validationVersion = TargetVersion.ResolveValidationVersion(
+            options.OpenApiVersion, validationContext.OpenApiSpecVersion);
 
         using var loader = new AssemblyLoader(options.AssemblyPath);
         var core = BuildCore(options, loader);
@@ -276,7 +315,7 @@ public sealed class OpenApiDocumentBuilder
             ActionByOperationKey     = actionByKey,
             TypeBySchemaId           = typeBySchemaId,
             SourceContext            = core.SourceContext,
-            OpenApiSpecVersion       = validationContext.OpenApiSpecVersion,
+            OpenApiSpecVersion       = validationVersion,
         };
 
         validationResult = Validation.OpenApiValidator.Validate(core.Document, enrichedContext);
@@ -286,6 +325,7 @@ public sealed class OpenApiDocumentBuilder
     public static OpenApiDocument Build(OpenApiDocumentOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        TargetVersion.EnsureSupported(options.OpenApiVersion, nameof(OpenApiDocumentOptions.OpenApiVersion));
 
         using var loader = new AssemblyLoader(options.AssemblyPath);
         return BuildCore(options, loader).Document;
@@ -327,6 +367,7 @@ public sealed class OpenApiDocumentBuilder
             GlobalConverterTypeNames = jsonOptions.GlobalConverterTypeNames,
             EnumAutoDescription      = options.EnumAutoDescription,
             EnumVarnames             = options.EnumVarnames,
+            OpenApiVersion           = options.OpenApiVersion,
         }, docResolver);
 
         // ── Step 1: Discovery ───────────────────────────────────────────────

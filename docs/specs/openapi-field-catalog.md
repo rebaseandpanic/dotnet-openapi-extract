@@ -97,7 +97,7 @@ Each section covers one OpenAPI object. Each row is one field path. Rows for a f
 
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
-| `openapi` | 3.0 | CLI `--openapi-version 3.0\|3.1\|3.2` (default `3.0`; any other value → exit 2) | `3.0.4` | `3.1.2` | `3.2.0` | — | — | supported | — |
+| `openapi` | 3.0 | CLI `--openapi-version 3.0\|3.1\|3.2` (default `3.0`; any other value → exit 2); Core `OpenApiDocumentOptions.OpenApiVersion` and `SchemaOptions.OpenApiVersion` (default 3.0; any other value → configuration error; the document is serialized only into the version it was built for) | `3.0.4` | `3.1.2` | `3.2.0` | — | — | supported | — |
 | `$self` | 3.2 | CLI `--self-url <uri>`; the value must be a valid URI reference without a fragment, otherwise configuration error. Also available through Core options. | `x-oai-$self` | `x-oai-$self` | `$self` | DW (3.0, 3.1) | — | stage 1 | stage-1 |
 | `info` | 3.0 | see §2 | written | = | = | — | `spec.info-title`, `spec.info-version`, `spec.info-description` | supported | — |
 | `jsonSchemaDialect` | 3.1 | CLI `--json-schema-dialect <uri>`; only the dialect the generator and validator really support (the OAS base dialect of the target version; for a 3.0 target, where the field does not exist, the 3.1 and 3.2 base dialects are accepted and the field is omitted with a warning); any other value is a configuration error. Without the flag the field is not written (the specification default applies). | omitted | written | written | DW (3.0) | — | stage 1 | stage-1 |

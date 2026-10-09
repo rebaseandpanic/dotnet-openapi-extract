@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotNetOpenApiExtract.Core.Tests" />
+    <!-- The CLI parses the OpenAPI version flag through the same internal helper the options are checked with. -->
+    <InternalsVisibleTo Include="DotNetOpenApiExtract.Cli" />
   </ItemGroup>
 
   <ItemGroup>

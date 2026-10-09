@@ -1,6 +1,7 @@
 using System.CommandLine;
 using DotNetOpenApiExtract.Core;
 using DotNetOpenApiExtract.Core.Validation;
+using DotNetOpenApiExtract.Core.Versioning;
 using Microsoft.OpenApi;
 using Microsoft.OpenApi.Reader;
 using Microsoft.OpenApi.YamlReader;
@@ -157,7 +158,8 @@ var enumAsStringOption = new Option<bool>("--enum-as-string")
 
 var openapiVersionOption = new Option<string>("--openapi-version")
 {
-    Description = "OpenAPI specification version: 3.0, 3.1, or 3.2",
+    Description = "OpenAPI version the document is built, validated and serialized for: 3.0, 3.1, or 3.2. " +
+                  "Any other value is an error (exit 2)",
     DefaultValueFactory = _ => "3.0",
 };
 
@@ -393,11 +395,16 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         return 2;
     }
 
-    // ── Validate openapi version ──────────────────────────────────────────────
-    if (openapiVer is not ("3.0" or "3.1" or "3.2"))
+    // ── Parse openapi version ─────────────────────────────────────────────────
+    // Parsed once; the same value drives the build, the validation and the serialization.
+    OpenApiSpecVersion specVersion;
+    try
     {
-        Console.Error.WriteLine(
-            $"Error: Unknown OpenAPI version '{openapiVer}'. Use 3.0, 3.1, or 3.2.");
+        specVersion = TargetVersion.Parse(openapiVer);
+    }
+    catch (OpenApiConfigurationException ex)
+    {
+        Console.Error.WriteLine($"Error: {ex.Message}");
         return 2;
     }
 
@@ -439,6 +446,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             PathBaseEmission    = pathBaseEmissionMode,
             EnumAutoDescription = !noEnumAutoDescription,
             EnumVarnames        = !noEnumVarnames,
+            OpenApiVersion      = specVersion,
         };
 
         OpenApiDocument document;
@@ -453,14 +461,6 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
 
             var severityOverrides = BuildSeverityOverrides(isStrict, warnRules, errorRules);
 
-            // Map --openapi-version string to enum for version-conditional rules (e.g. spec.no-ref-siblings)
-            var specVersionForValidation = openapiVer switch
-            {
-                "3.1" => (OpenApiSpecVersion?)OpenApiSpecVersion.OpenApi3_1,
-                "3.2" => (OpenApiSpecVersion?)OpenApiSpecVersion.OpenApi3_2,
-                _     => (OpenApiSpecVersion?)OpenApiSpecVersion.OpenApi3_0,
-            };
-
             var validationContext = new ValidationContext
             {
                 MinDescriptionLength = minDescLen,
@@ -472,7 +472,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
                     ? new HashSet<string>(enableRules, StringComparer.Ordinal)
                     : (IReadOnlySet<string>)new HashSet<string>(),
                 SeverityOverrides = severityOverrides,
-                OpenApiSpecVersion = specVersionForValidation,
+                OpenApiSpecVersion = specVersion,
                 RequiredResponseCodes = parsedRequiredCodes.Count > 0 ? parsedRequiredCodes : null,
                 MinDescriptionLengthPerRule = parsedRuleMinLengths.Count > 0 ? parsedRuleMinLengths : null,
             };
@@ -484,14 +484,6 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             document = OpenApiDocumentBuilder.Build(options);
         }
-
-        // ── Choose spec version ───────────────────────────────────────────────
-        var specVersion = openapiVer switch
-        {
-            "3.1" => OpenApiSpecVersion.OpenApi3_1,
-            "3.2" => OpenApiSpecVersion.OpenApi3_2,
-            _     => OpenApiSpecVersion.OpenApi3_0,
-        };
 
         // ── Ensure output directory exists ────────────────────────────────────
         var outputPath = Path.GetFullPath(output);

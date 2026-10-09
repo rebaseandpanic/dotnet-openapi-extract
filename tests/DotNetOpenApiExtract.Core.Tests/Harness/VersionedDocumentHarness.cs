@@ -31,18 +31,25 @@ internal static class VersionedDocumentHarness
         OpenApiSpecVersion.OpenApi3_2,
     ];
 
-    /// <summary>Options for the ModernApi fixture with its XML documentation.</summary>
-    public static OpenApiDocumentOptions ModernApiOptions() => new()
+    /// <summary>Options for the ModernApi fixture with its XML documentation, built for <paramref name="version"/>.</summary>
+    public static OpenApiDocumentOptions ModernApiOptions(
+        OpenApiSpecVersion version = OpenApiSpecVersion.OpenApi3_0) => new()
     {
-        AssemblyPath = TestPaths.ModernApiDll,
-        XmlPath      = TestPaths.ModernApiXml,
+        AssemblyPath   = TestPaths.ModernApiDll,
+        XmlPath        = TestPaths.ModernApiXml,
+        OpenApiVersion = version,
     };
 
-    /// <summary>Options for the SampleApi fixture (the 3.0 regression baseline) with its XML documentation.</summary>
-    public static OpenApiDocumentOptions SampleApiOptions() => new()
+    /// <summary>
+    /// Options for the SampleApi fixture (the 3.0 regression baseline) with its XML documentation,
+    /// built for <paramref name="version"/>.
+    /// </summary>
+    public static OpenApiDocumentOptions SampleApiOptions(
+        OpenApiSpecVersion version = OpenApiSpecVersion.OpenApi3_0) => new()
     {
-        AssemblyPath = TestPaths.SampleApiDll,
-        XmlPath      = TestPaths.SampleApiXml,
+        AssemblyPath   = TestPaths.SampleApiDll,
+        XmlPath        = TestPaths.SampleApiXml,
+        OpenApiVersion = version,
     };
 
     /// <summary>Builds the document through the public Core entry point.</summary>
@@ -82,11 +89,13 @@ internal static class VersionedDocumentHarness
             ?? throw new InvalidOperationException("Serialized YAML document is empty.");
     }
 
-    /// <summary>Builds the document and serializes it in one step.</summary>
+    /// <summary>
+    /// Builds the document and serializes it into the version it was built for
+    /// (<see cref="OpenApiDocumentOptions.OpenApiVersion"/>), the only supported pairing.
+    /// </summary>
     public static async Task<JsonNode> BuildAndSerializeAsync(
         OpenApiDocumentOptions options,
-        OpenApiSpecVersion version,
         DocumentFormat format,
         CancellationToken cancellationToken) =>
-        await SerializeAsync(Build(options), version, format, cancellationToken);
+        await SerializeAsync(Build(options), options.OpenApiVersion, format, cancellationToken);
 }

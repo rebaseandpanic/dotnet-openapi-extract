@@ -46,7 +46,7 @@ This means you can generate OpenAPI specs:
 | `--no-enum-auto-description` | no | off | Disable the auto-glue markdown description (type summary + per-value bullet list) on enum schemas. With this flag, `schema.description` on enums is not populated (unless set by a `JsonConverter` hint). `x-enum-descriptions` and `x-enum-varnames` still emit. |
 | `--no-enum-varnames` | no | off | Disable the `x-enum-varnames` extension on enum schemas |
 | `--path-base-emission <mode>` | no | `prefix` | How to emit `UsePathBase`: `prefix` (prepend to paths) or `servers` (add to `servers[]`) |
-| `--openapi-version <3.0\|3.1\|3.2>` | no | `3.0` | OpenAPI specification version |
+| `--openapi-version <3.0\|3.1\|3.2>` | no | `3.0` | OpenAPI version the document is built, validated and serialized for. Any other value is an error (exit 2) |
 | `--exclude-path <prefix>` | no | — | Exclude paths by prefix (repeatable) |
 | `--contact-name <string>` | no | — | `info.contact.name` |
 | `--contact-email <string>` | no | — | `info.contact.email` |
@@ -163,6 +163,7 @@ For the complete catalog of 650+ supported attributes and constructs, see [OpenA
 | Unknown `[JsonConverter]` types | Arbitrary runtime code — falls back to default schema. Well-known converters are recognized via built-in registry |
 | `[ModelBinder]` custom binding | Runtime behavior, not interpretable statically |
 | Runtime Swashbuckle filters | Any filter that modifies the document at runtime is invisible to static analysis |
+| Serializing a library-built document into another OpenAPI version | The document is built for `OpenApiDocumentOptions.OpenApiVersion` (default 3.0) and is serialized only into that version; the CLI always builds, validates and serializes for one version |
 
 ### Runtime-only Program.cs patterns
 

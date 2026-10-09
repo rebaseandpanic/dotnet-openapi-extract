@@ -74,6 +74,11 @@ public sealed class ValidationContext
     /// (e.g., <c>spec.no-ref-siblings</c>). Null means version is unknown; version-specific rules
     /// default to applying conservatively (emit violations) so that the user can suppress via
     /// <c>--skip-rule</c> if they know they are targeting 3.1+.
+    /// <para>
+    /// In <see cref="OpenApiDocumentBuilder.BuildWithValidation"/> a null value is replaced by the
+    /// build version (<see cref="OpenApiDocumentOptions.OpenApiVersion"/>); an explicit value that
+    /// differs from it is an <see cref="OpenApiConfigurationException"/>.
+    /// </para>
     /// </summary>
     public OpenApiSpecVersion? OpenApiSpecVersion { get; init; }
 

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
+using DotNetOpenApiExtract.Core.Versioning;
 using Microsoft.OpenApi;
 
 namespace DotNetOpenApiExtract.Core.Schema;
@@ -121,9 +122,13 @@ public sealed class SchemaGenerator
     /// Optional documentation resolver. When supplied, enum schemas will include an
     /// <c>x-enum-descriptions</c> extension populated from XML <c>&lt;summary&gt;</c> tags.
     /// </param>
+    /// <exception cref="OpenApiConfigurationException">
+    /// <see cref="SchemaOptions.OpenApiVersion"/> is not 3.0, 3.1 or 3.2.
+    /// </exception>
     public SchemaGenerator(SchemaOptions? options = null, DocumentationResolver? docResolver = null)
     {
         _options = options ?? new SchemaOptions();
+        TargetVersion.EnsureSupported(_options.OpenApiVersion, nameof(SchemaOptions.OpenApiVersion));
         _docResolver = docResolver;
     }
 
@@ -1459,4 +1464,13 @@ public sealed class SchemaOptions
     /// When <see langword="false"/>, the extension is omitted.
     /// </summary>
     public bool EnumVarnames { get; init; } = true;
+
+    /// <summary>
+    /// The OpenAPI version the schemas are generated for: <see cref="OpenApiSpecVersion.OpenApi3_0"/>
+    /// (default), <see cref="OpenApiSpecVersion.OpenApi3_1"/> or <see cref="OpenApiSpecVersion.OpenApi3_2"/>.
+    /// Schemas generated for one version are serialized only into that version.
+    /// Any other value makes the <see cref="SchemaGenerator"/> constructor throw
+    /// <see cref="OpenApiConfigurationException"/>.
+    /// </summary>
+    public OpenApiSpecVersion OpenApiVersion { get; init; } = TargetVersion.Default;
 }

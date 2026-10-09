@@ -2,6 +2,11 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [FEATURE] The target OpenAPI version is a build option on every public Core surface: `OpenApiDocumentOptions.OpenApiVersion` and `SchemaOptions.OpenApiVersion` (`Microsoft.OpenApi.OpenApiSpecVersion`, default `OpenApi3_0`). A document is built for that version and is supported only when serialized into the same version. The CLI parses `--openapi-version` once and uses the value for the build, the validation and the serialization. Output does not change yet: the option is the carrier for version-dependent forms.
+- [BEHAVIOR] A version other than 3.0, 3.1 or 3.2 (`OpenApi2_0`, or a value outside the enum) makes `OpenApiDocumentBuilder.Build`, `OpenApiDocumentBuilder.BuildWithValidation` and `new SchemaGenerator(...)` throw the new public `OpenApiConfigurationException` (derived from `InvalidOperationException`) before the assembly is loaded. `BuildWithValidation` takes the validation version from the build options when `ValidationContext.OpenApiSpecVersion` is `null`; an explicit value that differs from `OpenApiDocumentOptions.OpenApiVersion` now throws `OpenApiConfigurationException`. Library callers that set `ValidationContext.OpenApiSpecVersion` to 3.1 or 3.2 must set the same `OpenApiVersion` in the build options. The CLI exit code for an unknown `--openapi-version` stays 2.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.
