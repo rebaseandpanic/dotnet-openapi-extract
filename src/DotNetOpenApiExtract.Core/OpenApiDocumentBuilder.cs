@@ -1843,11 +1843,22 @@ public sealed class OpenApiDocumentBuilder
                 {
                     // Body types per status, so each global media type gets its own form
                     // (an asynchronous sequence differs between JSON and sequential media types).
-                    // Typed results write their own content type: [Produces] does not apply to them.
-                    var bodyTypes = ResponseExtractor.ExtractResponses(action)
-                        .Where(r => r.BodyType != null && !r.BodyFromHttpResult)
+                    var extracted = ResponseExtractor.ExtractResponses(action)
+                        .Where(r => r.BodyType != null)
                         .GroupBy(r => r.StatusCode == ResponseExtractor.DefaultStatusCode ? "default" : r.StatusCode.ToString())
-                        .ToDictionary(g => g.Key, g => g.First().BodyType!, StringComparer.Ordinal);
+                        .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+                    // Typed results and files write their own content type: the global [Produces]
+                    // filter does not apply to them.
+                    var ownContentType = extracted
+                        .Where(e => e.Value.BodyFromHttpResult
+                                    || SseEventSchema.TryGetItemType(e.Value.BodyType!, out _)
+                                    || FileTypes.IsFile(e.Value.BodyType!))
+                        .Select(e => e.Key)
+                        .ToHashSet(StringComparer.Ordinal);
+                    var bodyTypes = extracted
+                        .Where(e => !ownContentType.Contains(e.Key))
+                        .ToDictionary(e => e.Key, e => e.Value.BodyType!, StringComparer.Ordinal);
 
                     foreach (var (statusKey, responseInterface) in operation.Responses)
                     {
@@ -1861,11 +1872,11 @@ public sealed class OpenApiDocumentBuilder
                         // Replace the content entries with the global content types. A response
                         // whose body type is known is rebuilt per media type; otherwise (e.g. an
                         // injected ProblemDetails response) the schema of the first entry is kept.
+                        if (ownContentType.Contains(statusKey))
+                            continue;
+
                         if (bodyTypes.TryGetValue(statusKey, out var bodyType))
                         {
-                            // A result that writes its own content type is not affected by [Produces].
-                            if (SseEventSchema.TryGetItemType(bodyType, out _))
-                                continue;
 
                             response.Content = BuildResponseContent(
                                 globalMediaTypes.ProducesContentTypes, bodyType, schemaGenerator, ledger, operation, httpSlots: null);

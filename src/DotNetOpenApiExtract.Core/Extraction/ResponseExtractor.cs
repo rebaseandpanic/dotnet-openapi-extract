@@ -93,11 +93,42 @@ public static class ResponseExtractor
     /// </remarks>
     public static IReadOnlyList<ResponseInfo> ExtractResponses(ActionInfo action)
     {
+        var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(action.Method, action.Controller.Type);
+        return ExtractResponsesCore(action, defaultContentTypes, contentTypesExplicit)
+            .Select(r => WithFileMediaType(r, defaultContentTypes, contentTypesExplicit))
+            .ToList();
+    }
+
+    /// <summary>
+    /// A file body is raw bytes: unless its response declares media types of its own or
+    /// <c>[Produces]</c> declares them, it is written as <c>application/octet-stream</c>, never JSON.
+    /// </summary>
+    private static ResponseInfo WithFileMediaType(
+        ResponseInfo response, IReadOnlyList<string> defaultContentTypes, bool contentTypesExplicit)
+    {
+        if (response.BodyType == null || !Schema.FileTypes.IsFile(response.BodyType))
+            return response;
+
+        var ownTypes = response.ContentTypes.Count > 0 && !ReferenceEquals(response.ContentTypes, defaultContentTypes);
+        if (ownTypes)
+            return response;
+
+        return new ResponseInfo
+        {
+            StatusCode           = response.StatusCode,
+            BodyType             = response.BodyType,
+            Description          = response.Description,
+            ContentTypes         = contentTypesExplicit ? defaultContentTypes : [Schema.FileTypes.DefaultResponseMediaType],
+            ContentTypesExplicit = contentTypesExplicit,
+            BodyFromHttpResult   = false,
+        };
+    }
+
+    private static IReadOnlyList<ResponseInfo> ExtractResponsesCore(
+        ActionInfo action, IReadOnlyList<string> defaultContentTypes, bool contentTypesExplicit)
+    {
         var method = action.Method;
         var controllerType = action.Controller.Type;
-
-        // Resolve default content types from [Produces] on the method, then the controller.
-        var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(method, controllerType);
 
         var declared = MergeLevels(
             CollectDeclared(method, defaultContentTypes, contentTypesExplicit),
@@ -328,13 +359,25 @@ public static class ResponseExtractor
         if (attr.ConstructorArguments.Count >= 3)
             bodyType = attr.ConstructorArguments[2].Value as Type;
 
+        // Arg 3 (optional): params string[] contentTypes — the response's own media types.
+        var contentTypes = new List<string>();
+        if (attr.ConstructorArguments.Count >= 4
+            && attr.ConstructorArguments[3].Value is IReadOnlyCollection<CustomAttributeTypedArgument> declared)
+        {
+            foreach (var item in declared)
+            {
+                if (item.Value is string ct && !string.IsNullOrWhiteSpace(ct))
+                    contentTypes.Add(ct);
+            }
+        }
+
         return new ResponseInfo
         {
             StatusCode = statusCode.Value,
             Description = description,
             BodyType = bodyType,
-            ContentTypes = defaultContentTypes,
-            ContentTypesExplicit = contentTypesExplicit,
+            ContentTypes = contentTypes.Count > 0 ? contentTypes : defaultContentTypes,
+            ContentTypesExplicit = contentTypesExplicit || contentTypes.Count > 0,
         };
     }
 

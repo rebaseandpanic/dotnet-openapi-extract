@@ -85,6 +85,14 @@ internal static class TypedResults
             return true;
         }
 
+        if (Schema.FileTypes.IsFile(type))
+        {
+            // A file result writes the file with 200; its media type is the declared one or
+            // application/octet-stream (decided by the caller).
+            Add(responses, new ResponseInfo { StatusCode = 200, BodyType = type, ContentTypes = [] });
+            return true;
+        }
+
         if (!StatusByType.TryGetValue(name, out var status))
             return false;
 

@@ -221,6 +221,11 @@ public sealed class SchemaGenerator
         if (type.IsArray && type.GetElementType()?.FullName == "System.Byte")
             return new OpenApiSchema { Type = JsonSchemaType.String, Format = "byte" };
 
+        // --- 1b. File content (FileResult, IFileHttpResult, Stream, IFormFile) → binary string ---
+        // Raw bytes on the wire, never a JSON object: no component for the framework type.
+        if (FileTypes.IsFile(type))
+            return new OpenApiSchema { Type = JsonSchemaType.String, Format = "binary" };
+
         // --- 2. T[] (non-byte) → array schema ---
         if (type.IsArray)
         {
