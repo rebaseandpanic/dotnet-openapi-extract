@@ -20,12 +20,14 @@ internal static class CliRunner
     /// Runs the CLI with <paramref name="arguments"/> in <paramref name="workingDirectory"/>
     /// and waits for it to exit. A run that outlives <paramref name="timeout"/> is killed and
     /// reported as a <see cref="TimeoutException"/>, never as an exit code.
+    /// <paramref name="environment"/> adds or overrides environment variables of the process.
     /// </summary>
     public static async Task<CliResult> RunAsync(
         IEnumerable<string> arguments,
         string workingDirectory,
         CancellationToken cancellationToken,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         ArgumentNullException.ThrowIfNull(arguments);
 
@@ -39,6 +41,9 @@ internal static class CliRunner
             RedirectStandardError  = true,
             UseShellExecute        = false,
         };
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+            startInfo.Environment[name] = value;
+
         startInfo.ArgumentList.Add(TestPaths.CliDll);
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
