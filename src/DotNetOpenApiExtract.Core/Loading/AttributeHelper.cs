@@ -69,6 +69,25 @@ public static class AttributeHelper
     }
 
     /// <summary>
+    /// Get all attribute data whose type is <paramref name="attributeFullName"/> or its generic
+    /// variant with one type argument (<c>ProducesAttribute</c> and <c>ProducesAttribute&lt;T&gt;</c>),
+    /// in metadata order. A closed generic attribute type has a <c>FullName</c> carrying its type
+    /// arguments, so it never equals the plain name.
+    /// </summary>
+    internal static IEnumerable<CustomAttributeData> GetAttributesWithGenericForm(
+        MemberInfo member, string attributeFullName)
+    {
+        var genericName = attributeFullName + "`1";
+        foreach (var a in member.GetCustomAttributesData())
+        {
+            var type = a.AttributeType;
+            if (type.FullName == attributeFullName
+                || (type.IsGenericType && type.GetGenericTypeDefinition().FullName == genericName))
+                yield return a;
+        }
+    }
+
+    /// <summary>
     /// Get the first attribute data matching any of the given full type names.
     /// </summary>
     public static CustomAttributeData? GetAttribute(MemberInfo member, params string[] attributeFullNames)

@@ -123,14 +123,14 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 - Routes (`[Route]`, `[HttpGet]`, `[HttpPost]`, etc., and `[AcceptVerbs]` with one or several methods and a named `Route`) with full template resolution; an action whose HTTP methods are not statically visible (an empty `[AcceptVerbs()]`, a custom `HttpMethodAttribute` subclass) is skipped with a warning
 - Polymorphism (`[JsonPolymorphic]` / `[JsonDerivedType]`, or Swashbuckle `[SwaggerDiscriminator]` / `[SwaggerSubType]`) as unions: `oneOf` of per-type variants (with a `discriminator` for an abstract base or interface; plus a base branch for a concrete base), or `anyOf` when some derived types have no discriminator value
 - Parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, `[FromForm]`) with `[ApiController]` inference
-- Responses (`[ProducesResponseType]`, `[SwaggerResponse]`) with return type inference
+- Responses (`[ProducesResponseType]` incl. `[ProducesResponseType<T>]`, `[SwaggerResponse]`, `[ProducesDefaultResponseType]`) on the action and on the controller (for one status code the action wins), with return type inference. The body type of a response comes from the type declared for its status code, then (for 200) `[Produces(typeof(T))]` / `[Produces<T>]`, then the return type; as in ASP.NET Core ApiExplorer, `[Produces(typeof(T))]` declares a 200 response and the return type is used only when nothing declares a response
 - Schemas from DTO classes — primitives, nullable, collections, dictionaries, enums, generics, inheritance, self-referencing types
 - Enum extensions: `x-enum-varnames` (always, matches `enum[]` length), `x-enum-descriptions` (when any value is documented), markdown auto-glue `description` combining type summary + per-value bullet list
 - Enum value description sources: XML `<summary>` (primary) with `[Description]` attribute fallback
 - Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, etc.)
 - JSON attributes (`[JsonPropertyName]`, `[JsonIgnore]`, `[JsonRequired]`)
 - Swagger annotations (`[SwaggerOperation]`, `[SwaggerParameter]`, `[SwaggerTag]`, `[SwaggerSchema]`)
-- XML documentation (`<summary>`, `<remarks>`, `<param>`, `<response>`)
+- XML documentation (`<summary>`, `<remarks>`, `<param>`, `<response>` on the action and on the controller)
 - Nullable reference types via NRT attribute analysis
 - Description fallback chains: Swagger attrs > `[Description]` > XML docs
 - `[Obsolete]` → `deprecated: true` on operations, schemas, enums

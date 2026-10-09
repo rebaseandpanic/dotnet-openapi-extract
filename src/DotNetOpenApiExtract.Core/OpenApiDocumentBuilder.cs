@@ -959,8 +959,10 @@ public sealed class OpenApiDocumentBuilder
                 ? "default"
                 : resp.StatusCode.ToString();
 
-            var description = resp.Description
-                ?? docs.ResponseDescriptions.GetValueOrDefault(statusKey)
+            // The resolved descriptions keep the action's sources (attributes, then XML) ahead of
+            // the controller's; ResponseInfo.Description may already hold a controller value.
+            var description = docs.ResponseDescriptions.GetValueOrDefault(statusKey)
+                ?? resp.Description
                 ?? GetDefaultStatusDescription(resp.StatusCode);
 
             var apiResponse = new OpenApiResponse { Description = description };

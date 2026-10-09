@@ -37,9 +37,9 @@ public sealed class ResponseInfo
 
 /// <summary>
 /// Extracts HTTP response information from controller action methods.
-/// Inspects <c>[ProducesResponseType]</c>, <c>[SwaggerResponse]</c>, and
-/// <c>[ProducesDefaultResponseType]</c> attributes via reflection-only metadata,
-/// and falls back to return-type inference when no attributes are present.
+/// Inspects <c>[ProducesResponseType]</c>, <c>[SwaggerResponse]</c>,
+/// <c>[ProducesDefaultResponseType]</c> and <c>[Produces]</c> on the action and its controller via
+/// reflection-only metadata, and falls back to return-type inference when nothing declares a response.
 /// </summary>
 public static class ResponseExtractor
 {
@@ -59,50 +59,177 @@ public static class ResponseExtractor
     /// <param name="action">The action to inspect.</param>
     /// <returns>
     /// A non-empty, ordered list of <see cref="ResponseInfo"/> instances.
-    /// When no response attributes are present the list is inferred from
-    /// the method's return type.
     /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Responses are declared by <c>[SwaggerResponse]</c>, <c>[ProducesResponseType]</c> (all
+    /// overloads, including <c>[ProducesResponseType&lt;T&gt;]</c>) and
+    /// <c>[ProducesDefaultResponseType]</c> on the action and on its controller. For one status code
+    /// the action's declaration wins over the controller's, field by field: a field the action leaves
+    /// open (body type, description, content types) is taken from the controller.
+    /// </para>
+    /// <para>
+    /// The <b>effective response type</b> of a status code is, in priority order: the type declared
+    /// for that code (action, then controller); for the 200 response, the type of
+    /// <c>[Produces(typeof(T))]</c> / <c>[Produces&lt;T&gt;]</c> (action, then controller); for the
+    /// 200 response, the return type after <c>Task&lt;&gt;</c>, <c>ValueTask&lt;&gt;</c> and
+    /// <c>ActionResult&lt;&gt;</c> are removed. As in ASP.NET Core ApiExplorer, <c>[Produces]</c>
+    /// with a type declares a 200 response; the return type yields a response only when nothing
+    /// else declares one (<c>void</c> / <c>Task</c> → 204, <c>IActionResult</c> → 200 without a body).
+    /// </para>
+    /// </remarks>
     public static IReadOnlyList<ResponseInfo> ExtractResponses(ActionInfo action)
     {
         var method = action.Method;
-        var controller = action.Controller;
+        var controllerType = action.Controller.Type;
 
         // Resolve default content types from [Produces] on the method, then the controller.
-        var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(method, controller.Type);
+        var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(method, controllerType);
 
-        var responses = new List<ResponseInfo>();
+        var declared = MergeLevels(
+            CollectDeclared(method, defaultContentTypes, contentTypesExplicit),
+            CollectDeclared(controllerType, defaultContentTypes, contentTypesExplicit));
 
-        // --- [SwaggerResponse] (highest priority) ---
-        foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.SwaggerResponse))
+        var producesType = ResolveProducesType(method) ?? ResolveProducesType(controllerType);
+        var signatureType = UnwrapReturnType(method.ReturnType);
+        var signatureBody = signatureType == null || IsVoidLike(signatureType) || IsNonGenericActionResult(signatureType)
+            ? null
+            : signatureType;
+
+        if (declared.Count == 0 && producesType == null)
+            return InferFromReturnType(signatureType, defaultContentTypes, contentTypesExplicit);
+
+        var responses = new List<ResponseInfo>(declared.Count + 1);
+        var has200 = false;
+        foreach (var entry in declared)
         {
-            var response = ParseSwaggerResponse(attr, defaultContentTypes, contentTypesExplicit);
-            if (response != null)
-                responses.Add(response);
+            var response = entry.Response;
+            if (response.StatusCode == 200)
+            {
+                has200 = true;
+                if (response.BodyType == null)
+                {
+                    // A 200 declared without a type: [Produces(typeof(T))], then the return type.
+                    var bodyType = producesType ?? signatureBody;
+                    if (bodyType != null)
+                        response = Copy(response, bodyType);
+                }
+            }
+            responses.Add(response);
         }
 
-        // --- [ProducesResponseType] (all overloads, including generic form) ---
-        foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.ProducesResponseType))
+        // [Produces(typeof(T))] declares the 200 response itself.
+        if (!has200 && producesType != null)
         {
-            var response = ParseProducesResponseType(attr, defaultContentTypes, contentTypesExplicit);
-            if (response != null)
-                responses.Add(response);
+            responses.Add(new ResponseInfo
+            {
+                StatusCode = 200,
+                BodyType = producesType,
+                ContentTypes = defaultContentTypes,
+                ContentTypesExplicit = contentTypesExplicit,
+            });
         }
 
-        // --- [ProducesDefaultResponseType] / [ProducesDefaultResponseType(typeof(T))] ---
-        foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.ProducesDefaultResponseType))
+        return responses;
+    }
+
+    /// <summary>A declared response and whether its content types came from its own attribute.</summary>
+    private readonly record struct DeclaredResponse(ResponseInfo Response, bool OwnContentTypes);
+
+    /// <summary>
+    /// Responses declared on one level (action method or controller class), first declaration per
+    /// status code wins: <c>[SwaggerResponse]</c>, then <c>[ProducesResponseType]</c>, then
+    /// <c>[ProducesDefaultResponseType]</c>.
+    /// </summary>
+    private static List<DeclaredResponse> CollectDeclared(
+        MemberInfo member, IReadOnlyList<string> defaultContentTypes, bool contentTypesExplicit)
+    {
+        var result = new List<DeclaredResponse>();
+        var seen = new HashSet<int>();
+
+        void Add(ResponseInfo? response)
         {
-            var response = ParseProducesDefaultResponseType(attr, defaultContentTypes, contentTypesExplicit);
-            if (response != null)
-                responses.Add(response);
+            if (response != null && seen.Add(response.StatusCode))
+                result.Add(new DeclaredResponse(response, !ReferenceEquals(response.ContentTypes, defaultContentTypes)));
         }
 
-        // If we found any explicit declarations, return them (de-duplicated by status code,
-        // keeping first-seen which corresponds to priority order above).
-        if (responses.Count > 0)
-            return DeduplicateByStatusCode(responses);
+        foreach (var attr in AttributeHelper.GetAttributes(member, AttributeHelper.Names.SwaggerResponse))
+            Add(ParseSwaggerResponse(attr, defaultContentTypes, contentTypesExplicit));
 
-        // --- Fallback: infer from return type ---
-        return InferFromReturnType(method, defaultContentTypes, contentTypesExplicit);
+        foreach (var attr in AttributeHelper.GetAttributesWithGenericForm(member, AttributeHelper.Names.ProducesResponseType))
+            Add(ParseProducesResponseType(attr, defaultContentTypes, contentTypesExplicit));
+
+        foreach (var attr in AttributeHelper.GetAttributes(member, AttributeHelper.Names.ProducesDefaultResponseType))
+            Add(ParseProducesDefaultResponseType(attr, defaultContentTypes, contentTypesExplicit));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Action responses in their order, then controller-only status codes in theirs. For a status
+    /// code declared on both levels, every field the action leaves open comes from the controller.
+    /// </summary>
+    private static List<DeclaredResponse> MergeLevels(
+        List<DeclaredResponse> action, List<DeclaredResponse> controller)
+    {
+        var byCode = controller.ToDictionary(c => c.Response.StatusCode);
+        var result = new List<DeclaredResponse>(action.Count + controller.Count);
+
+        foreach (var entry in action)
+        {
+            if (!byCode.Remove(entry.Response.StatusCode, out var fallback))
+            {
+                result.Add(entry);
+                continue;
+            }
+
+            var own = entry.Response;
+            var useControllerContentTypes = !entry.OwnContentTypes && fallback.OwnContentTypes;
+            result.Add(new DeclaredResponse(new ResponseInfo
+            {
+                StatusCode = own.StatusCode,
+                BodyType = own.BodyType ?? fallback.Response.BodyType,
+                Description = own.Description ?? fallback.Response.Description,
+                ContentTypes = useControllerContentTypes ? fallback.Response.ContentTypes : own.ContentTypes,
+                ContentTypesExplicit = own.ContentTypesExplicit,
+            }, entry.OwnContentTypes || fallback.OwnContentTypes));
+        }
+
+        foreach (var entry in controller)
+        {
+            if (byCode.ContainsKey(entry.Response.StatusCode))
+                result.Add(entry);
+        }
+
+        return result;
+    }
+
+    private static ResponseInfo Copy(ResponseInfo response, Type bodyType) => new()
+    {
+        StatusCode = response.StatusCode,
+        BodyType = bodyType,
+        Description = response.Description,
+        ContentTypes = response.ContentTypes,
+        ContentTypesExplicit = response.ContentTypesExplicit,
+    };
+
+    /// <summary>
+    /// The response type declared by <c>[Produces(typeof(T))]</c> or <c>[Produces&lt;T&gt;]</c> on
+    /// <paramref name="member"/>, or <see langword="null"/>.
+    /// </summary>
+    private static Type? ResolveProducesType(MemberInfo member)
+    {
+        foreach (var attr in AttributeHelper.GetAttributesWithGenericForm(member, AttributeHelper.Names.Produces))
+        {
+            if (attr.AttributeType.IsGenericType)
+                return attr.AttributeType.GetGenericArguments()[0];
+
+            if (attr.ConstructorArguments.Count == 1 && IsTypeArgument(attr.ConstructorArguments[0])
+                && attr.ConstructorArguments[0].Value is Type type)
+                return type;
+        }
+
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -298,17 +425,14 @@ public static class ResponseExtractor
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Infers response info from the method's declared return type when no
-    /// explicit response attributes are present.
+    /// Infers response info from the method's unwrapped return type when nothing declares a
+    /// response.
     /// </summary>
     private static IReadOnlyList<ResponseInfo> InferFromReturnType(
-        MethodInfo method,
+        Type? unwrapped,
         IReadOnlyList<string> defaultContentTypes,
         bool contentTypesExplicit)
     {
-        var returnType = method.ReturnType;
-        var unwrapped = UnwrapReturnType(returnType);
-
         // void → 204 No Content
         if (unwrapped == null || IsVoidLike(unwrapped))
         {
@@ -453,28 +577,6 @@ public static class ResponseExtractor
             }
         }
 
-        return result;
-    }
-
-    // -------------------------------------------------------------------------
-    // Deduplication
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns a new list with only the first <see cref="ResponseInfo"/> for each
-    /// distinct status code, preserving insertion order (i.e. priority order).
-    /// When both [SwaggerResponse] and [ProducesResponseType] declare the same status code,
-    /// the first-seen entry wins silently (SwaggerResponse has higher priority).
-    /// </summary>
-    private static IReadOnlyList<ResponseInfo> DeduplicateByStatusCode(List<ResponseInfo> responses)
-    {
-        var seen = new HashSet<int>();
-        var result = new List<ResponseInfo>(responses.Count);
-        foreach (var r in responses)
-        {
-            if (seen.Add(r.StatusCode))
-                result.Add(r);
-        }
         return result;
     }
 

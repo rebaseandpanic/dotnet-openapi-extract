@@ -189,7 +189,8 @@ public sealed class DocumentationResolver
         // --- ResponseDescriptions ---
         // Merge: attribute-sourced description (already in ResponseInfo.Description)
         // is the primary source; XML <response> fills gaps.
-        var responseDescriptions = ResolveResponseDescriptions(method, xmlDoc);
+        var responseDescriptions = ResolveResponseDescriptions(
+            method, xmlDoc, action.Controller.Type, _xmlParser.GetTypeDoc(action.Controller.Type));
 
         return new OperationDocumentation
         {
@@ -520,19 +521,32 @@ public sealed class DocumentationResolver
     }
 
     /// <summary>
-    /// Builds a status-code → description dictionary by combining attribute-sourced
-    /// descriptions (from <c>[SwaggerResponse]</c> and <c>[ProducesResponseType]</c>, already
-    /// resolved in <see cref="Extraction.ResponseExtractor"/>) with XML <c>&lt;response&gt;</c>
-    /// docs as a fallback for each status code not already described.
+    /// Builds a status-code → description dictionary. For each status code the first source with a
+    /// description wins: the action's <c>[SwaggerResponse]</c>, its <c>[ProducesResponseType]</c>
+    /// <c>Description</c> (.NET 10+), its XML <c>&lt;response&gt;</c>, then the same three sources on
+    /// the controller class. The action always wins over the controller.
     /// </summary>
     private static IReadOnlyDictionary<string, string> ResolveResponseDescriptions(
         MethodInfo method,
-        XmlDocEntry? xmlDoc)
+        XmlDocEntry? xmlDoc,
+        Type controllerType,
+        XmlDocEntry? controllerXmlDoc)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        AddResponseDescriptions(result, method, xmlDoc);
+        AddResponseDescriptions(result, controllerType, controllerXmlDoc);
+        return result;
+    }
+
+    /// <summary>Adds the descriptions one level declares for codes not described yet.</summary>
+    private static void AddResponseDescriptions(
+        Dictionary<string, string> result, MemberInfo member, XmlDocEntry? xmlDoc)
+    {
+        // Codes this level already described; the level's own sources keep the first value.
+        var level = new Dictionary<string, string>(StringComparer.Ordinal);
 
         // --- [SwaggerResponse] ---
-        foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.SwaggerResponse))
+        foreach (var attr in AttributeHelper.GetAttributes(member, AttributeHelper.Names.SwaggerResponse))
         {
             // Constructor: (int statusCode, string? description, Type? type)
             if (attr.ConstructorArguments.Count < 1)
@@ -543,31 +557,31 @@ public sealed class DocumentationResolver
                 continue;
 
             var codeKey = statusCode.Value.ToString();
-            if (result.ContainsKey(codeKey))
+            if (level.ContainsKey(codeKey))
                 continue; // first wins
 
             if (attr.ConstructorArguments.Count >= 2 &&
                 attr.ConstructorArguments[1].Value is string desc &&
                 !string.IsNullOrEmpty(desc))
             {
-                result[codeKey] = desc;
+                level[codeKey] = desc;
             }
         }
 
         // --- [ProducesResponseType] named arg "Description" (.NET 10+) ---
-        foreach (var attr in AttributeHelper.GetAttributes(method, AttributeHelper.Names.ProducesResponseType))
+        foreach (var attr in AttributeHelper.GetAttributesWithGenericForm(member, AttributeHelper.Names.ProducesResponseType))
         {
             var statusCode = ExtractProducesResponseTypeStatusCode(attr);
             if (statusCode == null)
                 continue;
 
             var codeKey = statusCode.Value.ToString();
-            if (result.ContainsKey(codeKey))
+            if (level.ContainsKey(codeKey))
                 continue;
 
             var desc = AttributeHelper.GetNamedArgument<string>(attr, "Description");
             if (!string.IsNullOrEmpty(desc))
-                result[codeKey] = desc;
+                level[codeKey] = desc;
         }
 
         // --- XML <response code="..."> as fallback for any not yet described ---
@@ -575,12 +589,13 @@ public sealed class DocumentationResolver
         {
             foreach (var kvp in xmlDoc.Responses)
             {
-                if (!result.ContainsKey(kvp.Key) && !string.IsNullOrEmpty(kvp.Value))
-                    result[kvp.Key] = kvp.Value;
+                if (!level.ContainsKey(kvp.Key) && !string.IsNullOrEmpty(kvp.Value))
+                    level[kvp.Key] = kvp.Value;
             }
         }
 
-        return result;
+        foreach (var (code, desc) in level)
+            result.TryAdd(code, desc);
     }
 
     /// <summary>
