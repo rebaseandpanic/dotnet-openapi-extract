@@ -164,7 +164,7 @@ Each section covers one OpenAPI object. Each row is one field path. Rows for a f
 
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
-| `components.schemas` | 3.0 | every complex CLR type (class, struct, record, interface) reached from a parameter, body or response; ids follow the Swashbuckle convention (`UserDtoApiResponse`; a short-name collision falls back to the full name with `_`); `ProblemDetails` from `AddProblemDetails()` | written | = | = | — | `schema.description`, `component.no-unused` (off by default) | supported | — |
+| `components.schemas` | 3.0 | every complex CLR type (class, struct, record, interface) reached from a parameter, body or response; ids follow the Swashbuckle convention (`UserDtoApiResponse`); an id already held by another type (two non-generic types with one short name, or two closed generic types with one candidate such as `A.Page<Item>` and `B.Page<Item>`) falls back to the full CLR name with `.`/`+` → `_`, then to a numeric suffix `_2`, `_3`…; every type gets its own component; `ProblemDetails` from `AddProblemDetails()` | written | = | = | — | `schema.description`, `component.no-unused` (off by default) | supported | — |
 | `components.responses` | 3.0 | — | never | never | never | — | — | not planned: responses are inlined by design | — |
 | `components.parameters` | 3.0 | — | never | never | never | — | — | not planned: parameters are inlined by design | — |
 | `components.examples` | 3.0 | — | never | never | never | — | — | not planned: inlined; named examples are stage 2 (§19) | — |

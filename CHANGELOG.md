@@ -11,6 +11,8 @@ All notable changes to this project.
 - [BEHAVIOR] Within one build, a warning repeated with the same code, place and text is reported once (for direct schema generation: once per `SchemaGenerator` instance). Previously, for example, a security scheme registered three times printed the duplicate warning twice.
 - [FEATURE] New public `OpenApiExtractionException` (derived from `InvalidOperationException`, with `TypeName` and `MemberName`) for annotations that are provably wrong; it is not raised yet.
 
+- [BUGFIX] Two different closed generic types whose component id came out the same — for example `A.Page<Item>` and `B.Page<Item>`, both `ItemPage` — silently shared one component, so the second response was described by the first type's schema. Every component id is now reserved per CLR type: the second type gets the fallback id (`Item` + the full name of its generic definition with `.`/`+` → `_`, e.g. `ItemB_Page`), and a numeric suffix if that is taken too. Ids that did not collide are unchanged, including the existing full-name fallback for two non-generic types with one short name. OpenAPI 3.0 output changes only for documents that had such a collision.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.

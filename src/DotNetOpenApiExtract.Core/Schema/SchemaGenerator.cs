@@ -22,7 +22,7 @@ namespace DotNetOpenApiExtract.Core.Schema;
 public sealed class SchemaGenerator
 {
     private readonly Dictionary<string, OpenApiSchema> _schemas = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _schemaTypeMap = new(StringComparer.Ordinal); // schema ID → type FullName for collision detection
+    private readonly SchemaIdRegistry _schemaIds = new(); // every component id, unique per (type, context, role)
     private readonly Dictionary<string, Type> _schemaIdToType = new(StringComparer.Ordinal); // schema ID → original Type
     private readonly HashSet<string> _generating = new(StringComparer.Ordinal); // cycle detection
     private readonly SchemaOptions _options;
@@ -1054,34 +1054,59 @@ public sealed class SchemaGenerator
     // =========================================================================
 
     /// <summary>
-    /// Produces a stable schema identifier for use as the key in components/schemas.
+    /// Produces a stable schema identifier for use as the key in components/schemas, reserved
+    /// in <see cref="SchemaIdRegistry"/> for the type's direct use.
     /// Follows the Swashbuckle convention: generic types produce names like
     /// <c>UserDtoApiResponse</c> (args first, then base name).
     /// For list-like types used as generic arguments, produces <c>UserDtoList</c>.
+    /// When another type already holds the name, the full CLR name is used instead
+    /// (<c>.</c> and <c>+</c> replaced by <c>_</c>).
     /// </summary>
     private string GetSchemaId(Type type)
     {
         if (!type.IsGenericType)
-        {
-            var shortName = type.Name;
-            var typeFullName = type.FullName ?? type.Name;
+            return ReserveNonGenericId(type);
 
-            // Check if a DIFFERENT type already claimed this short name
-            if (_schemaTypeMap.TryGetValue(shortName, out var existingFullName)
-                && existingFullName != typeFullName)
-            {
-                return typeFullName.Replace('.', '_').Replace('+', '_');
-            }
+        return _schemaIds.Reserve(
+            SchemaKey.Direct(type),
+            candidate: GenericIdCandidate(type, fullBaseName: false),
+            fallback:  GenericIdCandidate(type, fullBaseName: true));
+    }
 
-            _schemaTypeMap[shortName] = typeFullName;
-            return shortName;
-        }
+    /// <summary>
+    /// A non-generic type's id is its short name, or its full name when another type holds the
+    /// short name. It is reserved as soon as it is computed — also when it is only a part of a
+    /// generic id — so the first type to ask keeps the short name.
+    /// </summary>
+    private string ReserveNonGenericId(Type type)
+    {
+        var typeFullName = type.FullName ?? type.Name;
+        return _schemaIds.Reserve(
+            SchemaKey.Direct(type),
+            candidate: type.Name,
+            fallback:  typeFullName.Replace('.', '_').Replace('+', '_'));
+    }
+
+    /// <summary>
+    /// Builds the generic id <c>{Arg1}And{Arg2}{BaseName}</c>, e.g.
+    /// <c>ApiResponse&lt;UserDto&gt;</c> → <c>UserDtoApiResponse</c>,
+    /// <c>ApiResponse&lt;List&lt;UserDto&gt;&gt;</c> → <c>UserDtoListApiResponse</c>,
+    /// <c>PaginatedResult&lt;UserDto, PaginationMeta&gt;</c> → <c>UserDtoAndPaginationMetaPaginatedResult</c>.
+    /// With <paramref name="fullBaseName"/> the base name is the generic definition's full name
+    /// (<c>.</c> and <c>+</c> replaced by <c>_</c>). Generic arguments contribute their name
+    /// without reserving it: only the type that becomes a component reserves its id.
+    /// </summary>
+    private string GenericIdCandidate(Type type, bool fullBaseName)
+    {
+        var definitionName = fullBaseName
+            ? (type.GetGenericTypeDefinition().FullName ?? type.Name).Replace('.', '_').Replace('+', '_')
+            : type.Name;
 
         // Strip the backtick arity suffix from the open generic name (e.g. "ApiResponse`1" → "ApiResponse").
-        var backtickIndex = type.Name.IndexOf('`');
+        var backtickIndex = definitionName.IndexOf('`');
         var baseName = backtickIndex >= 0
-            ? type.Name[..backtickIndex]
-            : type.Name;
+            ? definitionName[..backtickIndex]
+            : definitionName;
 
         var args = type.GetGenericArguments();
 
@@ -1090,14 +1115,11 @@ public sealed class SchemaGenerator
         for (int i = 0; i < args.Length; i++)
         {
             if (i > 0) sb.Append("And");
-            sb.Append(GetSchemaId(args[i]));
+            sb.Append(args[i].IsGenericType
+                ? GenericIdCandidate(args[i], fullBaseName: false)
+                : ReserveNonGenericId(args[i]));
         }
         sb.Append(baseName);
-
-        // Swashbuckle convention: {Arg1}And{Arg2}{BaseName}
-        // e.g. ApiResponse<UserDto> → UserDtoApiResponse
-        //      ApiResponse<List<UserDto>> → UserDtoListApiResponse
-        //      PaginatedResult<UserDto, PaginationMeta> → UserDtoAndPaginationMetaPaginatedResult
         return sb.ToString();
     }
 
