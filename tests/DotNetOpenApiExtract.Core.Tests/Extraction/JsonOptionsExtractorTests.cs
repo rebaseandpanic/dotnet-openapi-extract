@@ -474,6 +474,36 @@ public class JsonOptionsExtractorTests
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // Expression-bodied and block lambdas are read alike
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string, string, bool> LambdaForms => new()
+    {
+        { "AddJsonOptions", "JsonSerializerOptions", true },
+        { "AddJsonOptions", "JsonSerializerOptions", false },
+        { "ConfigureHttpJsonOptions", "SerializerOptions", true },
+        { "ConfigureHttpJsonOptions", "SerializerOptions", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(LambdaForms))]
+    public void Extract_ConverterAndSetting_InExpressionOrBlockLambda(string method, string options, bool expressionBody)
+    {
+        string Lambda(string statement) => expressionBody ? $"o => o.{options}.{statement}" : $"o => {{ o.{options}.{statement}; }}";
+        var source = $"""
+            builder.Services.{method}({Lambda("Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase))")});
+            builder.Services.{method}({Lambda("NumberHandling = JsonNumberHandling.AllowReadingFromString")});
+            """;
+
+        var result = JsonOptionsExtractor.Extract(BuildContext(source));
+        var context = method == "AddJsonOptions" ? result.Mvc : result.Http;
+
+        context.GlobalConverterTypeNames.Should().ContainSingle().Which.Should().Contain("JsonStringEnumConverter");
+        context.GlobalConverterEnumNamingPolicies.Should().Equal(JsonNamingPolicy.CamelCase);
+        context.NumberHandling.Should().Be(DotNetOpenApiExtract.Core.JsonNumberHandling.AllowReadingFromString);
+    }
+
     private static SourceAnalysisContext BuildContext(string source)
     {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);

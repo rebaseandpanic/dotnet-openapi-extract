@@ -264,8 +264,9 @@ public static class JsonOptionsExtractor
         SourceAnalysisContext context,
         Action<ExtractionDiagnostic>? onDiagnostic)
     {
-        // Scan all assignment expressions in the body.
-        foreach (var assignment in body.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+        // Scan all assignment expressions in the body, the body itself included: an expression
+        // lambda (o => o.X = …) is the assignment.
+        foreach (var assignment in body.DescendantNodesAndSelf().OfType<AssignmentExpressionSyntax>())
         {
             if (assignment.Left is not MemberAccessExpressionSyntax leftMae)
                 continue;
@@ -315,8 +316,9 @@ public static class JsonOptionsExtractor
             }
         }
 
-        // Scan Converters.Add(...) calls within the body.
-        foreach (var invocation in body.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        // Scan Converters.Add(...) calls within the body, the body itself included: in an expression
+        // lambda (o => o.X.Converters.Add(…)) the call is the body.
+        foreach (var invocation in body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax mae)
                 continue;

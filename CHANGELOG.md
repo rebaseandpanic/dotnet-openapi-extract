@@ -86,6 +86,8 @@ All notable changes to this project.
 
 - [FEATURE] The naming policy of a global string-enum converter is read: `Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase))` (any built-in policy, also `JsonStringEnumConverter<T>`) and Newtonsoft's `StringEnumConverter(camelCaseText: true)` or naming strategy (`CamelCaseNamingStrategy`, `SnakeCaseNamingStrategy`, `KebabCaseNamingStrategy`). It names the enum members that `[JsonStringEnumMemberName]` / `[EnumMember]` do not rename, as the serializers do; previously the member names were written. A policy that cannot be read statically leaves the member names, with a warning (code `json-options.unknown-converter-naming-policy`). `JsonContextOptions` and `SchemaOptions` get `GlobalConverterEnumNamingPolicies`, parallel to `GlobalConverterTypeNames`; contexts whose converter policies differ get separate schemas.
 
+- [BUGFIX] JSON options set in an expression-bodied lambda — `AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(...))`, `ConfigureHttpJsonOptions(o => o.SerializerOptions.NumberHandling = ...)` — were not read: only block lambdas were. Both forms are read now.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.
