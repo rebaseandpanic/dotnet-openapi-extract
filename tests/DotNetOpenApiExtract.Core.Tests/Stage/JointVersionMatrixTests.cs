@@ -111,11 +111,21 @@ public class JointVersionMatrixTests(JointVersionMatrixFixture fixture) : IClass
             excluded.Document, version, DocumentFormat.Json, TestContext.Current.CancellationToken);
         var onlyFromExcluded = ComponentsUnreachableFromKeptPaths(root);
 
-        bool BelongsToExcluded(ExtractionDiagnostic d) =>
-            d.Location is { } location
-            && (JointVersionMatrixFixture.ExcludedPrefixes.Any(prefix => OperationPath(location)?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true
-                                                                        || location.StartsWith("#/paths/" + prefix.Replace("/", "~1"), StringComparison.Ordinal))
-                || onlyFromExcluded.Any(id => location.StartsWith($"#/components/schemas/{id}", StringComparison.Ordinal)));
+        bool BelongsToExcluded(ExtractionDiagnostic d)
+        {
+            if (d.Location is not { } location)
+                return false;
+
+            // Paths are excluded by key prefix, as ExcludePathPrefixes does it.
+            var path = OperationPath(location) ?? PointerSegment(location, "#/paths/");
+            if (path != null && JointVersionMatrixFixture.ExcludedPrefixes.Any(
+                    prefix => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            // A component matches by its whole pointer segment, never by a name prefix.
+            var component = PointerSegment(location, ComponentsPointer);
+            return component != null && onlyFromExcluded.Contains(component);
+        }
 
         var expected = fixture.Full[version].Diagnostics.Where(d => !BelongsToExcluded(d)).Select(Identity).ToList();
 
@@ -157,10 +167,29 @@ public class JointVersionMatrixTests(JointVersionMatrixFixture fixture) : IClass
         return space > 0 ? location[(space + 1)..] : null;
     }
 
+    private const string ComponentsPointer = "#/components/schemas/";
+
+    /// <summary>
+    /// The first segment after <paramref name="prefix"/> in a JSON pointer, decoded
+    /// (<c>~1</c> → <c>/</c>, <c>~0</c> → <c>~</c>); null when the pointer is not under the prefix.
+    /// </summary>
+    private static string? PointerSegment(string pointer, string prefix)
+    {
+        if (!pointer.StartsWith(prefix, StringComparison.Ordinal))
+            return null;
+
+        var rest = pointer[prefix.Length..];
+        var slash = rest.IndexOf('/');
+        var segment = slash < 0 ? rest : rest[..slash];
+        return segment.Length == 0
+            ? null
+            : segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
+    }
+
     /// <summary>Component schemas no kept path reaches, directly or through other components.</summary>
     private static IReadOnlySet<string> ComponentsUnreachableFromKeptPaths(JsonNode root)
     {
-        const string prefix = "#/components/schemas/";
+        const string prefix = ComponentsPointer;
         var schemas = root["components"]?["schemas"]?.AsObject();
         if (schemas == null)
             return new HashSet<string>();
@@ -169,8 +198,8 @@ public class JointVersionMatrixTests(JointVersionMatrixFixture fixture) : IClass
         var pending = new Queue<string>(JsonReferences.All(root["paths"]).Where(r => r.StartsWith(prefix, StringComparison.Ordinal)));
         while (pending.TryDequeue(out var reference))
         {
-            var id = reference[prefix.Length..];
-            if (!reached.Add(id))
+            var id = PointerSegment(reference, prefix);
+            if (id == null || !reached.Add(id))
                 continue;
             foreach (var nested in JsonReferences.All(schemas[id]).Where(r => r.StartsWith(prefix, StringComparison.Ordinal)))
                 pending.Enqueue(nested);
