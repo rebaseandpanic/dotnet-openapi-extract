@@ -26,18 +26,20 @@ internal static class DefaultValueConverter
     /// <summary>
     /// Converts the <c>[DefaultValue]</c> attribute <paramref name="attribute"/>. <paramref name="schemaType"/>
     /// is the JSON type of the schema the default goes on: an enum default is the member's name when
-    /// the enum is written as strings, its number otherwise.
+    /// the enum is written as strings (its name on the wire under <paramref name="enumNaming"/>), its
+    /// number otherwise.
     /// </summary>
-    public static Result FromAttribute(CustomAttributeData attribute, JsonSchemaType? schemaType)
+    public static Result FromAttribute(
+        CustomAttributeData attribute, JsonSchemaType? schemaType, EnumWireNaming enumNaming = EnumWireNaming.MemberName)
     {
         var args = attribute.ConstructorArguments;
         if (args.Count == 2 && args[0].Value is Type type && args[1].Value is string text)
-            return FromText(type, text, schemaType);
+            return FromText(type, text, schemaType, enumNaming);
 
         if (args.Count == 1 && args[0].Value is { } literal)
         {
             if (args[0].ArgumentType.IsEnum)
-                return FromEnumValue(args[0].ArgumentType, literal, schemaType);
+                return FromEnumValue(args[0].ArgumentType, literal, schemaType, enumNaming);
             return new Result(true, FromLiteral(literal), null);
         }
 
@@ -52,17 +54,17 @@ internal static class DefaultValueConverter
     /// the member's name for a string enum, else its number.
     /// </summary>
     public static Result FromEnumDefault(Type enumType, object raw, JsonSchemaType? schemaType) =>
-        FromEnumValue(enumType, raw, schemaType);
+        FromEnumValue(enumType, raw, schemaType, EnumWireNaming.MemberName);
 
     /// <summary>An enum member's raw value: its name for a string enum schema, else its number.</summary>
-    private static Result FromEnumValue(Type enumType, object raw, JsonSchemaType? schemaType)
+    private static Result FromEnumValue(Type enumType, object raw, JsonSchemaType? schemaType, EnumWireNaming enumNaming)
     {
         if (!WritesStrings(schemaType))
             return new Result(true, SchemaGenerator.IntegralValue(raw), null);
 
         var field = enumType.GetFields(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(f => Equals(f.GetRawConstantValue(), raw));
         return field != null
-            ? new Result(true, JsonValue.Create(field.Name), null)
+            ? new Result(true, JsonValue.Create(SchemaGenerator.EnumWireName(field, enumNaming)), null)
             : new Result(false, null, $"{raw} is not a named member of {enumType.Name}");
     }
 
@@ -101,14 +103,14 @@ internal static class DefaultValueConverter
         "System.TimeOnly", "System.TimeSpan", "System.Char",
     };
 
-    private static Result FromText(Type type, string text, JsonSchemaType? schemaType)
+    private static Result FromText(Type type, string text, JsonSchemaType? schemaType, EnumWireNaming enumNaming)
     {
         if (type.IsEnum)
         {
             var field = type.GetField(text, BindingFlags.Public | BindingFlags.Static);
             return field == null
                 ? new Result(false, null, $"\"{text}\" is not a member of {type.Name}")
-                : FromEnumValue(type, field.GetRawConstantValue()!, schemaType);
+                : FromEnumValue(type, field.GetRawConstantValue()!, schemaType, enumNaming);
         }
 
         var culture = CultureInfo.InvariantCulture;

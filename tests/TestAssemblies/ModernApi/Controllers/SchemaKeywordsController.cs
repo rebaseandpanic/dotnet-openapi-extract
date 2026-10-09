@@ -107,4 +107,10 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>readOnly, writeOnly and title sources.</summary>
     [HttpGet("access")]
     public ActionResult<AccessModel> Access() => new AccessModel();
+
+    /// <summary>Enum members under every known converter.</summary>
+    [HttpGet("enum-wire-names")]
+    public ActionResult<EnumWireNamesModel> EnumWireNames(
+        [FromQuery] StjTint tint = StjTint.Red,
+        [FromQuery] StjTint[]? tints = null) => new EnumWireNamesModel();
 }

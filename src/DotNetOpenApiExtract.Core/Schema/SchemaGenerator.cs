@@ -37,6 +37,7 @@ public sealed class SchemaGenerator
     private int _generationDepth; // public GenerateSchema nesting, to find the end of the outermost call
     private bool _hasNumberHandlingScope; // a property or type sets the number handling for the schema being generated
     private JsonNumberHandling _numberHandlingScope;
+    private bool _bindingByMemberName; // a parameter outside a JSON body: model binding reads enum member names
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
     // GetCustomAttributesData() scans on the same type when processing its properties.
@@ -218,6 +219,26 @@ public sealed class SchemaGenerator
         }
     }
 
+    /// <summary>
+    /// The schema of a value ASP.NET Core model binding reads from the route, query string, a header
+    /// or a form field. Such a value is converted by its type converter, not by the JSON serializer:
+    /// an enum is read by its member names (and numbers), so a string enum lists the member names,
+    /// not the names a JSON converter writes.
+    /// </summary>
+    internal IOpenApiSchema GenerateBoundValueSchema(Type type)
+    {
+        var previous = _bindingByMemberName;
+        _bindingByMemberName = true;
+        try
+        {
+            return GenerateSchema(type);
+        }
+        finally
+        {
+            _bindingByMemberName = previous;
+        }
+    }
+
     private IOpenApiSchema GenerateSchemaCore(Type type)
     {
         // --- 1. byte[] → base64 binary string (before the array check below) ---
@@ -269,7 +290,7 @@ public sealed class SchemaGenerator
             // Check if a globally-registered converter overrides the default primitive schema.
             // This handles converters like IsoDateTimeConverter or UnixDateTimeConverter
             // registered globally via SchemaOptions.GlobalConverterTypeNames.
-            // Enum types are excluded here — they are handled via HasApplicableGlobalEnumConverter.
+            // Enum types are excluded here — they are handled via GlobalEnumConverter.
             foreach (var converterFullName in _options.GlobalConverterTypeNames)
             {
                 var converterHint = JsonConverterRegistry.TryGet(converterFullName);
@@ -363,15 +384,17 @@ public sealed class SchemaGenerator
 
         // --- 8. Complex types (class, struct, record, interface) ---
         // A property's number handling does not reach the members of a nested object.
-        var (hadScope, scope) = (_hasNumberHandlingScope, _numberHandlingScope);
+        // Nor does binding by member name: a component describes the JSON form of its type.
+        var (hadScope, scope, byMemberName) = (_hasNumberHandlingScope, _numberHandlingScope, _bindingByMemberName);
         _hasNumberHandlingScope = false;
+        _bindingByMemberName = false;
         try
         {
             return GenerateComplexSchema(type);
         }
         finally
         {
-            (_hasNumberHandlingScope, _numberHandlingScope) = (hadScope, scope);
+            (_hasNumberHandlingScope, _numberHandlingScope, _bindingByMemberName) = (hadScope, scope, byMemberName);
         }
     }
 
@@ -388,9 +411,8 @@ public sealed class SchemaGenerator
     /// </summary>
     private IOpenApiSchema GenerateEnumSchema(Type enumType)
     {
-        bool asString = _options.EnumAsString
-            || GetConverterHintForType(enumType, enumType.GetCustomAttributesData())?.SchemaType == JsonSchemaType.String
-            || HasApplicableGlobalEnumConverter();
+        var naming = TypeEnumNaming(enumType);
+        bool asString = naming.HasValue;
 
         var fields = enumType.GetFields(BindingFlags.Public | BindingFlags.Static);
 
@@ -399,7 +421,7 @@ public sealed class SchemaGenerator
         if (asString)
         {
             var enumValues = fields
-                .Select(f => (JsonNode)JsonValue.Create(f.Name)!)
+                .Select(f => (JsonNode)JsonValue.Create(EnumWireName(f, naming!.Value))!)
                 .ToList();
 
             schema = new OpenApiSchema
@@ -430,7 +452,7 @@ public sealed class SchemaGenerator
             schema.Deprecated = true;
 
         // Collect per-value descriptions and emit extensions + auto-description.
-        ApplyEnumExtensions(schema, enumType, fields, asString);
+        ApplyEnumExtensions(schema, enumType, fields, naming);
 
         return schema;
     }
@@ -461,7 +483,7 @@ public sealed class SchemaGenerator
         OpenApiSchema schema,
         Type enumType,
         FieldInfo[] fields,
-        bool asString)
+        EnumWireNaming? naming)
     {
         // x-enum-varnames — unconditional when enabled and fields exist.
         if (_options.EnumVarnames && fields.Length > 0)
@@ -518,9 +540,9 @@ public sealed class SchemaGenerator
 
             // Determine the value representation for the bullet.
             string valueRepresentation;
-            if (asString)
+            if (naming.HasValue)
             {
-                valueRepresentation = fields[i].Name;
+                valueRepresentation = EnumWireName(fields[i], naming.Value);
             }
             else
             {
@@ -551,6 +573,60 @@ public sealed class SchemaGenerator
 
         if (!string.IsNullOrEmpty(finalDescription))
             schema.Description = finalDescription;
+    }
+
+    /// <summary>
+    /// How the enum type is written when it is written as strings, or <see langword="null"/> for
+    /// numbers: the converter on the type, else the first global converter that writes enums as
+    /// strings, else <see cref="SchemaOptions.EnumAsString"/> (System.Text.Json's string converter).
+    /// A parameter outside a JSON body is bound by its member name, whatever the converters say.
+    /// </summary>
+    private EnumWireNaming? TypeEnumNaming(Type enumType)
+    {
+        EnumWireNaming? naming = null;
+        if (GetConverterHintForType(enumType, enumType.GetCustomAttributesData()) is { SchemaType: JsonSchemaType.String } typeHint)
+            naming = typeHint.EnumNaming;
+        else if (GlobalEnumConverter() is { } globalHint)
+            naming = globalHint.EnumNaming;
+        else if (_options.EnumAsString)
+            naming = EnumWireNaming.JsonStringEnumMemberName;
+
+        return naming.HasValue && _bindingByMemberName ? EnumWireNaming.MemberName : naming;
+    }
+
+    /// <summary>
+    /// The naming of the enum a property's schema is built from (an enum or a nullable enum), or
+    /// <see langword="null"/> when it is not a string enum: the property's converter when it applies,
+    /// else the enum type's (<see cref="TypeEnumNaming"/>). It matches the names of the schema.
+    /// </summary>
+    private EnumWireNaming? PropertyEnumNaming(Type propertyType, IList<CustomAttributeData> attrData)
+    {
+        if (propertyType.IsEnum
+            && GetConverterHintForType(propertyType, attrData) is { SchemaType: JsonSchemaType.String } propertyHint)
+            return propertyHint.EnumNaming;
+
+        var enumType = propertyType.IsEnum ? propertyType
+            : IsNullableValueType(propertyType) && propertyType.GetGenericArguments()[0].IsEnum ? propertyType.GetGenericArguments()[0]
+            : null;
+        return enumType != null ? TypeEnumNaming(enumType) : null;
+    }
+
+    /// <summary>The name of the enum member <paramref name="field"/> on the wire under <paramref name="naming"/>.</summary>
+    internal static string EnumWireName(FieldInfo field, EnumWireNaming naming)
+    {
+        var attributeName = naming switch
+        {
+            EnumWireNaming.JsonStringEnumMemberName => AttributeHelper.Names.JsonStringEnumMemberName,
+            EnumWireNaming.EnumMemberValue          => AttributeHelper.Names.EnumMember,
+            _                                       => null,
+        };
+        if (attributeName == null || AttributeHelper.GetAttribute(field, attributeName) is not { } attribute)
+            return field.Name;
+
+        var name = naming == EnumWireNaming.JsonStringEnumMemberName
+            ? AttributeHelper.GetConstructorArgument<string>(attribute, 0)
+            : AttributeHelper.GetNamedArgument<string>(attribute, "Value");
+        return name ?? field.Name;
     }
 
     /// <summary>
@@ -639,25 +715,26 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when at least one globally registered converter
-    /// (from <see cref="SchemaOptions.GlobalConverterTypeNames"/>) applies to enum types.
+    /// The first globally registered converter (from <see cref="SchemaOptions.GlobalConverterTypeNames"/>)
+    /// that applies to enum types, as System.Text.Json picks the first converter that can convert;
+    /// <see langword="null"/> when there is none.
     /// </summary>
-    private bool HasApplicableGlobalEnumConverter()
+    private ConverterSchemaHint? GlobalEnumConverter()
     {
         foreach (var name in _options.GlobalConverterTypeNames)
         {
             var hint = JsonConverterRegistry.TryGet(name);
             if (hint == null) continue;
             if (JsonConverterRegistry.AppliesToType(hint, isEnum: true, targetTypeFullName: null))
-                return true;
+                return hint;
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
     /// Builds an <see cref="OpenApiSchema"/> from a <see cref="ConverterSchemaHint"/>.
-    /// For enum types with a string-type hint, enum field names are preserved as string values.
+    /// For enum types with a string-type hint, the enum values are the members' names on the wire.
     /// For other types, a simple schema with the specified type/format/description is returned.
     /// </summary>
     private static IOpenApiSchema BuildSchemaFromHint(ConverterSchemaHint hint, Type targetType)
@@ -667,7 +744,7 @@ public sealed class SchemaGenerator
         {
             var fields = targetType.GetFields(BindingFlags.Public | BindingFlags.Static);
             var enumValues = fields
-                .Select(f => (JsonNode)JsonValue.Create(f.Name)!)
+                .Select(f => (JsonNode)JsonValue.Create(EnumWireName(f, hint.EnumNaming))!)
                 .ToList();
 
             var enumSchema = new OpenApiSchema
@@ -1520,8 +1597,9 @@ public sealed class SchemaGenerator
                 : null;
 
         IOpenApiSchema result = schema;
+        var enumNaming = PropertyEnumNaming(propertyType, attrData) ?? EnumWireNaming.MemberName;
 
-        if (allowed != null && ConvertValues(allowed, jsonType, enumType, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        if (allowed != null && ConvertValues(allowed, jsonType, enumType, enumNaming, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
         {
             var constraint = allowedValues.Count == 1 ? SingleValueConstraint(allowedValues[0]) : new OpenApiSchema { Enum = allowedValues };
             if (isWrapper)
@@ -1544,7 +1622,7 @@ public sealed class SchemaGenerator
             }
         }
 
-        if (denied != null && ConvertValues(denied, jsonType, enumType, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+        if (denied != null && ConvertValues(denied, jsonType, enumType, enumNaming, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
             ((OpenApiSchema)result).Not = new OpenApiSchema { Enum = deniedValues };
 
         return result;
@@ -1588,7 +1666,7 @@ public sealed class SchemaGenerator
         static List<JsonNode?> AsStrings(List<JsonNode?> values) =>
             values.Select(v => (JsonNode?)JsonValue.Create(v!.ToJsonString())).ToList();
 
-        if (allowed != null && ConvertValues(allowed, numberType, null, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        if (allowed != null && ConvertValues(allowed, numberType, null, EnumWireNaming.MemberName, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
         {
             // Only the numeric branch: the numeric-string branch keeps its grammar, since STJ reads
             // other spellings of an allowed number ("+1", "01") and the schema is never narrower.
@@ -1597,7 +1675,7 @@ public sealed class SchemaGenerator
                 schema.AnyOf!.Remove(union.Named);
         }
 
-        if (denied != null && ConvertValues(denied, numberType, null, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+        if (denied != null && ConvertValues(denied, numberType, null, EnumWireNaming.MemberName, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
         {
             union.Number.Not = new OpenApiSchema { Enum = deniedValues };
             if (union.NumericString != null)
@@ -1619,7 +1697,7 @@ public sealed class SchemaGenerator
     /// one does not convert: numbers stay numbers, enum members become the schema's names or integers.
     /// </summary>
     private List<JsonNode?>? ConvertValues(
-        CustomAttributeData attribute, JsonSchemaType? jsonType, Type? enumType, PropertyInfo property,
+        CustomAttributeData attribute, JsonSchemaType? jsonType, Type? enumType, EnumWireNaming enumNaming, PropertyInfo property,
         string serializedName, string componentId, string attributeName)
     {
         var arguments = attribute.ConstructorArguments.Count == 1
@@ -1630,7 +1708,7 @@ public sealed class SchemaGenerator
         var result = new List<JsonNode?>();
         foreach (var argument in arguments)
         {
-            if (!TryConvertValue(argument, jsonType, enumType, out var node))
+            if (!TryConvertValue(argument, jsonType, enumType, enumNaming, out var node))
             {
                 var typeName = property.DeclaringType?.FullName ?? componentId;
                 RecordLoss(new PendingLoss
@@ -1658,7 +1736,8 @@ public sealed class SchemaGenerator
         "System.Byte", "System.SByte", "System.Int16", "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
     };
 
-    private static bool TryConvertValue(CustomAttributeTypedArgument argument, JsonSchemaType? jsonType, Type? enumType, out JsonNode? node)
+    private static bool TryConvertValue(
+        CustomAttributeTypedArgument argument, JsonSchemaType? jsonType, Type? enumType, EnumWireNaming enumNaming, out JsonNode? node)
     {
         node = null;
         bool Allows(JsonSchemaType t) => jsonType == null || (jsonType.Value & t) != 0;
@@ -1673,7 +1752,7 @@ public sealed class SchemaGenerator
                 .FirstOrDefault(f => Equals(f.GetRawConstantValue(), value));
             if (jsonType.HasValue && (jsonType.Value & JsonSchemaType.String) != 0 && field != null)
             {
-                node = JsonValue.Create(field.Name);
+                node = JsonValue.Create(EnumWireName(field, enumNaming));
                 return true;
             }
 
@@ -1734,7 +1813,8 @@ public sealed class SchemaGenerator
         var valueType = schema.Type is { } own && own != JsonSchemaType.Null
             ? own
             : NumberUnionBranches(schema)?.Number.Type ?? (schema.AllOf is [OpenApiSchema first, ..] ? first.Type : null);
-        var result = DefaultValueConverter.FromAttribute(attribute, valueType);
+        var result = DefaultValueConverter.FromAttribute(
+            attribute, valueType, PropertyEnumNaming(property.PropertyType, attrData) ?? EnumWireNaming.MemberName);
         if (result.HasValue)
         {
             schema.Default = result.Value;

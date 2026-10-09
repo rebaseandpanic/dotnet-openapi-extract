@@ -253,6 +253,8 @@ public static class AttributeHelper
         public const string JsonConverter = "System.Text.Json.Serialization.JsonConverterAttribute";
         public const string JsonPolymorphic = "System.Text.Json.Serialization.JsonPolymorphicAttribute";
         public const string JsonDerivedType = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
+        public const string JsonStringEnumMemberName = "System.Text.Json.Serialization.JsonStringEnumMemberNameAttribute";
+        public const string EnumMember = "System.Runtime.Serialization.EnumMemberAttribute";
 
         // Asp.Versioning (current namespace)
         public const string ApiVersion = "Asp.Versioning.ApiVersionAttribute";

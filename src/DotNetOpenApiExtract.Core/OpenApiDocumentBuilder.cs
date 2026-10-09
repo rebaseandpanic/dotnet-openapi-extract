@@ -967,7 +967,8 @@ public sealed class OpenApiDocumentBuilder
             if (param.Location is OurParameterLocation.Body or OurParameterLocation.Form)
                 continue;
 
-            var paramSchema = schemaGenerator.GenerateSchema(param.Type);
+            // Bound by model binding (type converters), not by the JSON serializer.
+            var paramSchema = schemaGenerator.GenerateBoundValueSchema(param.Type);
 
             var openApiIn = param.Location switch
             {
@@ -1071,7 +1072,7 @@ public sealed class OpenApiDocumentBuilder
 
             foreach (var fp in formParams)
             {
-                var fpSchema = schemaGenerator.GenerateSchema(fp.Type);
+                var fpSchema = schemaGenerator.GenerateBoundValueSchema(fp.Type);
                 formSchema.Properties![fp.Name] = fpSchema;
             }
 

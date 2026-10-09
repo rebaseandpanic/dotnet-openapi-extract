@@ -71,6 +71,7 @@ public static class JsonConverterRegistry
             {
                 SchemaType = JsonSchemaType.String,
                 TargetTypeFullNames = [AnyEnumTarget],
+                EnumNaming = EnumWireNaming.JsonStringEnumMemberName,
             },
 
             // System.Text.Json — JsonStringEnumConverter<T> (open generic definition)
@@ -78,6 +79,7 @@ public static class JsonConverterRegistry
             {
                 SchemaType = JsonSchemaType.String,
                 TargetTypeFullNames = [AnyEnumTarget],
+                EnumNaming = EnumWireNaming.JsonStringEnumMemberName,
             },
 
             // Community — JsonStringEnumMemberConverter
@@ -92,6 +94,7 @@ public static class JsonConverterRegistry
             {
                 SchemaType = JsonSchemaType.String,
                 TargetTypeFullNames = [AnyEnumTarget],
+                EnumNaming = EnumWireNaming.EnumMemberValue,
             },
 
             // Newtonsoft.Json — IsoDateTimeConverter
@@ -255,4 +258,27 @@ public sealed record ConverterSchemaHint
     /// </para>
     /// </summary>
     public IReadOnlyList<string> TargetTypeFullNames { get; init; } = [];
+
+    /// <summary>
+    /// For a converter that writes enums as strings: the member attribute that renames a member on
+    /// the wire. The converters in the registry are known without a naming policy (an attribute
+    /// cannot pass one; a global converter is known by its type).
+    /// </summary>
+    internal EnumWireNaming EnumNaming { get; init; } = EnumWireNaming.MemberName;
+}
+
+/// <summary>How a string-enum converter names a member on the wire.</summary>
+internal enum EnumWireNaming
+{
+    /// <summary>The member's name.</summary>
+    MemberName,
+
+    /// <summary>
+    /// System.Text.Json: <c>[JsonStringEnumMemberName]</c>, else the member's name;
+    /// <c>[EnumMember]</c> is ignored.
+    /// </summary>
+    JsonStringEnumMemberName,
+
+    /// <summary>Newtonsoft.Json: <c>[EnumMember(Value)]</c>, else the member's name.</summary>
+    EnumMemberValue,
 }
