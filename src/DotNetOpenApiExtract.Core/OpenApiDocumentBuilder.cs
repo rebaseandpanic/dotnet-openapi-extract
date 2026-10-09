@@ -1097,6 +1097,15 @@ public sealed class OpenApiDocumentBuilder
         {
             var bodySchema = schemaGenerator.GenerateSchema(bodyParam.Type);
 
+            // Validation attributes on the [FromBody] parameter itself constrain the body; a
+            // reference is wrapped in allOf, the shared component is left as it is.
+            var bodyReflection = bodyParam.ReflectionParameter;
+            bodySchema = schemaGenerator.ApplyParameterValidation(
+                bodySchema, bodyReflection.GetCustomAttributesData(), bodyParam.Type,
+                bodyReflection.Member.DeclaringType?.FullName ?? string.Empty,
+                $"{bodyReflection.Member.Name}({bodyReflection.Name})",
+                new LossAnchor.Node(new LossAnchor.Operation(operation), ["requestBody"]), jsonBody: true);
+
             // <param example> of a body is the example of the request body's media types.
             JsonNode? bodyExample = null;
             var bodyName = bodyParam.ReflectionParameter.Name ?? bodyParam.Name;
@@ -1124,10 +1133,21 @@ public sealed class OpenApiDocumentBuilder
             // The form's example: an object of the fields that have an example, by their names in the form.
             var formExample = new JsonObject();
             var unparsableFields = new List<string>();
+            var formMediaType = (consumes ?? ["multipart/form-data"])[0];
+            var requiredFields = new HashSet<string>(StringComparer.Ordinal);
             foreach (var fp in formParams)
             {
-                var fpSchema = schemaGenerator.GenerateBoundValueSchema(fp.Type);
+                // A field is bound by model binding; its validation attributes constrain its schema.
+                var fieldReflection = fp.ReflectionParameter;
+                var fpSchema = schemaGenerator.ApplyParameterValidation(
+                    schemaGenerator.GenerateBoundValueSchema(fp.Type), fieldReflection.GetCustomAttributesData(), fp.Type,
+                    fieldReflection.Member.DeclaringType?.FullName ?? string.Empty,
+                    $"{fieldReflection.Member.Name}({fieldReflection.Name})",
+                    new LossAnchor.Node(new LossAnchor.Operation(operation),
+                        ["requestBody", "content", formMediaType, "schema", "properties", fp.Name]));
                 formSchema.Properties![fp.Name] = fpSchema;
+                if (fp.IsRequired)
+                    requiredFields.Add(fp.Name);
 
                 if (docs.ParameterExamples.TryGetValue(fp.ReflectionParameter.Name ?? fp.Name, out var fieldExample))
                 {
@@ -1137,6 +1157,9 @@ public sealed class OpenApiDocumentBuilder
                         unparsableFields.AddRange([fp.Name, fieldExample]);
                 }
             }
+
+            if (requiredFields.Count > 0)
+                formSchema.Required = requiredFields;
 
             if (unparsableFields.Count > 0)
                 RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation), ["requestBody"]),

@@ -1478,10 +1478,13 @@ public sealed class SchemaGenerator
     /// <c>[DeniedValues]</c> (same keywords and version forms). A
     /// reference is wrapped in <c>allOf</c> first. A <c>[Range]</c> <c>RangeAttribute</c> rejects is an
     /// extraction error naming <paramref name="typeName"/> and <paramref name="memberName"/>; a bound
-    /// that cannot be written gives a warning at <paramref name="anchor"/>.
+    /// that cannot be written gives a warning at <paramref name="anchor"/>. For a <c>[FromBody]</c>
+    /// parameter (<paramref name="jsonBody"/>) enum values are the serializer's names, otherwise the
+    /// member names model binding reads.
     /// </summary>
     internal IOpenApiSchema ApplyParameterValidation(
-        IOpenApiSchema schema, IList<CustomAttributeData> attrData, Type parameterType, string typeName, string memberName, LossAnchor anchor)
+        IOpenApiSchema schema, IList<CustomAttributeData> attrData, Type parameterType, string typeName, string memberName, LossAnchor anchor,
+        bool jsonBody = false)
     {
         var constrains = AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.StringLength)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MinLength)
@@ -1499,9 +1502,9 @@ public sealed class SchemaGenerator
         ApplyConstraintAttributes(mutable, attrData);
         ApplyRange(mutable, attrData, typeName, memberName, anchor);
 
-        // A parameter is bound by member name (model binding), so its enum values are member names.
-        return ApplyAllowedAndDeniedValues(mutable, attrData,
-            new ValueSite(parameterType, typeName, memberName, anchor, EnumWireNaming.MemberName));
+        // A bound parameter is read by member name (model binding); a JSON body by the serializer's names.
+        var naming = jsonBody ? PropertyEnumNaming(parameterType, attrData) ?? EnumWireNaming.MemberName : EnumWireNaming.MemberName;
+        return ApplyAllowedAndDeniedValues(mutable, attrData, new ValueSite(parameterType, typeName, memberName, anchor, naming));
     }
 
     /// <summary><c>maxLength</c> (strings), <c>maxItems</c> (arrays) or <c>maxProperties</c> (dictionaries); the tighter bound wins.</summary>

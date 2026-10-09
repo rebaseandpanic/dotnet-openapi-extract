@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
+using ModernApi.Models.Keywords;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace ModernApi.Controllers;
@@ -33,4 +34,29 @@ public class ParameterAttributesController : ControllerBase
         [FromQuery, SwaggerParameter(Required = true)] string? optionalByType,
         [FromQuery, SwaggerParameter(Required = false)] int requiredByType,
         [FromQuery] int inferred) => Ok();
+
+    /// <summary>Constraints on a scalar body.</summary>
+    [HttpPost("body-scalar")]
+    public IActionResult BodyScalar([FromBody, StringLength(20, MinimumLength = 3)] string text) => Ok();
+
+    /// <summary>Constraints on a collection body.</summary>
+    [HttpPost("body-collection")]
+    public IActionResult BodyCollection([FromBody, MinLength(1), MaxLength(5)] List<int> items) => Ok();
+
+    /// <summary>Allowed values of an enum body with renamed members.</summary>
+    [HttpPost("body-enum")]
+    public IActionResult BodyEnum([FromBody, AllowedValues(StjTint.Red, StjTint.Crimson)] StjTint tint) => Ok();
+
+    /// <summary>A declared format on a reference body.</summary>
+    [HttpPost("body-reference")]
+    public IActionResult BodyReference([FromBody, SwaggerSchema(Format = "x-doc")] AnnotatedTarget target) => Ok();
+
+    /// <summary>Constraints and requiredness of form fields.</summary>
+    [HttpPost("form-constraints")]
+    public IActionResult FormConstraints(
+        [FromForm, StringLength(10, MinimumLength = 2)] string title,
+        [FromForm, Range(1, 5)] int pages,
+        [FromForm, MaxLength(3)] string[]? tags,
+        [FromForm, SwaggerParameter(Required = false)] string note,
+        [FromForm] int? optional) => Ok();
 }
