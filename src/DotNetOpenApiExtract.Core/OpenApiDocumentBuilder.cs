@@ -260,7 +260,7 @@ public sealed class OpenApiDocumentBuilder
         OpenApiDocument Document,
         IReadOnlyList<ControllerInfo> Controllers,
         IReadOnlyList<ActionInfo> Actions,
-        SchemaGenerator SchemaGenerator,
+        IReadOnlyDictionary<string, Type> SchemaTypes,
         SourceAnalysisContext SourceContext);
 
     /// <summary>
@@ -308,7 +308,7 @@ public sealed class OpenApiDocumentBuilder
 
         // TypeBySchemaId: schema component ID → CLR Type
         var typeBySchemaId = new Dictionary<string, Type>(
-            core.SchemaGenerator.SchemaTypes, StringComparer.Ordinal);
+            core.SchemaTypes, StringComparer.Ordinal);
 
         var enrichedContext = new ValidationContext
         {
@@ -358,6 +358,66 @@ public sealed class OpenApiDocumentBuilder
         return new ContextJson(naming, context.DictionaryKeyPolicy ?? naming);
     }
 
+    /// <summary>
+    /// Whether the two contexts shape a schema differently: naming policy, ignore condition, number
+    /// handling or the set of converters. The dictionary key policy does not count.
+    /// </summary>
+    private static bool ContextsShapeSchemasDifferently(
+        ContextJson mvcJson, JsonContextOptions mvc, ContextJson httpJson, JsonContextOptions http)
+    {
+        return mvcJson.NamingPolicy != httpJson.NamingPolicy
+            || (mvc.DefaultIgnoreCondition ?? JsonIgnoreCondition.Never) != (http.DefaultIgnoreCondition ?? JsonIgnoreCondition.Never)
+            || (mvc.NumberHandling ?? JsonNumberHandling.Strict) != (http.NumberHandling ?? JsonNumberHandling.Strict)
+            || !new HashSet<string>(mvc.GlobalConverterTypeNames, StringComparer.Ordinal)
+                .SetEquals(http.GlobalConverterTypeNames);
+    }
+
+    /// <summary>
+    /// The full name of <paramref name="type"/> in C# form: <c>Ns.Envelope&lt;Ns.Item&gt;</c> for a
+    /// closed generic type, nested types with <c>.</c>.
+    /// </summary>
+    private static string TypeDisplayName(Type type)
+    {
+        if (!type.IsGenericType)
+            return (type.FullName ?? type.Name).Replace('+', '.');
+
+        var definition = type.GetGenericTypeDefinition();
+        var name = (definition.FullName ?? definition.Name).Replace('+', '.');
+        var tick = name.IndexOf('`');
+        if (tick >= 0)
+            name = name[..tick];
+        return $"{name}<{string.Join(", ", type.GetGenericArguments().Select(TypeDisplayName))}>";
+    }
+
+    /// <summary>
+    /// One warning on the document naming every CLR type that has schemas in both contexts: each
+    /// context describes it by its own options, under its own component.
+    /// </summary>
+    private static void RecordSharedContextTypes(LossLedger ledger, SchemaGenerator mvc, SchemaGenerator http)
+    {
+        var mvcTypes = mvc.SchemaTypes.Values.Select(TypeDisplayName).ToHashSet(StringComparer.Ordinal);
+        var shared = http.SchemaTypes.Values
+            .Select(TypeDisplayName)
+            .Where(mvcTypes.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (shared.Count == 0)
+            return;
+
+        ledger.Add(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.SerializationContextsSharedTypes,
+            Anchor   = LossAnchor.Document.Instance,
+            Message  = "the MVC JSON options (AddJsonOptions) and the HTTP JSON options (ConfigureHttpJsonOptions) " +
+                       "shape schemas differently; types used in both contexts get a schema per context " +
+                       $"(the HTTP one with the suffix Http when both exist): {string.Join(", ", shared)}.",
+            Feature  = "mediaType.schema",
+            Subjects = shared,
+        });
+    }
+
     // =========================================================================
     // Core build pipeline
     // =========================================================================
@@ -385,7 +445,11 @@ public sealed class OpenApiDocumentBuilder
         // Controller bodies serialize with the MVC options (AddJsonOptions) only; the HTTP
         // options (ConfigureHttpJsonOptions) never reach them.
         var mvcJson = ResolveContextJson(jsonOptions.Mvc, jsonOptions, options.NamingPolicy);
+        var httpJson = ResolveContextJson(jsonOptions.Http, jsonOptions, options.NamingPolicy);
         var effectiveNamingPolicy = mvcJson.NamingPolicy;
+        // Typed IResult bodies and server-sent events data serialize with the HTTP options; they get
+        // schemas of their own only when the options differ in what shapes a schema.
+        var contextsDiffer = ContextsShapeSchemasDifferently(mvcJson, jsonOptions.Mvc, httpJson, jsonOptions.Http);
 
         // ── Resolve XML documentation paths (priority: XmlPaths > XmlPath > auto-detect > framework) ──
         var xmlPaths = BuildXmlPathList(options, loader, diagnostics);
@@ -407,6 +471,10 @@ public sealed class OpenApiDocumentBuilder
         }, docResolver);
         // Schema warnings (polymorphism) wait in the build's ledger for the finished document.
         schemaGenerator.AttachLedger(ledger);
+
+        // Schemas of the HTTP context are generated after the operation loop, once every MVC
+        // schema exists, so a type both contexts describe is recognized when its HTTP id is chosen.
+        var httpSlots = new List<Action<SchemaGenerator>>();
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
         var controllers = ControllerDiscovery.DiscoverControllers(loader.Assembly);
@@ -559,7 +627,7 @@ public sealed class OpenApiDocumentBuilder
                 var actionAttrs     = action.Method.GetCustomAttributesData();
                 var controllerAttrs = action.Controller.Type.GetCustomAttributesData();
 
-                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document, ledger);
+                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document, ledger, httpSlots);
                 ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
                 ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
@@ -577,6 +645,31 @@ public sealed class OpenApiDocumentBuilder
             }
         }
 
+        // ── Step 3a: Schemas of the HTTP serialization context ──────────────
+        var httpGenerator = schemaGenerator;
+        if (httpSlots.Count > 0 && contextsDiffer)
+        {
+            httpGenerator = SchemaGenerator.ForHttpContext(new SchemaOptions
+            {
+                NamingPolicy             = httpJson.NamingPolicy,
+                EnumAsString             = options.EnumAsString,
+                DictionaryKeyPolicy      = httpJson.DictionaryKeyPolicy,
+                DefaultIgnoreCondition   = jsonOptions.Http.DefaultIgnoreCondition,
+                NumberHandling           = jsonOptions.Http.NumberHandling,
+                GlobalConverterTypeNames = jsonOptions.Http.GlobalConverterTypeNames,
+                EnumAutoDescription      = options.EnumAutoDescription,
+                EnumVarnames             = options.EnumVarnames,
+                OpenApiVersion           = options.OpenApiVersion,
+                OnDiagnostic             = diagnostics.Report,
+            }, docResolver, schemaGenerator);
+        }
+
+        foreach (var fill in httpSlots)
+            fill(httpGenerator);
+
+        if (!ReferenceEquals(httpGenerator, schemaGenerator))
+            RecordSharedContextTypes(ledger, schemaGenerator, httpGenerator);
+
         // ── Step 3b: Exclude paths by prefix ────────────────────────────────
         if (options.ExcludePathPrefixes is { Count: > 0 })
         {
@@ -589,18 +682,23 @@ public sealed class OpenApiDocumentBuilder
         }
 
         // ── Step 4: Component schemas ────────────────────────────────────────
-        // schemaGenerator.Schemas is populated as a side-effect of building operations above.
-        if (schemaGenerator.Schemas.Count > 0)
+        // The generators' Schemas are populated as a side-effect of building operations above;
+        // each context names properties by its own policy.
+        var componentSources = ReferenceEquals(httpGenerator, schemaGenerator)
+            ? new[] { (Generator: schemaGenerator, Naming: effectiveNamingPolicy) }
+            : [(schemaGenerator, effectiveNamingPolicy), (httpGenerator, httpJson.NamingPolicy)];
+        if (componentSources.Any(c => c.Generator.Schemas.Count > 0))
         {
             document.Components = new OpenApiComponents
             {
                 Schemas = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal),
             };
 
-            foreach (var (id, schema) in schemaGenerator.Schemas)
+            foreach (var (generator, namingPolicy) in componentSources)
+            foreach (var (id, schema) in generator.Schemas)
             {
                 // Apply type-level description from documentation sources
-                if (schemaGenerator.SchemaTypes.TryGetValue(id, out var schemaType))
+                if (generator.SchemaTypes.TryGetValue(id, out var schemaType))
                 {
                     var typeDesc = docResolver.ResolveTypeDescription(schemaType);
                     if (!string.IsNullOrEmpty(typeDesc) && string.IsNullOrEmpty(schema.Description))
@@ -615,7 +713,7 @@ public sealed class OpenApiDocumentBuilder
                         foreach (var p in schemaType.GetProperties(
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
                         {
-                            var serialized = ResolvePropertyName(p, effectiveNamingPolicy);
+                            var serialized = ResolvePropertyName(p, namingPolicy);
                             // First property with this name wins (matches CollectProperties derived-first ordering).
                             propMap.TryAdd(serialized, p);
                         }
@@ -689,7 +787,14 @@ public sealed class OpenApiDocumentBuilder
         // ── Step 12: Deliver pending warnings against the finished document ──
         DownlevelPass.Run(document, ledger, diagnostics);
 
-        return new BuildCoreResult(document, controllers, actions, schemaGenerator, sourceContext);
+        var schemaTypes = new Dictionary<string, Type>(schemaGenerator.SchemaTypes, StringComparer.Ordinal);
+        if (!ReferenceEquals(httpGenerator, schemaGenerator))
+        {
+            foreach (var (id, type) in httpGenerator.SchemaTypes)
+                schemaTypes.TryAdd(id, type);
+        }
+
+        return new BuildCoreResult(document, controllers, actions, schemaTypes, sourceContext);
     }
 
     /// <summary>
@@ -831,7 +936,8 @@ public sealed class OpenApiDocumentBuilder
         SchemaGenerator schemaGenerator,
         SecuritySchemeExtractionResult securityResult,
         OpenApiDocument document,
-        LossLedger ledger)
+        LossLedger ledger,
+        List<Action<SchemaGenerator>> httpSlots)
     {
         var docs = docResolver.ResolveOperation(action);
         var parameters = ParameterExtractor.ExtractParameters(action);
@@ -973,7 +1079,7 @@ public sealed class OpenApiDocumentBuilder
                 // Emit a Content section when there is a typed body, or when the content types
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
                 apiResponse.Content = BuildResponseContent(
-                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation);
+                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -1007,7 +1113,9 @@ public sealed class OpenApiDocumentBuilder
     }
 
     /// <summary>
-    /// The content of one response, chosen per media type. When the body type is an asynchronous
+    /// The content of one response, chosen per media type. <c>ServerSentEventsResult&lt;T&gt;</c> gets
+    /// <c>text/event-stream</c> with the event schema as <c>itemSchema</c>, filled in later through
+    /// <paramref name="httpSlots"/>. When the body type is an asynchronous
     /// sequence (<c>IAsyncEnumerable&lt;T&gt;</c>): a sequential JSON media type gets
     /// <c>itemSchema: T</c> and no <c>schema</c>; <c>text/event-stream</c> gets no schema, because
     /// standard MVC has no formatter for it (warning on the operation); any other media type gets
@@ -1018,9 +1126,22 @@ public sealed class OpenApiDocumentBuilder
         Type? bodyType,
         SchemaGenerator schemaGenerator,
         LossLedger ledger,
-        OpenApiOperation operation)
+        OpenApiOperation operation,
+        List<Action<SchemaGenerator>>? httpSlots)
     {
         var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+
+        // ServerSentEventsResult<T> writes text/event-stream itself, whatever is declared; its
+        // events are described by itemSchema, the data in the HTTP serialization context, which is
+        // generated after the operation loop.
+        if (bodyType != null && httpSlots != null && SseEventSchema.TryGetItemType(bodyType, out var sseItemType))
+        {
+            var eventStream = new OpenApiMediaType();
+            content[EventStreamMediaType] = eventStream;
+            httpSlots.Add(httpGenerator => eventStream.ItemSchema = SseEventSchema.Create(sseItemType, httpGenerator));
+            return content;
+        }
+
         Type? elementType = null;
         var isSequence = bodyType != null && StreamingTypes.TryGetAsyncEnumerableElementType(bodyType, out elementType);
         IOpenApiSchema? bodySchema = null;
@@ -1697,8 +1818,12 @@ public sealed class OpenApiDocumentBuilder
                         // injected ProblemDetails response) the schema of the first entry is kept.
                         if (bodyTypes.TryGetValue(statusKey, out var bodyType))
                         {
+                            // A result that writes its own content type is not affected by [Produces].
+                            if (SseEventSchema.TryGetItemType(bodyType, out _))
+                                continue;
+
                             response.Content = BuildResponseContent(
-                                globalMediaTypes.ProducesContentTypes, bodyType, schemaGenerator, ledger, operation);
+                                globalMediaTypes.ProducesContentTypes, bodyType, schemaGenerator, ledger, operation, httpSlots: null);
                             continue;
                         }
 

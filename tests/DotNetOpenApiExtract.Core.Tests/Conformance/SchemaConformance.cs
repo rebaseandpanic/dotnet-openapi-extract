@@ -29,6 +29,12 @@ public sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Error
 /// annotation schema taken from the document and the extracted instance.
 /// </para>
 /// <para>
+/// <c>contentMediaType</c> and <c>contentEncoding</c> are annotations too (2020-12 Validation §8: an
+/// implementation may assert them, a schema does not require it). The evaluator used here asserts
+/// them, which would reject, for example, the empty data of a server-sent event; they are removed
+/// before evaluation, and the content they describe is checked explicitly as above.
+/// </para>
+/// <para>
 /// OpenAPI 3.0 schemas are not JSON Schema 2020-12 (<c>nullable</c>, boolean exclusive bounds), so
 /// only 3.1 and 3.2 documents are accepted.
 /// </para>
@@ -160,7 +166,8 @@ public sealed class SchemaConformance
     };
 
     /// <summary>
-    /// Rewrites component references of <paramref name="schema"/> and of its subschemas. Only schema
+    /// Rewrites component references of <paramref name="schema"/> and of its subschemas, and removes
+    /// the content annotations from them. Only schema
     /// positions are visited: values of <c>const</c>, <c>enum</c>, <c>default</c>, <c>example</c>,
     /// <c>examples</c> and other annotations are data and keep any <c>$ref</c> they contain as is.
     /// </summary>
@@ -168,6 +175,10 @@ public sealed class SchemaConformance
     {
         if (schema is not JsonObject obj)
             return; // boolean schema or not a schema
+
+        // Content annotations (see the class remarks).
+        obj.Remove("contentMediaType");
+        obj.Remove("contentEncoding");
 
         if (obj["$ref"] is JsonValue value
             && value.TryGetValue<string>(out var reference)

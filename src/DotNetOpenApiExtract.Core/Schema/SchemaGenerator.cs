@@ -23,7 +23,9 @@ namespace DotNetOpenApiExtract.Core.Schema;
 public sealed class SchemaGenerator
 {
     private readonly Dictionary<string, OpenApiSchema> _schemas = new(StringComparer.Ordinal);
-    private readonly SchemaIdRegistry _schemaIds = new(); // every component id, unique per (type, context, role)
+    private readonly SchemaIdRegistry _schemaIds; // every component id, unique per (type, context, role); shared by the contexts of a build
+    private readonly SchemaContext _context; // the serialization context this generator describes
+    private readonly SchemaGenerator? _mvcCounterpart; // HTTP context only: the MVC generator of the same build
     private readonly Dictionary<string, Type> _schemaIdToType = new(StringComparer.Ordinal); // schema ID → original Type
     private readonly HashSet<string> _generating = new(StringComparer.Ordinal); // cycle detection
     private readonly SchemaOptions _options;
@@ -132,11 +134,40 @@ public sealed class SchemaGenerator
     /// <see cref="SchemaOptions.OpenApiVersion"/> is not 3.0, 3.1 or 3.2.
     /// </exception>
     public SchemaGenerator(SchemaOptions? options = null, DocumentationResolver? docResolver = null)
+        : this(options, docResolver, new SchemaIdRegistry(), SchemaContext.Mvc, mvcCounterpart: null)
+    {
+    }
+
+    /// <summary>
+    /// A generator for the HTTP serialization context of a build whose HTTP JSON options differ from
+    /// the MVC ones. It shares the id registry of <paramref name="mvcCounterpart"/>, so no id of one
+    /// context is ever given to the other; a type the MVC context already describes gets the
+    /// candidate id with the suffix <c>Http</c>, a type only this context describes keeps its usual id.
+    /// </summary>
+    internal static SchemaGenerator ForHttpContext(
+        SchemaOptions options, DocumentationResolver? docResolver, SchemaGenerator mvcCounterpart)
+    {
+        ArgumentNullException.ThrowIfNull(mvcCounterpart);
+        var generator = new SchemaGenerator(options, docResolver, mvcCounterpart._schemaIds, SchemaContext.Http, mvcCounterpart);
+        if (mvcCounterpart._ledger != null)
+            generator.AttachLedger(mvcCounterpart._ledger);
+        return generator;
+    }
+
+    private SchemaGenerator(
+        SchemaOptions? options,
+        DocumentationResolver? docResolver,
+        SchemaIdRegistry schemaIds,
+        SchemaContext context,
+        SchemaGenerator? mvcCounterpart)
     {
         _options = options ?? new SchemaOptions();
         TargetVersion.EnsureSupported(_options.OpenApiVersion, nameof(SchemaOptions.OpenApiVersion));
         _diagnostics = new DiagnosticBag(_options.OnDiagnostic);
         _docResolver = docResolver;
+        _schemaIds = schemaIds;
+        _context = context;
+        _mvcCounterpart = mvcCounterpart;
     }
 
     /// <summary>All generated component schemas (for the components/schemas section).</summary>
@@ -884,7 +915,7 @@ public sealed class SchemaGenerator
             return GenerateComplexSchema(type);
 
         var fullName = (type.FullName ?? type.Name).Replace('.', '_').Replace('+', '_');
-        var directId = _schemaIds.Reserve(SchemaKey.Direct(type), $"{GetSchemaId(type)}Direct", $"{fullName}Direct");
+        var directId = _schemaIds.Reserve(SchemaKey.Direct(type, _context), $"{GetSchemaId(type)}Direct", $"{fullName}Direct{ContextSuffixFor(SchemaKey.Union(type))}");
         if (_schemas.ContainsKey(directId) || !_generating.Add(directId))
             return new OpenApiSchemaReference(directId, null);
 
@@ -961,7 +992,7 @@ public sealed class SchemaGenerator
     {
         var baseType = polymorphism.BaseType;
         var fullName = (baseType.FullName ?? baseType.Name).Replace('.', '_').Replace('+', '_');
-        var branchId = _schemaIds.Reserve(SchemaKey.BaseDefault(baseType), $"{unionId}Default", $"{fullName}Default");
+        var branchId = _schemaIds.Reserve(SchemaKey.BaseDefault(baseType, _context), $"{unionId}Default", $"{fullName}Default{ContextSuffixFor(SchemaKey.Union(baseType))}");
 
         if (_schemas.ContainsKey(branchId) || !_generating.Add(branchId))
             return new OpenApiSchemaReference(branchId, null);
@@ -1475,18 +1506,60 @@ public sealed class SchemaGenerator
         if (!type.IsGenericType)
             return ReserveNonGenericId(type);
 
-        return _schemaIds.Reserve(
-            OwnKey(type),
+        return ReserveOwnId(
+            type,
             candidate: GenericIdCandidate(type, fullBaseName: false),
             fallback:  GenericIdCandidate(type, fullBaseName: true));
     }
 
     /// <summary>
-    /// The key of the component a type's own id names: the union for a polymorphic base (whose
-    /// component is the union, so references at its uses stay unchanged), the direct schema otherwise.
+    /// The key of the component a type's own id names in this generator's context: the union for a
+    /// polymorphic base (whose component is the union, so references at its uses stay unchanged),
+    /// the direct schema otherwise.
     /// </summary>
     private SchemaKey OwnKey(Type type) =>
-        UnionOf(type) != null ? SchemaKey.Union(type) : SchemaKey.Direct(type);
+        UnionOf(type) != null ? SchemaKey.Union(type, _context) : SchemaKey.Direct(type, _context);
+
+    /// <summary>
+    /// Reserves the own id of <paramref name="type"/>. In the HTTP context a type the MVC context of
+    /// the build also describes gets <c>Http</c> appended to both names, so the two schemas of one
+    /// type are told apart; references and the ids derived from this one (variants, base branch)
+    /// follow it.
+    /// </summary>
+    private string ReserveOwnId(Type type, string candidate, string fallback)
+    {
+        var key = OwnKey(type);
+        var suffix = ContextSuffixFor(key);
+        return _schemaIds.Reserve(key, candidate + suffix, fallback + suffix);
+    }
+
+    /// <summary>
+    /// <c>Http</c> when this is the HTTP context and the MVC generator of the build has written a
+    /// schema for the same component; empty otherwise.
+    /// </summary>
+    private string ContextSuffixFor(SchemaKey key)
+    {
+        if (_context != SchemaContext.Http || _mvcCounterpart == null)
+            return string.Empty;
+
+        return _schemaIds.TryGetId(key.In(SchemaContext.Mvc), out var mvcId) && _mvcCounterpart._schemas.ContainsKey(mvcId)
+            ? "Http"
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// The part of a generic id that names a non-generic type argument. In the HTTP context an
+    /// argument the MVC context has an id for contributes that id, so <c>Page&lt;Item&gt;</c> is
+    /// <c>ItemPage</c> in both contexts before the context suffix.
+    /// </summary>
+    private string ArgumentIdPart(Type argument)
+    {
+        if (_context == SchemaContext.Http
+            && _schemaIds.TryGetId(OwnKey(argument).In(SchemaContext.Mvc), out var mvcId))
+            return mvcId;
+
+        return ReserveNonGenericId(argument);
+    }
 
     /// <summary>
     /// A non-generic type's id is its short name, or its full name when another type holds the
@@ -1496,8 +1569,8 @@ public sealed class SchemaGenerator
     private string ReserveNonGenericId(Type type)
     {
         var typeFullName = type.FullName ?? type.Name;
-        return _schemaIds.Reserve(
-            OwnKey(type),
+        return ReserveOwnId(
+            type,
             candidate: type.Name,
             fallback:  typeFullName.Replace('.', '_').Replace('+', '_'));
     }
@@ -1514,7 +1587,7 @@ public sealed class SchemaGenerator
             ? GenericIdCandidate(derived, fullBaseName: true)
             : (derived.FullName ?? derived.Name).Replace('.', '_').Replace('+', '_');
         return _schemaIds.Reserve(
-            SchemaKey.Variant(derived, baseType),
+            SchemaKey.Variant(derived, baseType, _context),
             candidate: $"{derivedName}As{unionId}",
             fallback:  $"{derivedFullName}As{unionId}");
     }
@@ -1551,7 +1624,7 @@ public sealed class SchemaGenerator
             if (i > 0) sb.Append("And");
             sb.Append(args[i].IsGenericType
                 ? GenericIdCandidate(args[i], fullBaseName: false)
-                : ReserveNonGenericId(args[i]));
+                : ArgumentIdPart(args[i]));
         }
         sb.Append(baseName);
         return sb.ToString();

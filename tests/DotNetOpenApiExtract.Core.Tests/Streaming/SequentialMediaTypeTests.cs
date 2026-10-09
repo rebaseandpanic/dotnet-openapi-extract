@@ -224,8 +224,10 @@ public class SequentialMediaTypeTests(SequentialMediaTypeFixture fixture) : ICla
     {
         var diagnostics = fixture.ModernApiExcluded.Diagnostics;
 
-        diagnostics.Should().NotContain(d => d.Code == ItemSchemaCode || d.Code == EventStreamCode);
+        diagnostics.Should().NotContain(d => d.Code == EventStreamCode);
         diagnostics.Should().NotContain(d => d.Location != null && d.Location.Contains("sequential", StringComparison.Ordinal));
+        diagnostics.Should().Contain(d => d.Code == ItemSchemaCode,
+            because: "kept paths with item schemas (server-sent events) are still reported, so the filter is by path");
         diagnostics.Should().NotContain(d => d.Location == "#/components/schemas/Parcel");
     }
 

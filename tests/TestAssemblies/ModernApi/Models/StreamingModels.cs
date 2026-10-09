@@ -45,3 +45,13 @@ public sealed class ExpressParcel : Parcel
     /// <summary>Delivery deadline in hours.</summary>
     public int DeadlineHours { get; set; }
 }
+
+/// <summary>A node of a tree streamed as events; recursive through its children.</summary>
+public class TreeEvent
+{
+    /// <summary>Node label.</summary>
+    public required string Label { get; set; }
+
+    /// <summary>Child nodes.</summary>
+    public List<TreeEvent> Children { get; set; } = [];
+}

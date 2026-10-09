@@ -5,6 +5,12 @@ internal enum SchemaContext
 {
     /// <summary>MVC controller bodies, serialized with the MVC JSON options.</summary>
     Mvc,
+
+    /// <summary>
+    /// Typed <c>IResult</c> bodies and server-sent events data, serialized with the HTTP JSON
+    /// options; used only when those options differ from the MVC ones in what shapes a schema.
+    /// </summary>
+    Http,
 }
 
 /// <summary>What a component schema stands for, besides its CLR type.</summary>
@@ -31,17 +37,20 @@ internal enum SchemaRole
 /// </summary>
 internal readonly record struct SchemaKey(string TypeIdentity, SchemaContext Context, SchemaRole Role, string? RoleBase = null)
 {
-    public static SchemaKey Direct(Type type) =>
-        new(Identity(type), SchemaContext.Mvc, SchemaRole.Direct);
+    public static SchemaKey Direct(Type type, SchemaContext context = SchemaContext.Mvc) =>
+        new(Identity(type), context, SchemaRole.Direct);
 
-    public static SchemaKey Union(Type baseType) =>
-        new(Identity(baseType), SchemaContext.Mvc, SchemaRole.Union);
+    public static SchemaKey Union(Type baseType, SchemaContext context = SchemaContext.Mvc) =>
+        new(Identity(baseType), context, SchemaRole.Union);
 
-    public static SchemaKey BaseDefault(Type baseType) =>
-        new(Identity(baseType), SchemaContext.Mvc, SchemaRole.BaseDefault);
+    public static SchemaKey BaseDefault(Type baseType, SchemaContext context = SchemaContext.Mvc) =>
+        new(Identity(baseType), context, SchemaRole.BaseDefault);
 
-    public static SchemaKey Variant(Type derivedType, Type baseType) =>
-        new(Identity(derivedType), SchemaContext.Mvc, SchemaRole.Variant, Identity(baseType));
+    public static SchemaKey Variant(Type derivedType, Type baseType, SchemaContext context = SchemaContext.Mvc) =>
+        new(Identity(derivedType), context, SchemaRole.Variant, Identity(baseType));
+
+    /// <summary>The same component in <paramref name="context"/>.</summary>
+    public SchemaKey In(SchemaContext context) => this with { Context = context };
 
     private static string Identity(Type type) => type.FullName ?? type.Name;
 }
@@ -80,6 +89,9 @@ internal sealed class SchemaIdRegistry
         _keyById[id] = key;
         return id;
     }
+
+    /// <summary>The id reserved for <paramref name="key"/>, if any.</summary>
+    public bool TryGetId(SchemaKey key, out string id) => _idByKey.TryGetValue(key, out id!);
 
     private bool IsFreeFor(string id, SchemaKey key) =>
         !_keyById.TryGetValue(id, out var holder) || holder == key;

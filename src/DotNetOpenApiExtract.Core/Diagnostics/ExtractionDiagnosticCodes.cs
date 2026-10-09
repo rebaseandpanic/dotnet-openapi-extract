@@ -117,6 +117,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string ResponseEventStreamWithoutFormatter = "response.event-stream-without-formatter";
 
+    /// <summary>
+    /// The MVC and HTTP JSON options differ in what shapes a schema (naming policy, ignore condition,
+    /// number handling, converters) and some CLR types are used in both contexts: each context gets
+    /// its own schema of such a type. One per document. Subjects: the full names of those types.
+    /// </summary>
+    public const string SerializationContextsSharedTypes = "serialization-contexts.shared-types";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
