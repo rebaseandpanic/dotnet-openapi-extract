@@ -27,8 +27,10 @@ public sealed class ResponseInfo
     public IReadOnlyList<string> ContentTypes { get; init; } = ["application/json"];
 
     /// <summary>
-    /// True when content types were explicitly set via <c>[Produces]</c> on the action or controller,
-    /// rather than falling back to the default <c>["application/json"]</c>.
+    /// True when content types were explicitly set — via <c>[Produces]</c> on the action or controller,
+    /// or by the response attribute itself (<c>[ProducesResponseType(..., contentType)]</c>,
+    /// <c>[SwaggerResponse(..., contentTypes)]</c>) — rather than falling back to the default
+    /// <c>["application/json"]</c>.
     /// Used to emit a <c>Content</c> section even when <see cref="BodyType"/> is null —
     /// for example, SSE endpoints that declare <c>[Produces("text/event-stream")]</c> with no body.
     /// </summary>
@@ -316,7 +318,7 @@ public static class ResponseExtractor
                 BodyType = own.BodyType ?? fallback.Response.BodyType,
                 Description = own.Description ?? fallback.Response.Description,
                 ContentTypes = useControllerContentTypes ? fallback.Response.ContentTypes : own.ContentTypes,
-                ContentTypesExplicit = own.ContentTypesExplicit,
+                ContentTypesExplicit = own.ContentTypesExplicit || useControllerContentTypes,
             }, entry.OwnContentTypes || fallback.OwnContentTypes));
         }
 
@@ -529,7 +531,7 @@ public static class ResponseExtractor
             BodyType = bodyType,
             Description = description,
             ContentTypes = contentTypes,
-            ContentTypesExplicit = contentTypesExplicit,
+            ContentTypesExplicit = contentTypesExplicit || !ReferenceEquals(contentTypes, defaultContentTypes),
         };
     }
 

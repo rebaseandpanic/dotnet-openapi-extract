@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core.Tests.Harness;
+using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.OpenApi;
 using Xunit;
 
@@ -21,6 +22,30 @@ public sealed class BinaryContentFixture
     }
 
     public Dictionary<OpenApiSpecVersion, JsonNode> ModernApi { get; } = [];
+
+    /// <summary>ModernApi (3.1) with a global [Produces] filter in Program.cs.</summary>
+    public JsonNode ModernApiWithGlobalProduces { get; } = BuildWithGlobalProduces();
+
+    private static JsonNode BuildWithGlobalProduces()
+    {
+        using var source = new TempDirectory();
+        File.WriteAllText(Path.Combine(source.Path, "Program.cs"), """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddControllers(o => o.Filters.Add(new ProducesAttribute("application/vnd.global+json")));
+            var app = builder.Build();
+            app.MapControllers();
+            app.Run();
+            """);
+        var options = new OpenApiDocumentOptions
+        {
+            AssemblyPath   = TestPaths.ModernApiDll,
+            XmlPath        = TestPaths.ModernApiXml,
+            SourceRoot     = source.Path,
+            OpenApiVersion = OpenApiSpecVersion.OpenApi3_1,
+        };
+        return VersionedDocumentHarness.BuildAndSerializeAsync(options, DocumentFormat.Json, CancellationToken.None)
+            .GetAwaiter().GetResult();
+    }
 
     public Dictionary<OpenApiSpecVersion, JsonNode> SampleApi { get; } = [];
 }
@@ -118,5 +143,17 @@ public class BinaryAndSwaggerResponseContentTests(BinaryContentFixture fixture) 
         foreach (var (_, media) in content)
             media!["schema"]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ReportRow");
         response["description"]!.GetValue<string>().Should().Be("Report rows");
+    }
+
+    [Theory]
+    [InlineData("/binary/report", new[] { "application/xml", "text/csv" })]
+    [InlineData("/binary/report-csv", new[] { "text/csv" })]
+    [InlineData("/binary/file-stream", new[] { "application/octet-stream" })]
+    [InlineData("/binary/report-default", new[] { "application/vnd.global+json" })]
+    public void GlobalProducesFilter_DoesNotOverrideMediaTypesOfTheResponseItself(string path, string[] expected)
+    {
+        var content = fixture.ModernApiWithGlobalProduces["paths"]![path]!["get"]!["responses"]!["200"]!["content"]!.AsObject();
+
+        content.Select(p => p.Key).Should().Equal(expected, because: path);
     }
 }

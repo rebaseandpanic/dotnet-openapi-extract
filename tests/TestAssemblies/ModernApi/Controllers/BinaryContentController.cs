@@ -51,4 +51,14 @@ public class BinaryContentController : ControllerBase
     [HttpGet("report")]
     [SwaggerResponse(StatusCodes.Status200OK, "Report rows", typeof(ReportRow), "application/xml", "text/csv")]
     public IActionResult Report() => Ok();
+
+    /// <summary>A report in the media type [ProducesResponseType] declares.</summary>
+    [HttpGet("report-csv")]
+    [ProducesResponseType(typeof(ReportRow), StatusCodes.Status200OK, "text/csv")]
+    public IActionResult ReportCsv() => Ok();
+
+    /// <summary>A report without media types of its own.</summary>
+    [HttpGet("report-default")]
+    [ProducesResponseType(typeof(ReportRow), StatusCodes.Status200OK)]
+    public IActionResult ReportDefault() => Ok();
 }

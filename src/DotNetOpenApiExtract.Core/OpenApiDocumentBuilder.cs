@@ -1884,20 +1884,21 @@ public sealed class OpenApiDocumentBuilder
                     // Body types per status, so each global media type gets its own form
                     // (an asynchronous sequence differs between JSON and sequential media types).
                     var extracted = ResponseExtractor.ExtractResponses(action)
-                        .Where(r => r.BodyType != null)
                         .GroupBy(r => r.StatusCode == ResponseExtractor.DefaultStatusCode ? "default" : r.StatusCode.ToString())
                         .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-                    // Typed results and files write their own content type: the global [Produces]
-                    // filter does not apply to them.
+                    // Typed results and files write their own content type, and a response attribute
+                    // that names media types of its own has the last word: the global [Produces]
+                    // filter does not apply to them. (Per-action [Produces] skips the whole operation above.)
                     var ownContentType = extracted
-                        .Where(e => e.Value.BodyFromHttpResult
-                                    || SseEventSchema.TryGetItemType(e.Value.BodyType!, out _)
-                                    || FileTypes.IsFile(e.Value.BodyType!))
+                        .Where(e => e.Value.ContentTypesExplicit
+                                    || e.Value.BodyFromHttpResult
+                                    || (e.Value.BodyType != null
+                                        && (SseEventSchema.TryGetItemType(e.Value.BodyType, out _) || FileTypes.IsFile(e.Value.BodyType))))
                         .Select(e => e.Key)
                         .ToHashSet(StringComparer.Ordinal);
                     var bodyTypes = extracted
-                        .Where(e => !ownContentType.Contains(e.Key))
+                        .Where(e => e.Value.BodyType != null && !ownContentType.Contains(e.Key))
                         .ToDictionary(e => e.Key, e => e.Value.BodyType!, StringComparer.Ordinal);
 
                     foreach (var (statusKey, responseInterface) in operation.Responses)
