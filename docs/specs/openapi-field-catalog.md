@@ -584,8 +584,8 @@ OAuth2 and OpenID Connect declarations: missing required data in a fully known (
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
 | `securityScheme.type: apiKey` / `http` | 3.0 | Roslyn `AddSecurityDefinition(name, new OpenApiSecurityScheme { Type = SecuritySchemeType.ApiKey \| Http, … })`; `AddJwtBearer(...)` → `http` / `bearer` / `JWT` (name `Bearer` unless given) | written | = | = | `Warning: AddSecurityDefinition call with non-literal name — skipped.` | `security.scheme-defined` | supported | — |
-| `securityScheme.type: oauth2` | 3.0 | `Type = SecuritySchemeType.OAuth2` with `Flows = new OpenApiOAuthFlows { … }` | `oauth2` with its flows (§28, §29) | = | = | literal declaration without flows → extraction error; non-literal value → scheme omitted, warning | `security.scheme-defined` | bug: `Flows` is not parsed and the library throws `The 'flows' property is required for oauth2 security schemes.`, the CLI fails with exit 2 (verified); stage 1 | stage-1 |
-| `securityScheme.type: openIdConnect` | 3.0 | `Type = SecuritySchemeType.OpenIdConnect` with `OpenIdConnectUrl = new Uri("…")` | `openIdConnect` with `openIdConnectUrl` | = | = | literal declaration without the URL → extraction error; non-literal value → scheme omitted, warning | `security.scheme-defined` | bug: `OpenIdConnectUrl` is not parsed and the library throws `The 'openIdConnectUrl' property is required for openIdConnect security schemes.`, the CLI fails with exit 2 (verified); stage 1 | stage-1 |
+| `securityScheme.type: oauth2` | 3.0 | `Type = SecuritySchemeType.OAuth2` with `Flows = new OpenApiOAuthFlows { … }` | `oauth2` with its flows (§28, §29) | = | = | literal declaration without flows (no `Flows`, or `Flows` with no flow) → extraction error naming the scheme (`OpenApiExtractionException`, member `Flows`); a value that is not a literal or an in-project constant (flows, a flow, a URL, scopes) → scheme omitted together with its name in every requirement, one warning (code `security.scheme-not-static`, location `#/components/securitySchemes/<name>`, kept when every path is excluded) | `security.scheme-defined` | supported | — |
+| `securityScheme.type: openIdConnect` | 3.0 | `Type = SecuritySchemeType.OpenIdConnect` with `OpenIdConnectUrl = new Uri("…")` | `openIdConnect` with `openIdConnectUrl` | = | = | literal declaration without the URL → extraction error (member `OpenIdConnectUrl`); non-literal value → scheme omitted, warning as for oauth2 | `security.scheme-defined` | supported | — |
 | `securityScheme.type: mutualTLS` | 3.1 | `Type = SecuritySchemeType.MutualTLS` in the security scheme initializer in `Program.cs` (exists in Microsoft.OpenApi 2.7.x and 3.x) | omitted (form chosen by the tool, the library would throw); the requirements referencing it are removed by the existing mechanism | `mutualTLS` in `components.securitySchemes` | `mutualTLS` | DW (3.0): names the scheme and the change to the auth contract (which requirements were simplified or removed); the CLI does not fail | `security.scheme-defined` | bug: the definition is dropped silently (verified); stage 1 | stage-1 |
 | `securityScheme.type: mutualTLS` from `AddCertificate()` | 3.1 | `AddCertificate()` authentication registration | not a source | = | = | — | — | deferred: not proven to be a reliable source of `mutualTLS` | — |
 | `securityScheme.description` | 3.0 | `Description = "…"` literal; `AddJwtBearer` → fixed text | written | = | = | — | `security.scheme-description` | supported | — |
@@ -593,30 +593,30 @@ OAuth2 and OpenID Connect declarations: missing required data in a fully known (
 | `securityScheme.in` | 3.0 | `In = ParameterLocation.Query \| Header \| Cookie` | written | = | = | — | — | supported | — |
 | `securityScheme.scheme` | 3.0 | `Scheme = "…"` literal | written | = | = | — | — | supported | — |
 | `securityScheme.bearerFormat` | 3.0 | `BearerFormat = "…"` literal | written | = | = | — | — | supported | — |
-| `securityScheme.flows` | 3.0 | `Flows = new OpenApiOAuthFlows { … }` | written: `implicit`, `password`, `clientCredentials`, `authorizationCode` with all URLs and scopes (§28); `deviceAuthorization` per its row | = | = | see the oauth2 row | — | bug: not parsed (see the oauth2 row); stage 1 | stage-1 |
-| `securityScheme.openIdConnectUrl` | 3.0 | `OpenIdConnectUrl = new Uri("…")` | written | = | = | see the openIdConnect row | — | bug: not parsed (see the openIdConnect row); stage 1 | stage-1 |
-| `securityScheme.oauth2MetadataUrl` | 3.2 | Roslyn `OAuth2MetadataUrl = …` (MS.OpenApi 3.x only) | `x-oai-oauth2-metadata-url` (lib) | `x-oai-oauth2-metadata-url` | `oauth2MetadataUrl` | DW (3.0, 3.1) | — | stage 1 | stage-1 |
-| `securityScheme.deprecated` | 3.2 | Roslyn `Deprecated = true` (MS.OpenApi 3.x only) | `x-oai-deprecated` (lib) | `x-oai-deprecated` | `deprecated` | DW (3.0, 3.1) | — | stage 1 | stage-1 |
+| `securityScheme.flows` | 3.0 | `Flows = new OpenApiOAuthFlows { … }` | written: `implicit`, `password`, `clientCredentials`, `authorizationCode` with all URLs and scopes (§28); `deviceAuthorization` per its row | = | = | see the oauth2 row | — | supported | — |
+| `securityScheme.openIdConnectUrl` | 3.0 | `OpenIdConnectUrl = new Uri("…")` | written | = | = | see the openIdConnect row | — | supported | — |
+| `securityScheme.oauth2MetadataUrl` | 3.2 | Roslyn `OAuth2MetadataUrl = …` (MS.OpenApi 3.x only) | `x-oai-oauth2-metadata-url` (lib) | `x-oai-oauth2-metadata-url` | `oauth2MetadataUrl` | DW (3.0, 3.1), code `security.oauth2-metadata-url-moved-to-extension` | — | supported | — |
+| `securityScheme.deprecated` | 3.2 | Roslyn `Deprecated = true` (MS.OpenApi 3.x only) | `x-oai-deprecated` (lib) | `x-oai-deprecated` | `deprecated` | DW (3.0, 3.1), code `security.deprecated-moved-to-extension` | — | supported | — |
 
 ## 28. OAuth Flows Object
 
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
-| `flows.implicit` | 3.0 | `Flows = new OpenApiOAuthFlows { Implicit = … }` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flows.password` | 3.0 | `Password = …` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flows.clientCredentials` | 3.0 | `ClientCredentials = …` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flows.authorizationCode` | 3.0 | `AuthorizationCode = …` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flows.deviceAuthorization` | 3.2 | Roslyn `DeviceAuthorization = …` (MS.OpenApi 3.x only) | `x-oai-deviceAuthorization` (lib) | `x-oai-deviceAuthorization` | `deviceAuthorization` | DW (3.0, 3.1): one per scheme, covering the flow's URLs and scopes | — | stage 1 | stage-1 |
+| `flows.implicit` | 3.0 | `Flows = new OpenApiOAuthFlows { Implicit = … }` | written | = | = | — | — | supported | — |
+| `flows.password` | 3.0 | `Password = …` | written | = | = | — | — | supported | — |
+| `flows.clientCredentials` | 3.0 | `ClientCredentials = …` | written | = | = | — | — | supported | — |
+| `flows.authorizationCode` | 3.0 | `AuthorizationCode = …` | written | = | = | — | — | supported | — |
+| `flows.deviceAuthorization` | 3.2 | Roslyn `DeviceAuthorization = …` (MS.OpenApi 3.x only) | `x-oai-deviceAuthorization` (lib) | `x-oai-deviceAuthorization` | `deviceAuthorization` | DW (3.0, 3.1): one per scheme, covering the flow's URLs and scopes (code `security.device-authorization-moved-to-extension`) | — | supported | — |
 
 ## 29. OAuth Flow Object
 
 | Field | Since | Source in code | 3.0 output | 3.1 output | 3.2 output | Warning | --validate rule | Status | Tracking |
 |---|---|---|---|---|---|---|---|---|---|
-| `flow.authorizationUrl` | 3.0 | `AuthorizationUrl = new Uri(…)` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flow.deviceAuthorizationUrl` | 3.2 | `DeviceAuthorizationUrl` (MS.OpenApi 3.x only) | inside `x-oai-deviceAuthorization` (lib) | = | `deviceAuthorizationUrl` | covered by the `deviceAuthorization` DW | — | stage 1 | stage-1 |
-| `flow.tokenUrl` | 3.0 | `TokenUrl` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flow.refreshUrl` | 3.0 | `RefreshUrl` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
-| `flow.scopes` | 3.0 | `Scopes = new Dictionary<string,string> { … }` | written | = | = | — | — | bug: flows not parsed; stage 1 | stage-1 |
+| `flow.authorizationUrl` | 3.0 | `AuthorizationUrl = new Uri(…)` | written | = | = | — | — | supported | — |
+| `flow.deviceAuthorizationUrl` | 3.2 | `DeviceAuthorizationUrl` (MS.OpenApi 3.x only) | `x-oai-deviceAuthorizationUrl` inside `x-oai-deviceAuthorization` (lib) | = | `deviceAuthorizationUrl` | covered by the `deviceAuthorization` DW | — | supported | — |
+| `flow.tokenUrl` | 3.0 | `TokenUrl` | written | = | = | — | — | supported | — |
+| `flow.refreshUrl` | 3.0 | `RefreshUrl` | written | = | = | — | — | supported | — |
+| `flow.scopes` | 3.0 | `Scopes = new Dictionary<string,string> { … }` | written | = | = | — | — | supported | — |
 
 ## 30. Security Requirement Object
 

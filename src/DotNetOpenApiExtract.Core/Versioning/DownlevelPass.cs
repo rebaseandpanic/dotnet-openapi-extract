@@ -95,7 +95,7 @@ internal static class DownlevelPass
                 && degradationNodes.Any(ancestor => IsStrictDescendant(segments, ancestor)))
                 continue;
 
-            var location = place.Location;
+            var location = entry.Location ?? place.Location;
             located.Add((place.Rank, place.Order, new ExtractionDiagnostic
             {
                 Code            = entry.Code,

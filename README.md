@@ -153,7 +153,7 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 
 From `Program.cs` via Roslyn (when sources are available):
 
-- Security schemes (`AddSecurityDefinition`, `AddJwtBearer`, `AddSecurityRequirement`) — including lambda-factory form
+- Security schemes (`AddSecurityDefinition`, `AddJwtBearer`, `AddSecurityRequirement`) — including lambda-factory form; OAuth2 flows (implicit, password, client credentials, authorization code, device authorization) with their URLs and scopes, the OpenID Connect URL, and the OpenAPI 3.2 `oauth2MetadataUrl` / `deprecated` (extensions with a warning before 3.2). A literal OAuth2 or OpenID Connect declaration without flows or URL is an extraction error; one built from variables is omitted with a warning
 - `UsePathBase("/prefix")` — prepended to paths or emitted as `servers[].url`
 - `AddProblemDetails()` — auto-injects default 400 / 422 / 500 responses with RFC 7807 `ProblemDetails` schema
 - JSON serializer options: `PropertyNamingPolicy`, `DictionaryKeyPolicy`, `DefaultIgnoreCondition`, `NumberHandling`, global `Converters.Add(...)` (with the naming policy of a string-enum converter). Read separately per serialization context, as ASP.NET Core applies them: controller bodies follow `AddControllers().AddJsonOptions(...)` only; `ConfigureHttpJsonOptions(...)` configures minimal APIs, typed `IResult` bodies and server-sent events data and never reaches controllers. When the two differ in naming policy, ignore condition, number handling or converters, a type used in both contexts gets a second component `{Id}Http` described by the HTTP options, and one warning names those types

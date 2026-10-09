@@ -91,6 +91,13 @@ internal sealed record PendingLoss
     public string? ExtensionName { get; init; }
 
     public IReadOnlyList<string> Subjects { get; init; } = [];
+
+    /// <summary>
+    /// A fixed location for a record about a node the build removes or never creates (an omitted
+    /// security scheme, <c>#/components/securitySchemes/{name}</c>): its anchor is the owner that stays
+    /// (the document), and the location names the missing node instead of the owner's.
+    /// </summary>
+    public string? Location { get; init; }
 }
 
 /// <summary>

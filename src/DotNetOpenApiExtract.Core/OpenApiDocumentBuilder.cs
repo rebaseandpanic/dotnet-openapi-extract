@@ -773,7 +773,8 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Step 7: Security schemes ─────────────────────────────────────────
         ApplySecuritySchemes(document, securityResult);
-        OmitUndeclaredSecuritySchemes(document, diagnostics);
+        RecordOmittedSecuritySchemes(securityResult, ledger);
+        OmitUndeclaredSecuritySchemes(document, diagnostics, securityResult.OmittedSchemes);
 
         // ── Step 8: ProblemDetails ──────────────────────────────────────────
         if (ProblemDetailsDetector.IsRegistered(sourceContext))
@@ -1732,6 +1733,31 @@ public sealed class OpenApiDocumentBuilder
     }
 
     /// <summary>
+    /// One warning (class «source») per security scheme omitted because its declaration needs a value
+    /// that cannot be resolved statically. Its owner is the document (the scheme is global and never
+    /// reaches the output), so it is kept when every path is excluded; its location is the place the
+    /// scheme would have had.
+    /// </summary>
+    private static void RecordOmittedSecuritySchemes(SecuritySchemeExtractionResult securityResult, LossLedger ledger)
+    {
+        foreach (var name in securityResult.OmittedSchemes)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SecuritySchemeNotStatic,
+                Anchor   = LossAnchor.Document.Instance,
+                Location = $"#/components/securitySchemes/{Validation.JsonPointerHelper.EncodeSegment(name)}",
+                Message  = $"security scheme '{name}' needs a value that cannot be resolved statically (a variable, a call): " +
+                           "the scheme is omitted, and every requirement that names it loses that scheme.",
+                Feature  = "securityScheme",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = [name],
+            });
+        }
+    }
+
+    /// <summary>
     /// Removes scheme names that are not declared in <c>components/securitySchemes</c> from
     /// the document-level and per-operation security requirements, with a warning per name.
     /// </summary>
@@ -1745,11 +1771,12 @@ public sealed class OpenApiDocumentBuilder
     /// Must run after <see cref="ApplySecuritySchemes"/>, path exclusion and path base, so that
     /// declared schemes are final and warnings name the paths written to the spec.
     /// </remarks>
-    private static void OmitUndeclaredSecuritySchemes(OpenApiDocument document, DiagnosticBag diagnostics)
+    private static void OmitUndeclaredSecuritySchemes(
+        OpenApiDocument document, DiagnosticBag diagnostics, IReadOnlyList<string> reportedElsewhere)
     {
         var declared = document.Components?.SecuritySchemes;
 
-        document.Security = OmitUndeclared(document.Security, declared, "document-level", "#/security", diagnostics);
+        document.Security = OmitUndeclared(document.Security, declared, "document-level", "#/security", diagnostics, reportedElsewhere);
 
         foreach (var (path, pathItemInterface) in document.Paths)
         {
@@ -1760,7 +1787,7 @@ public sealed class OpenApiDocumentBuilder
             {
                 var operationKey = $"{method.Method.ToUpperInvariant()} {path}";
                 operation.Security = OmitUndeclared(
-                    operation.Security, declared, operationKey, operationKey, diagnostics);
+                    operation.Security, declared, operationKey, operationKey, diagnostics, reportedElsewhere);
             }
         }
     }
@@ -1775,7 +1802,8 @@ public sealed class OpenApiDocumentBuilder
         IDictionary<string, IOpenApiSecurityScheme>? declared,
         string location,
         string diagnosticLocation,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        IReadOnlyList<string> reportedElsewhere)
     {
         if (requirements is not { Count: > 0 })
             return requirements;
@@ -1791,6 +1819,13 @@ public sealed class OpenApiDocumentBuilder
 
             foreach (var reference in undeclared)
             {
+                // A declared scheme the extractor omitted has its own warning, naming the requirements.
+                if (reference.Reference.Id is { } omittedName && reportedElsewhere.Contains(omittedName))
+                {
+                    requirement.Remove(reference);
+                    continue;
+                }
+
                 diagnostics.Report(new ExtractionDiagnostic
                 {
                     Code     = ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme,

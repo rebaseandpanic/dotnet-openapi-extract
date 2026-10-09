@@ -1,4 +1,5 @@
 using DotNetOpenApiExtract.Core.Diagnostics;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.OpenApi;
@@ -27,6 +28,13 @@ public sealed class SecuritySchemeExtractionResult
     /// all be satisfied together (AND).
     /// </summary>
     public IReadOnlyList<IReadOnlyList<string>> GlobalRequirements { get; init; } = [];
+
+    /// <summary>
+    /// Names of <c>AddSecurityDefinition</c> declarations that are omitted because a value they
+    /// need (OAuth2 flows and their URLs and scopes, the OpenID Connect URL, the OAuth2 metadata
+    /// URL, <c>Deprecated</c>) cannot be resolved statically: a variable, a call, configuration.
+    /// </summary>
+    public IReadOnlyList<string> OmittedSchemes { get; init; } = [];
 
     /// <summary>
     /// [DEPRECATED] All scheme names from <see cref="GlobalRequirements"/>, flattened in
@@ -92,6 +100,7 @@ public static class SecuritySchemeExtractor
 
         var schemes = new Dictionary<string, OpenApiSecurityScheme>(StringComparer.Ordinal);
         var globalRequirements = new List<IReadOnlyList<string>>();
+        var omitted = new List<string>();
 
         // ── 1. AddJwtBearer registrations ─────────────────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddJwtBearer"))
@@ -138,7 +147,14 @@ public static class SecuritySchemeExtractor
                 continue;
             }
 
-            var scheme = TryParseSecuritySchemeFromInvocation(invocation);
+            var scheme = TryParseSecuritySchemeFromInvocation(invocation, name!, context.CompilationResult?.Compilation, out var notStatic);
+            if (notStatic)
+            {
+                if (!schemes.ContainsKey(name!) && !omitted.Contains(name!))
+                    omitted.Add(name!);
+                continue;
+            }
+
             if (scheme != null)
             {
                 if (!schemes.TryAdd(name!, scheme))
@@ -163,6 +179,7 @@ public static class SecuritySchemeExtractor
         {
             Schemes = schemes,
             GlobalRequirements = globalRequirements,
+            OmittedSchemes = omitted.Where(n => !schemes.ContainsKey(n)).ToList(),
         };
     }
 
@@ -173,11 +190,13 @@ public static class SecuritySchemeExtractor
     /// <summary>
     /// Attempts to parse an <c>OpenApiSecurityScheme</c> from an
     /// <c>AddSecurityDefinition("Name", new OpenApiSecurityScheme { ... })</c> call.
-    /// Returns null if the second argument is not a recognisable object-creation expression.
+    /// Returns null if the second argument is not a recognisable object-creation expression, or
+    /// with <paramref name="notStatic"/> set when a value the scheme needs cannot be resolved statically.
     /// </summary>
     private static OpenApiSecurityScheme? TryParseSecuritySchemeFromInvocation(
-        InvocationExpressionSyntax invocation)
+        InvocationExpressionSyntax invocation, string schemeName, CSharpCompilation? compilation, out bool notStatic)
     {
+        notStatic = false;
         var args = invocation.ArgumentList.Arguments;
         if (args.Count < 2)
             return null;
@@ -197,21 +216,27 @@ public static class SecuritySchemeExtractor
         if (!typeName.Contains("SecurityScheme", StringComparison.Ordinal))
             return null;
 
-        return ParseObjectInitializer(objCreation.Initializer);
+        return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic);
     }
 
     /// <summary>
-    /// Parses properties from an <c>InitializerExpressionSyntax</c> for
-    /// <c>OpenApiSecurityScheme</c>. Returns a best-effort result — unknown or
-    /// complex property values are silently skipped.
+    /// Parses properties from an <c>InitializerExpressionSyntax</c> for <c>OpenApiSecurityScheme</c>.
+    /// Descriptive values that are not literals are skipped. The values an OAuth2 or OpenID Connect
+    /// scheme needs — <c>Flows</c> (every flow, its URLs and scopes), <c>OpenIdConnectUrl</c> — and
+    /// <c>OAuth2MetadataUrl</c> / <c>Deprecated</c> must be resolved statically: otherwise
+    /// <paramref name="notStatic"/> is set and the scheme is omitted. A fully literal OAuth2 declaration
+    /// without flows, or OpenID Connect declaration without its URL, is an extraction error: no OpenAPI
+    /// document can hold it.
     /// </summary>
     private static OpenApiSecurityScheme? ParseObjectInitializer(
-        InitializerExpressionSyntax? initializer)
+        InitializerExpressionSyntax? initializer, string schemeName, CSharpCompilation? compilation, out bool notStatic)
     {
+        notStatic = false;
         if (initializer == null)
             return null;
 
         var scheme = new OpenApiSecurityScheme();
+        var unresolved = false;
 
         foreach (var expr in initializer.Expressions)
         {
@@ -253,6 +278,26 @@ public static class SecuritySchemeExtractor
                 case "In":
                     scheme.In = ParseParameterLocation(value);
                     break;
+
+                case "Flows":
+                    scheme.Flows = ParseFlows(value, compilation, ref unresolved);
+                    break;
+
+                case "OpenIdConnectUrl":
+                    scheme.OpenIdConnectUrl = ParseUri(value, compilation, ref unresolved);
+                    break;
+
+                case "OAuth2MetadataUrl":
+                    scheme.OAuth2MetadataUrl = ParseUri(value, compilation, ref unresolved);
+                    break;
+
+                case "Deprecated":
+                    if (value is LiteralExpressionSyntax deprecated
+                        && (deprecated.IsKind(SyntaxKind.TrueLiteralExpression) || deprecated.IsKind(SyntaxKind.FalseLiteralExpression)))
+                        scheme.Deprecated = deprecated.IsKind(SyntaxKind.TrueLiteralExpression);
+                    else
+                        unresolved = true;
+                    break;
             }
         }
 
@@ -260,7 +305,146 @@ public static class SecuritySchemeExtractor
         if (scheme.Type == null)
             return null;
 
+        if (unresolved)
+        {
+            notStatic = true;
+            return null;
+        }
+
+        if (scheme.Type == SecuritySchemeType.OAuth2
+            && scheme.Flows is not { Implicit: not null } and not { Password: not null } and not { ClientCredentials: not null }
+                and not { AuthorizationCode: not null } and not { DeviceAuthorization: not null })
+        {
+            throw new OpenApiExtractionException(
+                $"Security scheme '{schemeName}' is declared as OAuth2 without flows: OpenAPI requires 'flows' " +
+                "for an oauth2 scheme. Set Flows = new OpenApiOAuthFlows { … } in AddSecurityDefinition.",
+                "Microsoft.OpenApi.OpenApiSecurityScheme", "Flows");
+        }
+
+        if (scheme.Type == SecuritySchemeType.OpenIdConnect && scheme.OpenIdConnectUrl == null)
+        {
+            throw new OpenApiExtractionException(
+                $"Security scheme '{schemeName}' is declared as OpenID Connect without OpenIdConnectUrl: OpenAPI " +
+                "requires 'openIdConnectUrl' for an openIdConnect scheme.",
+                "Microsoft.OpenApi.OpenApiSecurityScheme", "OpenIdConnectUrl");
+        }
+
         return scheme;
+    }
+
+    /// <summary>The object creation <c>new T { … }</c> / <c>new() { … }</c> behind <paramref name="value"/>, if it is one.</summary>
+    private static BaseObjectCreationExpressionSyntax? Creation(ExpressionSyntax value)
+    {
+        while (value is ParenthesizedExpressionSyntax paren)
+            value = paren.Expression;
+        return value as BaseObjectCreationExpressionSyntax;
+    }
+
+    /// <summary>
+    /// <c>new OpenApiOAuthFlows { Implicit = …, Password = …, ClientCredentials = …, AuthorizationCode = …,
+    /// DeviceAuthorization = … }</c>; anything else sets <paramref name="unresolved"/>.
+    /// </summary>
+    private static OpenApiOAuthFlows? ParseFlows(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    {
+        if (Creation(value) is not { } creation)
+        {
+            unresolved = true;
+            return null;
+        }
+
+        var flows = new OpenApiOAuthFlows();
+        foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+        {
+            switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
+            {
+                case "Implicit":            flows.Implicit = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+                case "Password":            flows.Password = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+                case "ClientCredentials":   flows.ClientCredentials = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+                case "AuthorizationCode":   flows.AuthorizationCode = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+                case "DeviceAuthorization": flows.DeviceAuthorization = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+            }
+        }
+
+        return flows;
+    }
+
+    /// <summary>
+    /// <c>new OpenApiOAuthFlow { AuthorizationUrl, TokenUrl, RefreshUrl, DeviceAuthorizationUrl, Scopes }</c>;
+    /// a value that is not a literal (or an in-project constant) sets <paramref name="unresolved"/>.
+    /// </summary>
+    private static OpenApiOAuthFlow? ParseFlow(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    {
+        if (Creation(value) is not { } creation)
+        {
+            unresolved = true;
+            return null;
+        }
+
+        var flow = new OpenApiOAuthFlow();
+        foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+        {
+            switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
+            {
+                case "AuthorizationUrl":       flow.AuthorizationUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
+                case "TokenUrl":               flow.TokenUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
+                case "RefreshUrl":             flow.RefreshUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
+                case "DeviceAuthorizationUrl": flow.DeviceAuthorizationUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
+                case "Scopes":                 flow.Scopes = ParseScopes(assignment.Right, compilation, ref unresolved); break;
+            }
+        }
+
+        return flow;
+    }
+
+    /// <summary>
+    /// <c>new Uri("…")</c> (or <c>new("…")</c>, an optional <c>UriKind</c>) with a literal or in-project
+    /// constant string; anything else sets <paramref name="unresolved"/>.
+    /// </summary>
+    private static Uri? ParseUri(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    {
+        if (Creation(value) is { ArgumentList.Arguments: [var first, ..] }
+            && InvocationMatcher.GetStringValue(first.Expression, compilation) is { } text
+            && Uri.TryCreate(text, UriKind.RelativeOrAbsolute, out var uri))
+            return uri;
+
+        unresolved = true;
+        return null;
+    }
+
+    /// <summary>
+    /// <c>new Dictionary&lt;string, string&gt; { ["scope"] = "description", { "scope", "description" } }</c>
+    /// with literal or constant strings; anything else sets <paramref name="unresolved"/>.
+    /// </summary>
+    private static Dictionary<string, string>? ParseScopes(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    {
+        if (Creation(value) is not { } creation)
+        {
+            unresolved = true;
+            return null;
+        }
+
+        var scopes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in creation.Initializer?.Expressions ?? [])
+        {
+            (ExpressionSyntax Key, ExpressionSyntax Value)? pair = entry switch
+            {
+                AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax { ArgumentList.Arguments: [var key] } } indexed
+                    => (key.Expression, indexed.Right),
+                InitializerExpressionSyntax { Expressions: [var key, var description] } => (key, description),
+                _ => null,
+            };
+            if (pair is not { } p
+                || InvocationMatcher.GetStringValue(p.Key, compilation) is not { } scope
+                || InvocationMatcher.GetStringValue(p.Value, compilation) is not { } text)
+            {
+                unresolved = true;
+                return null;
+            }
+
+            scopes[scope] = text;
+        }
+
+        return scopes;
     }
 
     /// <summary>

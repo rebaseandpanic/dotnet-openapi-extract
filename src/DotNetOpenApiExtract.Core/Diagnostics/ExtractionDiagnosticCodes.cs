@@ -198,6 +198,33 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string ParameterPathRequiredKept = "parameter.path-required-kept";
 
+    /// <summary>
+    /// An <c>AddSecurityDefinition</c> declaration needs a value that cannot be resolved statically
+    /// (OAuth2 flows, their URLs or scopes, the OpenID Connect or OAuth2 metadata URL,
+    /// <c>Deprecated</c>): the scheme is omitted, with the requirements that name it. Location:
+    /// <c>#/components/securitySchemes/{name}</c>. Subjects: the scheme name.
+    /// </summary>
+    public const string SecuritySchemeNotStatic = "security.scheme-not-static";
+
+    /// <summary>
+    /// For a 3.0/3.1 target, the <c>deviceAuthorization</c> flow of an OAuth2 scheme (OpenAPI 3.2) is
+    /// written as <c>x-oai-deviceAuthorization</c>; one per scheme, covering the flow's URLs and scopes.
+    /// Subjects: the scheme name.
+    /// </summary>
+    public const string SecurityDeviceAuthorizationMovedToExtension = "security.device-authorization-moved-to-extension";
+
+    /// <summary>
+    /// For a 3.0/3.1 target, <c>oauth2MetadataUrl</c> of a security scheme (OpenAPI 3.2) is written as
+    /// <c>x-oai-oauth2-metadata-url</c>. Subjects: the scheme name.
+    /// </summary>
+    public const string SecurityOAuth2MetadataUrlMovedToExtension = "security.oauth2-metadata-url-moved-to-extension";
+
+    /// <summary>
+    /// For a 3.0/3.1 target, <c>deprecated</c> of a security scheme (OpenAPI 3.2) is written as
+    /// <c>x-oai-deprecated</c>. Subjects: the scheme name.
+    /// </summary>
+    public const string SecurityDeprecatedMovedToExtension = "security.deprecated-moved-to-extension";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
