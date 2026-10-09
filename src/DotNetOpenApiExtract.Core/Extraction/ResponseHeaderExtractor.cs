@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -56,6 +57,19 @@ public static class ResponseHeaderExtractor
     /// Deduplicated list of literal header names found in middleware bodies.
     /// </returns>
     public static IReadOnlyList<string> Extract(SourceAnalysisContext context)
+        => Extract(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Same as <see cref="Extract(SourceAnalysisContext)"/>, but delivers warnings to
+    /// <paramref name="onDiagnostic"/> instead of printing them to <c>Console.Error</c>.
+    /// </summary>
+    /// <param name="context">The source analysis context of the entry point.</param>
+    /// <param name="onDiagnostic">
+    /// Receives each warning. When <see langword="null"/>, warnings are printed to
+    /// <c>Console.Error</c>, as <see cref="Extract(SourceAnalysisContext)"/> does.
+    /// </param>
+    public static IReadOnlyList<string> Extract(
+        SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode == null)
             return [];
@@ -78,7 +92,7 @@ public static class ResponseHeaderExtractor
                 if (lambdaBody == null)
                     continue;
 
-                CollectHeaderNames(lambdaBody, result, seen, compilation.Compilation);
+                CollectHeaderNames(lambdaBody, result, seen, compilation.Compilation, onDiagnostic);
             }
         }
 
@@ -101,7 +115,7 @@ public static class ResponseHeaderExtractor
                 .Where(m => m.Identifier.Text is "InvokeAsync" or "Invoke");
 
             foreach (var method in invokeMethods)
-                CollectHeaderNames(method, result, seen, compilation.Compilation);
+                CollectHeaderNames(method, result, seen, compilation.Compilation, onDiagnostic);
         }
 
         return result;
@@ -130,7 +144,8 @@ public static class ResponseHeaderExtractor
         SyntaxNode scope,
         List<string> result,
         HashSet<string> seen,
-        CSharpCompilation? compilation)
+        CSharpCompilation? compilation,
+        Action<ExtractionDiagnostic>? onDiagnostic)
     {
         // ── Pattern A: method calls (.Append/.Add/.TryAdd) ────────────────────
         foreach (var invocation in scope.DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -171,8 +186,12 @@ public static class ResponseHeaderExtractor
             }
             else
             {
-                Console.Error.WriteLine(
-                    $"Warning: Response.Headers.{methodName}() call with non-literal header name — skipped.");
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.ResponseHeaderNonLiteralName,
+                    Message  = $"Response.Headers.{methodName}() call with non-literal header name — skipped.",
+                    Subjects = [$"Response.Headers.{methodName}()"],
+                });
             }
         }
 
@@ -210,8 +229,12 @@ public static class ResponseHeaderExtractor
             }
             else
             {
-                Console.Error.WriteLine(
-                    $"Warning: Response.Headers[...] assignment with non-literal header name — skipped.");
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.ResponseHeaderNonLiteralName,
+                    Message  = "Response.Headers[...] assignment with non-literal header name — skipped.",
+                    Subjects = ["Response.Headers[...]"],
+                });
             }
         }
     }

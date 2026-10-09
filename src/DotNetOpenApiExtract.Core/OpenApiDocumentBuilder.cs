@@ -8,6 +8,7 @@ using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 using DotNetOpenApiExtract.Core.Validation;
 using DotNetOpenApiExtract.Core.Versioning;
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.CodeAnalysis;
 
 // Alias to resolve ambiguity: our ParameterLocation vs Microsoft.OpenApi.ParameterLocation
@@ -207,6 +208,13 @@ public sealed class OpenApiDocumentOptions
     /// </para>
     /// </remarks>
     public OpenApiSpecVersion OpenApiVersion { get; init; } = TargetVersion.Default;
+
+    /// <summary>
+    /// Receives the warnings produced while the document is built, each delivered once per
+    /// build. When <see langword="null"/> (default), warnings are printed to <c>Console.Error</c>
+    /// as before. Warnings never stop the build.
+    /// </summary>
+    public Action<ExtractionDiagnostic>? OnDiagnostic { get; init; }
 }
 
 /// <summary>
@@ -337,14 +345,18 @@ public sealed class OpenApiDocumentBuilder
 
     private static BuildCoreResult BuildCore(OpenApiDocumentOptions options, AssemblyLoader loader)
     {
+        // Every warning of this build goes through one bag: delivered once, to the
+        // subscriber or to stderr.
+        var diagnostics = new DiagnosticBag(options.OnDiagnostic);
+
         // ── Source analysis (best-effort, never throws) ──────────────────────
         var sourceContext = TryBuildSourceAnalysisContext(options, loader);
 
         // ── Security extraction (Roslyn, best-effort, before operation loop) ──
-        var securityResult = SecuritySchemeExtractor.Extract(sourceContext);
+        var securityResult = SecuritySchemeExtractor.Extract(sourceContext, diagnostics.Report);
 
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
-        var jsonOptions = JsonOptionsExtractor.Extract(sourceContext);
+        var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
 
         // ── Resolve effective naming policy ───────────────────────────────────
         // Precedence: Roslyn > explicit NamingPolicy option > default CamelCase
@@ -353,7 +365,7 @@ public sealed class OpenApiDocumentBuilder
             ?? JsonNamingPolicy.CamelCase;
 
         // ── Resolve XML documentation paths (priority: XmlPaths > XmlPath > auto-detect > framework) ──
-        var xmlPaths = BuildXmlPathList(options, loader);
+        var xmlPaths = BuildXmlPathList(options, loader, diagnostics);
 
         var xmlParser = XmlDocParser.FromSources(xmlPaths);
         var docResolver = new DocumentationResolver(xmlParser);
@@ -368,6 +380,7 @@ public sealed class OpenApiDocumentBuilder
             EnumAutoDescription      = options.EnumAutoDescription,
             EnumVarnames             = options.EnumVarnames,
             OpenApiVersion           = options.OpenApiVersion,
+            OnDiagnostic             = diagnostics.Report,
         }, docResolver);
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
@@ -425,8 +438,7 @@ public sealed class OpenApiDocumentBuilder
                 if (Uri.TryCreate(options.ContactUrl, UriKind.Absolute, out var parsed))
                     contactUri = parsed;
                 else
-                    Console.Error.WriteLine(
-                        $"Warning: --contact-url '{options.ContactUrl}' is not a valid absolute URI and will be ignored.");
+                    WarnInvalidInfoUri(diagnostics, "--contact-url", options.ContactUrl, "#/info/contact/url");
             }
 
             info.Contact = new OpenApiContact
@@ -446,8 +458,7 @@ public sealed class OpenApiDocumentBuilder
                 if (Uri.TryCreate(options.LicenseUrl, UriKind.Absolute, out var parsed))
                     licenseUri = parsed;
                 else
-                    Console.Error.WriteLine(
-                        $"Warning: --license-url '{options.LicenseUrl}' is not a valid absolute URI and will be ignored.");
+                    WarnInvalidInfoUri(diagnostics, "--license-url", options.LicenseUrl, "#/info/license/url");
             }
 
             info.License = new OpenApiLicense
@@ -464,8 +475,7 @@ public sealed class OpenApiDocumentBuilder
             if (Uri.TryCreate(options.TermsOfService, UriKind.Absolute, out var tosUri))
                 info.TermsOfService = tosUri;
             else
-                Console.Error.WriteLine(
-                    $"Warning: --terms-of-service '{options.TermsOfService}' is not a valid absolute URI and will be ignored.");
+                WarnInvalidInfoUri(diagnostics, "--terms-of-service", options.TermsOfService, "#/info/termsOfService");
         }
 
         var document = new OpenApiDocument
@@ -635,24 +645,24 @@ public sealed class OpenApiDocumentBuilder
         }
 
         // ── Step 6: PathBase ─────────────────────────────────────────────────
-        var pathBase = PathBaseExtractor.ExtractPathBase(sourceContext);
+        var pathBase = PathBaseExtractor.ExtractPathBase(sourceContext, diagnostics.Report);
         if (!string.IsNullOrEmpty(pathBase))
             ApplyPathBase(document, pathBase, options.PathBaseEmission);
 
         // ── Step 7: Security schemes ─────────────────────────────────────────
         ApplySecuritySchemes(document, securityResult);
-        OmitUndeclaredSecuritySchemes(document);
+        OmitUndeclaredSecuritySchemes(document, diagnostics);
 
         // ── Step 8: ProblemDetails ──────────────────────────────────────────
         if (ProblemDetailsDetector.IsRegistered(sourceContext))
             ApplyProblemDetails(document);
 
         // ── Step 9: Global response headers ─────────────────────────────────
-        var responseHeaders = ResponseHeaderExtractor.Extract(sourceContext);
+        var responseHeaders = ResponseHeaderExtractor.Extract(sourceContext, diagnostics.Report);
         ApplyGlobalResponseHeaders(document, responseHeaders);
 
         // ── Step 10: Global media types ──────────────────────────────────────
-        var globalMediaTypes = GlobalMediaTypesExtractor.Extract(sourceContext);
+        var globalMediaTypes = GlobalMediaTypesExtractor.Extract(sourceContext, diagnostics.Report);
         ApplyGlobalMediaTypes(builtOperations, globalMediaTypes);
 
         // ── Step 11: Document-level tags metadata (descriptions + externalDocs) ─
@@ -661,6 +671,16 @@ public sealed class OpenApiDocumentBuilder
 
         return new BuildCoreResult(document, controllers, actions, schemaGenerator, sourceContext);
     }
+
+    /// <summary>Reports a document-metadata option whose value is not an absolute URI and is ignored.</summary>
+    private static void WarnInvalidInfoUri(DiagnosticBag diagnostics, string flag, string value, string location)
+        => diagnostics.Report(new ExtractionDiagnostic
+        {
+            Code     = ExtractionDiagnosticCodes.InfoInvalidUri,
+            Message  = $"{flag} '{value}' is not a valid absolute URI and will be ignored.",
+            Location = location,
+            Subjects = [value],
+        });
 
     // =========================================================================
     // XML path list builder
@@ -675,7 +695,8 @@ public sealed class OpenApiDocumentBuilder
     /// </list>
     /// First-wins merging in <see cref="XmlDocParser"/> ensures project docs override framework docs.
     /// </summary>
-    private static IReadOnlyList<string> BuildXmlPathList(OpenApiDocumentOptions options, AssemblyLoader loader)
+    private static IReadOnlyList<string> BuildXmlPathList(
+        OpenApiDocumentOptions options, AssemblyLoader loader, DiagnosticBag diagnostics)
     {
         var paths = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -710,12 +731,16 @@ public sealed class OpenApiDocumentBuilder
         var missingHints = loader.MissingRefPackHints;
         if (missingHints.Count > 0 && loader.RefPackXmlCount == 0)
         {
-            Console.Error.WriteLine(
-                "Warning: framework XML documentation not found in SDK ref packs at: " +
-                string.Join(", ", missingHints) +
-                "; descriptions for framework types (e.g. ProblemDetails) will be empty. " +
-                "Ref packs ship with the .NET SDK — install the SDK rather than only the runtime " +
-                "(e.g. base your Docker image on mcr.microsoft.com/dotnet/sdk:N.0 instead of aspnet:N.0).");
+            diagnostics.Report(new ExtractionDiagnostic
+            {
+                Code     = ExtractionDiagnosticCodes.FrameworkXmlDocsMissing,
+                Message  = "framework XML documentation not found in SDK ref packs at: " +
+                           string.Join(", ", missingHints) +
+                           "; descriptions for framework types (e.g. ProblemDetails) will be empty. " +
+                           "Ref packs ship with the .NET SDK — install the SDK rather than only the runtime " +
+                           "(e.g. base your Docker image on mcr.microsoft.com/dotnet/sdk:N.0 instead of aspnet:N.0).",
+                Subjects = missingHints.ToList(),
+            });
         }
 
         return paths;
@@ -1229,11 +1254,11 @@ public sealed class OpenApiDocumentBuilder
     /// Must run after <see cref="ApplySecuritySchemes"/>, path exclusion and path base, so that
     /// declared schemes are final and warnings name the paths written to the spec.
     /// </remarks>
-    private static void OmitUndeclaredSecuritySchemes(OpenApiDocument document)
+    private static void OmitUndeclaredSecuritySchemes(OpenApiDocument document, DiagnosticBag diagnostics)
     {
         var declared = document.Components?.SecuritySchemes;
 
-        document.Security = OmitUndeclared(document.Security, declared, "document-level");
+        document.Security = OmitUndeclared(document.Security, declared, "document-level", "#/security", diagnostics);
 
         foreach (var (path, pathItemInterface) in document.Paths)
         {
@@ -1242,8 +1267,9 @@ public sealed class OpenApiDocumentBuilder
 
             foreach (var (method, operation) in pathItem.Operations)
             {
+                var operationKey = $"{method.Method.ToUpperInvariant()} {path}";
                 operation.Security = OmitUndeclared(
-                    operation.Security, declared, $"{method.Method.ToUpperInvariant()} {path}");
+                    operation.Security, declared, operationKey, operationKey, diagnostics);
             }
         }
     }
@@ -1256,7 +1282,9 @@ public sealed class OpenApiDocumentBuilder
     private static IList<OpenApiSecurityRequirement>? OmitUndeclared(
         IList<OpenApiSecurityRequirement>? requirements,
         IDictionary<string, IOpenApiSecurityScheme>? declared,
-        string location)
+        string location,
+        string diagnosticLocation,
+        DiagnosticBag diagnostics)
     {
         if (requirements is not { Count: > 0 })
             return requirements;
@@ -1272,9 +1300,14 @@ public sealed class OpenApiDocumentBuilder
 
             foreach (var reference in undeclared)
             {
-                Console.Error.WriteLine(
-                    $"Warning: security requirement references undeclared scheme '{reference.Reference.Id}' " +
-                    $"({location}) — omitted; declare it with AddSecurityDefinition.");
+                diagnostics.Report(new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme,
+                    Message  = $"security requirement references undeclared scheme '{reference.Reference.Id}' " +
+                               $"({location}) — omitted; declare it with AddSecurityDefinition.",
+                    Location = diagnosticLocation,
+                    Subjects = reference.Reference.Id is { } schemeName ? [schemeName] : [],
+                });
                 requirement.Remove(reference);
             }
 

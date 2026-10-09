@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.OpenApi;
@@ -72,6 +73,19 @@ public static class SecuritySchemeExtractor
     /// are ignored with a warning to <c>Console.Error</c>.
     /// </remarks>
     public static SecuritySchemeExtractionResult Extract(SourceAnalysisContext context)
+        => Extract(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Same as <see cref="Extract(SourceAnalysisContext)"/>, but delivers warnings to
+    /// <paramref name="onDiagnostic"/> instead of printing them to <c>Console.Error</c>.
+    /// </summary>
+    /// <param name="context">The source analysis context of the entry point.</param>
+    /// <param name="onDiagnostic">
+    /// Receives each warning. When <see langword="null"/>, warnings are printed to
+    /// <c>Console.Error</c>, as <see cref="Extract(SourceAnalysisContext)"/> does.
+    /// </param>
+    public static SecuritySchemeExtractionResult Extract(
+        SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode == null)
             return new SecuritySchemeExtractionResult();
@@ -105,8 +119,7 @@ public static class SecuritySchemeExtractor
                 Description = "JWT Bearer authentication",
             }))
             {
-                Console.Error.WriteLine(
-                    $"Warning: Duplicate security scheme '{schemeName}' ignored (first registration wins).");
+                WarnDuplicateScheme(onDiagnostic, schemeName);
             }
         }
 
@@ -117,8 +130,11 @@ public static class SecuritySchemeExtractor
                 invocation, 0, context.CompilationResult?.Compilation);
             if (string.IsNullOrWhiteSpace(name))
             {
-                Console.Error.WriteLine(
-                    "Warning: AddSecurityDefinition call with non-literal name — skipped.");
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code    = ExtractionDiagnosticCodes.SecurityDefinitionNonLiteralName,
+                    Message = "AddSecurityDefinition call with non-literal name — skipped.",
+                });
                 continue;
             }
 
@@ -127,8 +143,7 @@ public static class SecuritySchemeExtractor
             {
                 if (!schemes.TryAdd(name!, scheme))
                 {
-                    Console.Error.WriteLine(
-                        $"Warning: Duplicate security scheme '{name}' ignored (first registration wins).");
+                    WarnDuplicateScheme(onDiagnostic, name!);
                 }
             }
         }
@@ -139,7 +154,7 @@ public static class SecuritySchemeExtractor
             // One call = one Security Requirement Object: its names are combined (AND),
             // separate calls are alternatives (OR).
             var names = TryExtractRequirementSchemeNames(
-                invocation, context.CompilationResult?.Compilation);
+                invocation, context.CompilationResult?.Compilation, onDiagnostic);
             if (names.Count > 0)
                 globalRequirements.Add(names);
         }
@@ -301,7 +316,8 @@ public static class SecuritySchemeExtractor
     /// </param>
     private static IReadOnlyList<string> TryExtractRequirementSchemeNames(
         InvocationExpressionSyntax invocation,
-        CSharpCompilation? compilation)
+        CSharpCompilation? compilation,
+        Action<ExtractionDiagnostic>? onDiagnostic)
     {
         // We look for scheme names (string literals or in-project string constants)
         // used as keys inside the object initializer.
@@ -347,7 +363,7 @@ public static class SecuritySchemeExtractor
 
             var resolvedName = InvocationMatcher.GetStringValue(referenceIdArg, compilation);
             if (resolvedName == null)
-                WarnNonLiteralRequirementSchemeName();
+                WarnNonLiteralRequirementSchemeName(onDiagnostic);
             else
                 AddName(resolvedName);
         }
@@ -393,7 +409,7 @@ public static class SecuritySchemeExtractor
             // cannot be resolved statically and is reported as skipped.
             var idValue = InvocationMatcher.GetStringValue(idExpression, compilation);
             if (idValue == null)
-                WarnNonLiteralRequirementSchemeName();
+                WarnNonLiteralRequirementSchemeName(onDiagnostic);
             else
                 AddName(idValue);
         }
@@ -417,7 +433,19 @@ public static class SecuritySchemeExtractor
         return first != null && first.NameColon == null ? first.Expression : null;
     }
 
-    private static void WarnNonLiteralRequirementSchemeName()
-        => Console.Error.WriteLine(
-            "Warning: AddSecurityRequirement call with non-literal scheme name — skipped.");
+    private static void WarnNonLiteralRequirementSchemeName(Action<ExtractionDiagnostic>? onDiagnostic)
+        => DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+        {
+            Code    = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScheme,
+            Message = "AddSecurityRequirement call with non-literal scheme name — skipped.",
+        });
+
+    private static void WarnDuplicateScheme(Action<ExtractionDiagnostic>? onDiagnostic, string schemeName)
+        => DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+        {
+            Code     = ExtractionDiagnosticCodes.SecurityDuplicateScheme,
+            Message  = $"Duplicate security scheme '{schemeName}' ignored (first registration wins).",
+            Location = Validation.JsonPointerHelper.ForSecurityScheme(schemeName),
+            Subjects = [schemeName],
+        });
 }

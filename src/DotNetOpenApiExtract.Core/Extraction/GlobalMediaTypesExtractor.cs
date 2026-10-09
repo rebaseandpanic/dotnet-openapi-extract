@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 
@@ -30,6 +31,19 @@ public static class GlobalMediaTypesExtractor
     /// global filter registrations.
     /// </returns>
     public static GlobalMediaTypesExtractionResult Extract(SourceAnalysisContext context)
+        => Extract(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Same as <see cref="Extract(SourceAnalysisContext)"/>, but delivers warnings to
+    /// <paramref name="onDiagnostic"/> instead of printing them to <c>Console.Error</c>.
+    /// </summary>
+    /// <param name="context">The source analysis context of the entry point.</param>
+    /// <param name="onDiagnostic">
+    /// Receives each warning. When <see langword="null"/>, warnings are printed to
+    /// <c>Console.Error</c>, as <see cref="Extract(SourceAnalysisContext)"/> does.
+    /// </param>
+    public static GlobalMediaTypesExtractionResult Extract(
+        SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode is null)
             return GlobalMediaTypesExtractionResult.Empty;
@@ -44,7 +58,7 @@ public static class GlobalMediaTypesExtractor
             {
                 // The single argument must be a lambda: o => o.Filters.Add(new ProducesAttribute(...))
                 // We look for all Filters.Add(...) calls nested inside this invocation.
-                CollectFiltersFromInvocation(invocation, producesTypes, consumesTypes);
+                CollectFiltersFromInvocation(invocation, producesTypes, consumesTypes, onDiagnostic);
             }
         }
 
@@ -67,7 +81,8 @@ public static class GlobalMediaTypesExtractor
     private static void CollectFiltersFromInvocation(
         InvocationExpressionSyntax addControllersCall,
         List<string> producesTypes,
-        List<string> consumesTypes)
+        List<string> consumesTypes,
+        Action<ExtractionDiagnostic>? onDiagnostic)
     {
         // Walk all descendant invocations looking for: <receiver>.Add(<object creation>)
         foreach (var inner in addControllersCall.DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -103,7 +118,7 @@ public static class GlobalMediaTypesExtractor
             if (!isProduces && !isConsumes)
                 continue;
 
-            var contentTypes = ExtractStringArguments(objCreation);
+            var contentTypes = ExtractStringArguments(objCreation, onDiagnostic);
             if (isProduces)
                 producesTypes.AddRange(contentTypes);
             else
@@ -131,7 +146,8 @@ public static class GlobalMediaTypesExtractor
     /// additional <c>params</c> arguments are all collected. Non-literal arguments produce
     /// a warning and are skipped.
     /// </summary>
-    private static IEnumerable<string> ExtractStringArguments(ObjectCreationExpressionSyntax objCreation)
+    private static IEnumerable<string> ExtractStringArguments(
+        ObjectCreationExpressionSyntax objCreation, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (objCreation.ArgumentList is null)
             yield break;
@@ -146,9 +162,14 @@ public static class GlobalMediaTypesExtractor
             else
             {
                 // Non-literal argument — cannot resolve statically.
-                Console.Error.WriteLine(
-                    $"Warning: Non-literal content-type argument in {GetLastIdentifier(objCreation.Type) ?? "attribute"} constructor. " +
-                    "Global media type entry will be skipped.");
+                var attributeName = GetLastIdentifier(objCreation.Type) ?? "attribute";
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.MediaTypesNonLiteralContentType,
+                    Message  = $"Non-literal content-type argument in {attributeName} constructor. " +
+                               "Global media type entry will be skipped.",
+                    Subjects = [attributeName],
+                });
             }
         }
     }

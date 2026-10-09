@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.OpenApi;
 using Microsoft.OpenApi.YamlReader;
 using SharpYaml.Serialization;
@@ -55,6 +56,21 @@ internal static class VersionedDocumentHarness
     /// <summary>Builds the document through the public Core entry point.</summary>
     public static OpenApiDocument Build(OpenApiDocumentOptions options) =>
         OpenApiDocumentBuilder.Build(options);
+
+    /// <summary>
+    /// Builds the document with a subscriber attached and returns every diagnostic delivered
+    /// during the build, in delivery order. <paramref name="createOptions"/> receives the
+    /// subscriber to put into <see cref="OpenApiDocumentOptions.OnDiagnostic"/>.
+    /// </summary>
+    public static (OpenApiDocument Document, IReadOnlyList<ExtractionDiagnostic> Diagnostics) BuildCollecting(
+        Func<Action<ExtractionDiagnostic>, OpenApiDocumentOptions> createOptions)
+    {
+        ArgumentNullException.ThrowIfNull(createOptions);
+
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var document = Build(createOptions(diagnostics.Add));
+        return (document, diagnostics);
+    }
 
     /// <summary>
     /// Serializes <paramref name="document"/> into <paramref name="version"/> and

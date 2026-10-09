@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -64,6 +65,19 @@ public static class JsonOptionsExtractor
     /// Returns an empty result when the context is unavailable or no options are registered.
     /// </summary>
     public static JsonOptionsExtractionResult Extract(SourceAnalysisContext context)
+        => Extract(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Same as <see cref="Extract(SourceAnalysisContext)"/>, but delivers warnings to
+    /// <paramref name="onDiagnostic"/> instead of printing them to <c>Console.Error</c>.
+    /// </summary>
+    /// <param name="context">The source analysis context of the entry point.</param>
+    /// <param name="onDiagnostic">
+    /// Receives each warning. When <see langword="null"/>, warnings are printed to
+    /// <c>Console.Error</c>, as <see cref="Extract(SourceAnalysisContext)"/> does.
+    /// </param>
+    public static JsonOptionsExtractionResult Extract(
+        SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode == null)
             return new JsonOptionsExtractionResult();
@@ -87,7 +101,8 @@ public static class JsonOptionsExtractor
                 ref defaultIgnoreCondition,
                 ref numberHandling,
                 converterTypeNames,
-                context);
+                context,
+                onDiagnostic);
         }
 
         // ── 2. AddJsonOptions ──────────────────────────────────────────────────
@@ -103,7 +118,8 @@ public static class JsonOptionsExtractor
                 ref defaultIgnoreCondition,
                 ref numberHandling,
                 converterTypeNames,
-                context);
+                context,
+                onDiagnostic);
         }
 
         return new JsonOptionsExtractionResult
@@ -158,7 +174,8 @@ public static class JsonOptionsExtractor
         ref JsonIgnoreCondition? defaultIgnoreCondition,
         ref JsonNumberHandling? numberHandling,
         List<string> converterTypeNames,
-        SourceAnalysisContext context)
+        SourceAnalysisContext context,
+        Action<ExtractionDiagnostic>? onDiagnostic)
     {
         // Scan all assignment expressions in the body.
         foreach (var assignment in body.DescendantNodes().OfType<AssignmentExpressionSyntax>())
@@ -182,7 +199,7 @@ public static class JsonOptionsExtractor
                     if (namingPolicyValue.HasValue)
                         propertyNamingPolicy = namingPolicyValue.Value;
                     else
-                        WarnNonLiteral("PropertyNamingPolicy", assignment.Right);
+                        WarnNonLiteral(onDiagnostic, "PropertyNamingPolicy", assignment.Right);
                     break;
 
                 case "DictionaryKeyPolicy":
@@ -190,7 +207,7 @@ public static class JsonOptionsExtractor
                     if (dictPolicyValue.HasValue)
                         dictionaryKeyPolicy = dictPolicyValue.Value;
                     else
-                        WarnNonLiteral("DictionaryKeyPolicy", assignment.Right);
+                        WarnNonLiteral(onDiagnostic, "DictionaryKeyPolicy", assignment.Right);
                     break;
 
                 case "DefaultIgnoreCondition":
@@ -198,7 +215,7 @@ public static class JsonOptionsExtractor
                     if (ignoreValue.HasValue)
                         defaultIgnoreCondition = ignoreValue.Value;
                     else
-                        WarnNonLiteral("DefaultIgnoreCondition", assignment.Right);
+                        WarnNonLiteral(onDiagnostic, "DefaultIgnoreCondition", assignment.Right);
                     break;
 
                 case "NumberHandling":
@@ -206,7 +223,7 @@ public static class JsonOptionsExtractor
                     if (numberValue.HasValue)
                         numberHandling = numberValue.Value;
                     else
-                        WarnNonLiteral("NumberHandling", assignment.Right);
+                        WarnNonLiteral(onDiagnostic, "NumberHandling", assignment.Right);
                     break;
             }
         }
@@ -248,8 +265,11 @@ public static class JsonOptionsExtractor
             else if (arg is ImplicitObjectCreationExpressionSyntax)
             {
                 // new() — cannot determine type without semantic model
-                Console.Error.WriteLine(
-                    "Warning: JsonOptions.Converters.Add(new()) — cannot determine converter type statically, skipped.");
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code    = ExtractionDiagnosticCodes.JsonOptionsUntypedConverter,
+                    Message = "JsonOptions.Converters.Add(new()) — cannot determine converter type statically, skipped.",
+                });
                 continue;
             }
 
@@ -420,9 +440,14 @@ public static class JsonOptionsExtractor
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static void WarnNonLiteral(string propName, ExpressionSyntax expr)
+    private static void WarnNonLiteral(
+        Action<ExtractionDiagnostic>? onDiagnostic, string propName, ExpressionSyntax expr)
     {
-        Console.Error.WriteLine(
-            $"Warning: JsonOptions.{propName} = {expr} — non-literal assignment cannot be resolved statically, skipped.");
+        DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+        {
+            Code     = ExtractionDiagnosticCodes.JsonOptionsNonLiteralSetting,
+            Message  = $"JsonOptions.{propName} = {expr} — non-literal assignment cannot be resolved statically, skipped.",
+            Subjects = [propName],
+        });
     }
 }

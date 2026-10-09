@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Diagnostics;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 
 namespace DotNetOpenApiExtract.Core.Extraction;
@@ -24,6 +25,19 @@ public static class PathBaseExtractor
     /// <see langword="null"/> when no unambiguous literal <c>UsePathBase</c> call is found.
     /// </returns>
     public static string? ExtractPathBase(SourceAnalysisContext context)
+        => ExtractPathBase(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Same as <see cref="ExtractPathBase(SourceAnalysisContext)"/>, but delivers warnings to
+    /// <paramref name="onDiagnostic"/> instead of printing them to <c>Console.Error</c>.
+    /// </summary>
+    /// <param name="context">The source analysis context of the entry point.</param>
+    /// <param name="onDiagnostic">
+    /// Receives each warning. When <see langword="null"/>, warnings are printed to
+    /// <c>Console.Error</c>, as <see cref="ExtractPathBase(SourceAnalysisContext)"/> does.
+    /// </param>
+    public static string? ExtractPathBase(
+        SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode is null)
             return null;
@@ -37,9 +51,11 @@ public static class PathBaseExtractor
 
         if (invocations.Count > 1)
         {
-            Console.Error.WriteLine(
-                $"Warning: Found {invocations.Count} UsePathBase() calls in the entry point. " +
-                "Using the first one.");
+            DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+            {
+                Code    = ExtractionDiagnosticCodes.PathBaseMultipleCalls,
+                Message = $"Found {invocations.Count} UsePathBase() calls in the entry point. Using the first one.",
+            });
         }
 
         foreach (var invocation in invocations)
@@ -49,8 +65,11 @@ public static class PathBaseExtractor
             if (raw is null)
             {
                 // Non-literal argument (variable, config access, etc.) — cannot resolve statically.
-                Console.Error.WriteLine(
-                    "Warning: UsePathBase() argument is not a string literal. Path base will not be emitted.");
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code    = ExtractionDiagnosticCodes.PathBaseNonLiteral,
+                    Message = "UsePathBase() argument is not a string literal. Path base will not be emitted.",
+                });
                 return null;
             }
 

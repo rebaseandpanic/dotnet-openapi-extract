@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Versioning;
+using DotNetOpenApiExtract.Core.Diagnostics;
 using Microsoft.OpenApi;
 
 namespace DotNetOpenApiExtract.Core.Schema;
@@ -26,7 +27,7 @@ public sealed class SchemaGenerator
     private readonly HashSet<string> _generating = new(StringComparer.Ordinal); // cycle detection
     private readonly SchemaOptions _options;
     private readonly DocumentationResolver? _docResolver;
-    private readonly HashSet<string> _warnedConverters = new(StringComparer.Ordinal); // dedup unknown converter warnings
+    private readonly DiagnosticBag _diagnostics; // per-instance deduplication of warnings
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
     // GetCustomAttributesData() scans on the same type when processing its properties.
@@ -129,6 +130,7 @@ public sealed class SchemaGenerator
     {
         _options = options ?? new SchemaOptions();
         TargetVersion.EnsureSupported(_options.OpenApiVersion, nameof(SchemaOptions.OpenApiVersion));
+        _diagnostics = new DiagnosticBag(_options.OnDiagnostic);
         _docResolver = docResolver;
     }
 
@@ -504,10 +506,15 @@ public sealed class SchemaGenerator
 
         if (hint == null)
         {
-            // Emit a single warning per unique unknown converter to avoid log spam.
-            if (_warnedConverters.Add(converterFullName))
-                Console.Error.WriteLine(
-                    $"[DotNetOpenApiExtract] Unknown [JsonConverter]: {converterFullName} — schema unchanged.");
+            // One warning per unique unknown converter per generator instance (the bag deduplicates).
+            var message = $"Unknown [JsonConverter]: {converterFullName} — schema unchanged.";
+            _diagnostics.Report(new ExtractionDiagnostic
+            {
+                Code       = ExtractionDiagnosticCodes.SchemaUnknownJsonConverter,
+                Message    = message,
+                Subjects   = [converterFullName],
+                StderrLine = "[DotNetOpenApiExtract] " + message,
+            });
             return null;
         }
 
@@ -1473,4 +1480,11 @@ public sealed class SchemaOptions
     /// <see cref="OpenApiConfigurationException"/>.
     /// </summary>
     public OpenApiSpecVersion OpenApiVersion { get; init; } = TargetVersion.Default;
+
+    /// <summary>
+    /// Receives the warnings produced by the generator, each delivered once per generator
+    /// instance. When <see langword="null"/> (default), warnings are printed to
+    /// <c>Console.Error</c> as before.
+    /// </summary>
+    public Action<ExtractionDiagnostic>? OnDiagnostic { get; init; }
 }

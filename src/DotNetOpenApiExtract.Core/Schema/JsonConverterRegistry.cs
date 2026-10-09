@@ -16,7 +16,8 @@ namespace DotNetOpenApiExtract.Core.Schema;
 /// </list>
 /// Only converters whose effect on serialization can be reliably inferred from their type
 /// alone are included. Unknown converters leave schema generation unchanged; a warning is
-/// emitted via <c>Console.Error</c> (deduplicated per <see cref="SchemaGenerator"/> instance).
+/// delivered through <see cref="SchemaOptions.OnDiagnostic"/>, or printed to <c>Console.Error</c>
+/// without a subscriber (deduplicated per <see cref="SchemaGenerator"/> instance).
 /// </remarks>
 public static class JsonConverterRegistry
 {
