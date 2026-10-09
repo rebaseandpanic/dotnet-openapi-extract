@@ -150,3 +150,34 @@ public sealed class Branch : TreeNode
     /// <summary>Child nodes.</summary>
     public List<TreeNode> Children { get; set; } = [];
 }
+
+/// <summary>A fruit; a concrete base whose unknown CLR types fall back to an ancestor when written.</summary>
+[JsonPolymorphic(UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor)]
+[JsonDerivedType(typeof(Apple), "apple")]
+public class Fruit
+{
+    /// <summary>Weight in grams.</summary>
+    public int Weight { get; set; }
+}
+
+/// <summary>An apple.</summary>
+public sealed class Apple : Fruit
+{
+    /// <summary>Apple variety.</summary>
+    public string Variety { get; set; } = string.Empty;
+}
+
+/// <summary>A coupon; a concrete base reachable only from an excluded path.</summary>
+[JsonDerivedType(typeof(PercentCoupon), "percent")]
+public class Coupon
+{
+    /// <summary>Coupon code.</summary>
+    public string Code { get; set; } = string.Empty;
+}
+
+/// <summary>A percentage coupon.</summary>
+public sealed class PercentCoupon : Coupon
+{
+    /// <summary>Discount percentage.</summary>
+    public int Percent { get; set; }
+}

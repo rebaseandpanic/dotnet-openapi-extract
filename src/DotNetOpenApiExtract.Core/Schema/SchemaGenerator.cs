@@ -804,20 +804,17 @@ public sealed class SchemaGenerator
 
             var exclusive = withoutValue.Count == 0;
             var isConcrete = !baseType.IsAbstract && !baseType.IsInterface;
+            OpenApiSchemaReference? baseBranch = null;
             if (isConcrete)
-                alternatives.Add(GenerateBaseBranch(polymorphism, unionId, exclusive ? mappedValues : null));
+            {
+                baseBranch = (OpenApiSchemaReference)GenerateBaseBranch(polymorphism, unionId, exclusive ? mappedValues : null);
+                alternatives.Add(baseBranch);
+            }
 
             if (exclusive)
             {
                 union.OneOf = alternatives;
-                if (!isConcrete)
-                {
-                    union.Discriminator = new OpenApiDiscriminator
-                    {
-                        PropertyName = polymorphism.PropertyName,
-                        Mapping      = mapping,
-                    };
-                }
+                ApplyDiscriminator(union, unionId, polymorphism, mapping, baseBranch);
             }
             else
             {
@@ -854,6 +851,50 @@ public sealed class SchemaGenerator
         {
             _generating.Remove(unionId);
         }
+    }
+
+    /// <summary>
+    /// The <c>discriminator</c> object of an exclusive union, written only when every alternative
+    /// has a value, or — in 3.2 — when the only one without a value is the base branch, which
+    /// <c>defaultMapping</c> then names. For a concrete base in 3.0/3.1 the discriminator property
+    /// is optional, which those versions cannot express: no object, one warning on the union.
+    /// </summary>
+    private void ApplyDiscriminator(
+        OpenApiSchema union,
+        string unionId,
+        PolymorphismInfo polymorphism,
+        Dictionary<string, OpenApiSchemaReference> mapping,
+        OpenApiSchemaReference? baseBranch)
+    {
+        if (baseBranch == null)
+        {
+            union.Discriminator = new OpenApiDiscriminator { PropertyName = polymorphism.PropertyName, Mapping = mapping };
+            return;
+        }
+
+        if (_options.OpenApiVersion == OpenApiSpecVersion.OpenApi3_2)
+        {
+            union.Discriminator = new OpenApiDiscriminator
+            {
+                PropertyName   = polymorphism.PropertyName,
+                Mapping        = mapping,
+                DefaultMapping = new OpenApiSchemaReference(baseBranch.Reference.Id!, null),
+            };
+            return;
+        }
+
+        RecordLoss(new PendingLoss
+        {
+            Class           = LossClass.Degradation,
+            Code            = ExtractionDiagnosticCodes.PolymorphismDiscriminatorNotExpressible,
+            Anchor          = new LossAnchor.Component(unionId),
+            Message         = $"the discriminator of concrete base {polymorphism.BaseType.FullName} is optional on the wire, " +
+                              "which needs discriminator.defaultMapping (requires 3.2): written as oneOf without a discriminator object.",
+            Feature         = "schema.discriminator",
+            Action          = DiagnosticAction.Omitted,
+            RequiredVersion = OpenApiSpecVersion.OpenApi3_2,
+            Subjects        = [polymorphism.BaseType.FullName ?? polymorphism.BaseType.Name],
+        });
     }
 
     /// <summary>

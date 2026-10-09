@@ -87,6 +87,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string PolymorphismSourceDisagreement = "polymorphism.source-disagreement";
 
+    /// <summary>
+    /// For a 3.0/3.1 target, the union of a concrete polymorphic base has no <c>discriminator</c> object:
+    /// its discriminator property is optional on the wire, which needs <c>defaultMapping</c> (3.2).
+    /// One per union. Location: the union component. Subjects: the base type.
+    /// </summary>
+    public const string PolymorphismDiscriminatorNotExpressible = "polymorphism.discriminator-not-expressible";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

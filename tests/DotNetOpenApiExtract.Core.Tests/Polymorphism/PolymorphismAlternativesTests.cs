@@ -84,12 +84,12 @@ public class PolymorphismAlternativesTests(PolymorphismAlternativesFixture fixtu
 
     [Theory]
     [MemberData(nameof(Versions))]
-    public void ConcreteBase_OneOfVariantsAndBaseBranch_NoDiscriminatorObjectYet(OpenApiSpecVersion version)
+    public void ConcreteBase_OneOfVariantsAndBaseBranch(OpenApiSpecVersion version)
     {
         var schemas = Schemas(version);
         var union = schemas[Component(version, "/polymorphism-alt/pet")]!;
 
-        union.AsObject().ContainsKey("discriminator").Should().BeFalse();
+        // The discriminator object (3.2 only, with defaultMapping) is covered by DiscriminatorVersionTests.
         var alternatives = Alternatives(union, "oneOf");
         alternatives.Should().HaveCount(3);
 

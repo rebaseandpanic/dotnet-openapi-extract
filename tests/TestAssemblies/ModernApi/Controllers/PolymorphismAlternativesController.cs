@@ -36,6 +36,10 @@ public class PolymorphismAlternativesController : ControllerBase
     [HttpGet("bird")]
     public ActionResult<Bird> GetBird() => throw new NotSupportedException();
 
+    /// <summary>A fruit (concrete base with UnknownDerivedTypeHandling).</summary>
+    [HttpGet("fruit")]
+    public ActionResult<Fruit> GetFruit() => throw new NotSupportedException();
+
     /// <summary>A tree node (recursive hierarchy).</summary>
     [HttpGet("tree")]
     public ActionResult<TreeNode> GetTree() => throw new NotSupportedException();
@@ -49,6 +53,10 @@ public class ExcludedPolymorphismController : ControllerBase
     /// <summary>A message (a derived type without a value).</summary>
     [HttpGet("message")]
     public ActionResult<Message> GetMessage() => throw new NotSupportedException();
+
+    /// <summary>A coupon (concrete base, only on this excluded path).</summary>
+    [HttpGet("coupon")]
+    public ActionResult<Coupon> GetCoupon() => throw new NotSupportedException();
 
     /// <summary>A ticket (STJ and Swashbuckle disagree).</summary>
     [HttpGet("ticket")]
