@@ -1093,8 +1093,10 @@ public sealed class SchemaGenerator
     /// <c>ApiResponse&lt;List&lt;UserDto&gt;&gt;</c> → <c>UserDtoListApiResponse</c>,
     /// <c>PaginatedResult&lt;UserDto, PaginationMeta&gt;</c> → <c>UserDtoAndPaginationMetaPaginatedResult</c>.
     /// With <paramref name="fullBaseName"/> the base name is the generic definition's full name
-    /// (<c>.</c> and <c>+</c> replaced by <c>_</c>). Generic arguments contribute their name
-    /// without reserving it: only the type that becomes a component reserves its id.
+    /// (<c>.</c> and <c>+</c> replaced by <c>_</c>). A non-generic argument contributes its own id,
+    /// which <see cref="ReserveNonGenericId"/> reserves for it (as before: the first type to ask
+    /// keeps the short name). A generic argument contributes its candidate name without reserving
+    /// it, because only a type that becomes a component may hold an id.
     /// </summary>
     private string GenericIdCandidate(Type type, bool fullBaseName)
     {
