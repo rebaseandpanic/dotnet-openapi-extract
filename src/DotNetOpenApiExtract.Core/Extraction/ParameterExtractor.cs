@@ -34,8 +34,14 @@ public sealed class ActionParameterInfo
     /// <summary>Whether the parameter is required.</summary>
     public required bool IsRequired { get; init; }
 
-    /// <summary>Default value, if the parameter has one.</summary>
+    /// <summary>
+    /// Default value, if the parameter has one: the <c>[DefaultValue]</c> literal, the value of
+    /// <c>[DefaultValue(Type, string)]</c> converted to the type (invariant culture), or the C# default.
+    /// </summary>
     public object? DefaultValue { get; init; }
+
+    /// <summary>The <c>[DefaultValue]</c> attribute of the parameter, if any.</summary>
+    internal CustomAttributeData? DefaultValueAttribute { get; init; }
 
     /// <summary>Description from [SwaggerRequestBody], [SwaggerParameter], or [Description] attribute, in that priority order.</summary>
     public string? Description { get; init; }
@@ -137,7 +143,7 @@ public static class ParameterExtractor
             object? defaultValue = null;
             var defaultValueAttr = AttributeHelper.GetAttribute(param, AttributeHelper.Names.DefaultValue);
             if (defaultValueAttr != null)
-                defaultValue = AttributeHelper.GetConstructorArgument<object>(defaultValueAttr, 0);
+                defaultValue = DefaultValueOf(defaultValueAttr);
             else if (param.HasDefaultValue)
                 defaultValue = param.RawDefaultValue;
 
@@ -151,6 +157,7 @@ public static class ParameterExtractor
                 Type = param.ParameterType,
                 IsRequired = isRequired,
                 DefaultValue = defaultValue,
+                DefaultValueAttribute = defaultValueAttr,
                 Description = description,
                 ReflectionParameter = param,
             });
@@ -497,5 +504,22 @@ public static class ParameterExtractor
             if (!string.IsNullOrEmpty(name))
                 target.Add(name);
         }
+    }
+
+    /// <summary>
+    /// The CLR value of a <c>[DefaultValue]</c>: the literal, or for <c>(Type, string)</c> the string
+    /// converted to the type in the invariant culture (<see langword="null"/> when it does not convert).
+    /// </summary>
+    private static object? DefaultValueOf(CustomAttributeData attribute)
+    {
+        if (attribute.ConstructorArguments is [{ Value: Type }, { Value: string }])
+        {
+            var converted = Schema.DefaultValueConverter.FromAttribute(attribute);
+            if (!converted.HasValue || converted.Value is not System.Text.Json.Nodes.JsonValue value)
+                return null;
+            return value.GetValue<object>();
+        }
+
+        return AttributeHelper.GetConstructorArgument<object>(attribute, 0);
     }
 }

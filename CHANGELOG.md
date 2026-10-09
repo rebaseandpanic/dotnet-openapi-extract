@@ -67,6 +67,8 @@ All notable changes to this project.
 - [BUGFIX] An `object` or `dynamic` property, which can hold any JSON value, is an unconstrained schema `{}` instead of `type: object` (also for `object` values of dictionaries).
 - [BUGFIX] Enums backed by `long` or `ulong` keep their values (`long.MaxValue`, `ulong.MaxValue`) instead of truncating them to `int`, and get the `type` / `format` of a property of their underlying type (`int64`).
 
+- [BUGFIX] `[DefaultValue(Type, string)]` (for example `[DefaultValue(typeof(decimal), "1.5")]`) wrote the type name (`"System.Decimal"`) as the default. The string is now converted to the type in the invariant culture and written with the schema's JSON type (`1.5`, `42`, `true`, a string for `Guid`), by one converter shared by DTO properties and action parameters; a value that does not convert gives a warning (code `schema.default-not-convertible`) and no `default`. Numeric literal defaults on properties (`[DefaultValue((byte)5)]`, …) are now numbers, as they already were on parameters.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.

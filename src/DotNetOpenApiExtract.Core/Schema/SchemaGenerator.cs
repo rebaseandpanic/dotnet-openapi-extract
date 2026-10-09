@@ -814,6 +814,9 @@ public sealed class SchemaGenerator
 
             propSchema = ApplyAllowedAndDeniedValues(propSchema, propAttrData, propInfo, serializedName, componentId);
 
+            if (propSchema is OpenApiSchema withDefault)
+                ApplyDefaultValue(withDefault, propAttrData, propInfo, serializedName, componentId);
+
             properties[serializedName] = propSchema;
 
             // Mark as required if annotated or non-nullable (NRT).
@@ -1365,26 +1368,6 @@ public sealed class SchemaGenerator
                 schema.Format = "phone";
         }
 
-        // [DefaultValue(value)]
-        var defaultVal = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DefaultValue);
-        if (defaultVal != null)
-        {
-            var value = AttributeHelper.GetConstructorArgument<object>(defaultVal, 0);
-            if (value != null)
-            {
-                schema.Default = value switch
-                {
-                    bool b   => JsonValue.Create(b),
-                    int i    => JsonValue.Create(i),
-                    long l   => JsonValue.Create(l),
-                    float f  => JsonValue.Create(f),
-                    double d => JsonValue.Create(d),
-                    string s => JsonValue.Create(s),
-                    _        => JsonValue.Create(value.ToString()),
-                };
-            }
-        }
-
         // [Obsolete] → deprecated: true
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
@@ -1571,6 +1554,40 @@ public sealed class SchemaGenerator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// <c>[DefaultValue]</c> on a property, through the converter shared with action parameters; a
+    /// value that does not convert to its type gives a warning and no <c>default</c>.
+    /// </summary>
+    private void ApplyDefaultValue(
+        OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string serializedName, string componentId)
+    {
+        var attribute = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DefaultValue);
+        if (attribute == null)
+            return;
+
+        var result = DefaultValueConverter.FromAttribute(attribute);
+        if (result.HasValue)
+        {
+            schema.Default = result.Value;
+            return;
+        }
+
+        if (result.Error == null)
+            return;
+
+        var typeName = property.DeclaringType?.FullName ?? componentId;
+        RecordLoss(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.SchemaDefaultNotConvertible,
+            Anchor   = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]),
+            Message  = $"[DefaultValue] on {typeName}.{property.Name}: {result.Error}; no default is written.",
+            Feature  = "schema.default",
+            Action   = DiagnosticAction.Omitted,
+            Subjects = [$"{typeName}.{property.Name}"],
+        });
     }
 
     /// <summary>

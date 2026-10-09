@@ -300,3 +300,35 @@ public class LooseValuesModel
     /// <summary>A ulong, for comparison.</summary>
     public ulong PlainUlong { get; set; }
 }
+
+/// <summary>Defaults declared with a type and a string.</summary>
+public class DefaultValuesModel
+{
+    /// <summary>A decimal default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(decimal), "1.5")]
+    public decimal Rate { get; set; } = 1.5m;
+
+    /// <summary>An integer default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(int), "42")]
+    public int Count { get; set; } = 42;
+
+    /// <summary>A boolean default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(bool), "true")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>A string default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(string), "hello")]
+    public string Greeting { get; set; } = "hello";
+
+    /// <summary>A GUID default.</summary>
+    [System.ComponentModel.DefaultValue(typeof(Guid), "0f8fad5b-d9cb-469f-a165-70867728950e")]
+    public Guid Id { get; set; }
+
+    /// <summary>A default that does not convert.</summary>
+    [System.ComponentModel.DefaultValue(typeof(int), "many")]
+    public int Broken { get; set; }
+
+    /// <summary>A literal default.</summary>
+    [System.ComponentModel.DefaultValue(5)]
+    public int Literal { get; set; } = 5;
+}

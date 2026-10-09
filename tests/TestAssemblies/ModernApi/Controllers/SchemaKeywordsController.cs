@@ -56,4 +56,20 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Unconstrained values and 64-bit enums.</summary>
     [HttpGet("loose-values")]
     public ActionResult<LooseValuesModel> LooseValues() => new LooseValuesModel();
+
+    /// <summary>Defaults on DTO properties.</summary>
+    [HttpGet("defaults")]
+    public ActionResult<DefaultValuesModel> Defaults() => new DefaultValuesModel();
+
+    /// <summary>Defaults on action parameters.</summary>
+    [HttpGet("parameter-defaults")]
+    public IActionResult ParameterDefaults(
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(decimal), "1.5")] decimal rate,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(int), "42")] int count,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(bool), "true")] bool enabled,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(string), "hello")] string greeting,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(Guid), "0f8fad5b-d9cb-469f-a165-70867728950e")] Guid id,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(int), "many")] int broken,
+        [FromQuery, System.ComponentModel.DefaultValue(5)] int literal,
+        [FromQuery] int page = 1) => Ok();
 }

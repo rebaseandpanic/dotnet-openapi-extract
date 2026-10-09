@@ -154,6 +154,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SchemaValueNotConvertible = "schema.value-not-convertible";
 
+    /// <summary>
+    /// The string of <c>[DefaultValue(Type, string)]</c> does not convert to the type (invariant culture):
+    /// no <c>default</c> is written. Location: the property, or the operation for a parameter.
+    /// Subjects: <c>Type.Property</c> or the parameter name.
+    /// </summary>
+    public const string SchemaDefaultNotConvertible = "schema.default-not-convertible";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
