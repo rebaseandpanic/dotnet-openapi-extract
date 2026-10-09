@@ -94,6 +94,10 @@ public class SchemaExampleTests(SchemaExampleFixture fixture) : IClassFixture<Sc
             data.Add(version, "spaced", "\"two  spaces\"");
             data.Add(version, "spacedObject", "{\"text\": \"a  b\"}");
             data.Add(version, "multiLine", "{\"a\": 1}");
+            data.Add(version, "padded", "\"  padded  \"");
+            data.Add(version, "blank", "\"   \"");
+            data.Add(version, "lines", "\"first line\\n  second line\"");
+            data.Add(version, "cdata", "\" <tag>  x \"");
         }
         return data;
     }

@@ -90,6 +90,25 @@ public class ExampleModel : ExampleBase
     /// </example>
     public Dictionary<string, int> MultiLine { get; set; } = [];
 
+    /// <summary>A string whose one-line example keeps its edge spaces.</summary>
+    /// <example>  padded  </example>
+    public string Padded { get; set; } = string.Empty;
+
+    /// <summary>A string whose example is spaces only.</summary>
+    /// <example>   </example>
+    public string Blank { get; set; } = string.Empty;
+
+    /// <summary>A string over several lines.</summary>
+    /// <example>
+    /// first line
+    ///   second line
+    /// </example>
+    public string Lines { get; set; } = string.Empty;
+
+    /// <summary>A string in CDATA with edge spaces.</summary>
+    /// <example><![CDATA[ <tag>  x ]]></example>
+    public string Cdata { get; set; } = string.Empty;
+
     /// <summary>A string enum.</summary>
     /// <example>ruby</example>
     public StjTint Tint { get; set; }

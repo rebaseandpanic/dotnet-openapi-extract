@@ -24,8 +24,8 @@ public sealed class XmlDocEntry
         new Dictionary<string, string>();
 
     /// <summary>
-    /// The text of the first &lt;example&gt;, if present: white space inside a line is kept, each line is
-    /// trimmed at its ends and blank leading and trailing lines are dropped.
+    /// The text of the first &lt;example&gt;, if present: a one-line example exactly as written; a
+    /// multi-line one without its opening and closing blank lines and its common indentation.
     /// </summary>
     public string? Example { get; init; }
 
@@ -84,7 +84,8 @@ public sealed class XmlDocParser
         XDocument doc;
         try
         {
-            doc = XDocument.Load(xmlPath);
+            // White space is kept: an <example> made only of spaces is data, not formatting.
+            doc = XDocument.Load(xmlPath, LoadOptions.PreserveWhitespace);
         }
         catch (Exception ex) when (ex is System.Xml.XmlException
                                      or IOException
@@ -312,10 +313,11 @@ public sealed class XmlDocParser
     }
 
     /// <summary>
-    /// The text of an <c>&lt;example&gt;</c> as data: white space inside a line is kept as written
-    /// (<c>"a  b"</c> stays two spaces); only the XML formatting is removed — each line is trimmed at
-    /// both ends (the indentation the compiler copies from <c>///</c> comments), blank lines before
-    /// and after the text are dropped, and lines are joined with <c>\n</c>.
+    /// The text of an <c>&lt;example&gt;</c> as data. A one-line example (CDATA included) is kept
+    /// exactly, edge spaces and a text of spaces only included. A multi-line example loses only its XML
+    /// formatting: the blank lines that open and close it and the indentation common to its lines;
+    /// everything else, inner and trailing white space included, is kept and lines are joined with
+    /// <c>\n</c>.
     /// </summary>
     private static string? GetExampleText(XElement? element)
     {
@@ -323,11 +325,20 @@ public sealed class XmlDocParser
 
         var sb = new System.Text.StringBuilder();
         AppendInnerText(element, sb);
-        var lines = sb.ToString().Replace("\r\n", "\n").Split('\n').Select(line => line.Trim()).ToList();
-        while (lines.Count > 0 && lines[0].Length == 0) lines.RemoveAt(0);
-        while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+        var text = sb.ToString().Replace("\r\n", "\n");
+        if (text.Length == 0) return null;
+        if (!text.Contains('\n')) return text;
 
-        return lines.Count == 0 ? null : string.Join("\n", lines);
+        var lines = text.Split('\n').ToList();
+        if (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[0])) lines.RemoveAt(0);
+        if (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1])) lines.RemoveAt(lines.Count - 1);
+        if (lines.Count == 0) return null;
+
+        var indent = lines.Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => l.Length - l.TrimStart().Length)
+            .DefaultIfEmpty(0)
+            .Min();
+        return string.Join("\n", lines.Select(l => l.Length >= indent ? l[indent..] : l.TrimStart()));
     }
 
     private static void AppendInnerText(XElement element, System.Text.StringBuilder sb)
