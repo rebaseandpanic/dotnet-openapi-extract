@@ -51,6 +51,15 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string RequestBodyOnGetHeadDelete = "request-body.get-head-delete";
 
+    /// <summary><c>[AcceptVerbs()]</c> lists no method; the action is not emitted. Subjects: the action (<c>Controller.Method</c>).</summary>
+    public const string DiscoveryEmptyAcceptVerbs = "discovery.empty-accept-verbs";
+
+    /// <summary>
+    /// An attribute derived from <c>HttpMethodAttribute</c> whose methods are not statically visible; the
+    /// action is not emitted (the method is never guessed from the attribute's name). Subjects: the attribute type.
+    /// </summary>
+    public const string DiscoveryUnknownHttpMethodAttribute = "discovery.unknown-http-method-attribute";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

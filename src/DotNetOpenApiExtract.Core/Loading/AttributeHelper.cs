@@ -139,6 +139,8 @@ public static class AttributeHelper
         public const string HttpPatch = "Microsoft.AspNetCore.Mvc.HttpPatchAttribute";
         public const string HttpHead = "Microsoft.AspNetCore.Mvc.HttpHeadAttribute";
         public const string HttpOptions = "Microsoft.AspNetCore.Mvc.HttpOptionsAttribute";
+        public const string AcceptVerbs = "Microsoft.AspNetCore.Mvc.AcceptVerbsAttribute";
+        public const string HttpMethodAttributeBase = "Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute";
         public const string ActionName = "Microsoft.AspNetCore.Mvc.ActionNameAttribute";
         public const string ExcludeFromDescription = "Microsoft.AspNetCore.Http.ExcludeFromDescriptionAttribute";
         public const string FromRoute = "Microsoft.AspNetCore.Mvc.FromRouteAttribute";

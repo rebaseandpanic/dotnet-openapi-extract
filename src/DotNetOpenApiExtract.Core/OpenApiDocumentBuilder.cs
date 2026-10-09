@@ -389,7 +389,7 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
         var controllers = ControllerDiscovery.DiscoverControllers(loader.Assembly);
-        var actions = ActionDiscovery.DiscoverActions(controllers);
+        var actions = ActionDiscovery.DiscoverActions(controllers, diagnostics.Report);
 
         // ── Step 2: Initialise document skeleton ────────────────────────────
 
@@ -515,18 +515,9 @@ public sealed class OpenApiDocumentBuilder
                 action.Controller.Type.Name,
                 action.Name);
 
-            // HttpMethod values in ActionInfo are already uppercase (from HttpAttributeMap).
-            var httpMethod = action.HttpMethod switch
-            {
-                "GET"     => HttpMethod.Get,
-                "POST"    => HttpMethod.Post,
-                "PUT"     => HttpMethod.Put,
-                "DELETE"  => HttpMethod.Delete,
-                "PATCH"   => HttpMethod.Patch,
-                "HEAD"    => HttpMethod.Head,
-                "OPTIONS" => HttpMethod.Options,
-                _         => HttpMethod.Get,
-            };
+            // Standard methods map to the shared HttpMethod instances; any other method from
+            // [AcceptVerbs] keeps its literal (the capitalization that goes into the request).
+            var httpMethod = HttpMethod.Parse(action.HttpMethod);
 
             // Get or create the path item for this path.
             if (!document.Paths.TryGetValue(path, out var pathItemInterface))
