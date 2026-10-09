@@ -160,7 +160,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - Global response headers from middleware (`app.Use(...)`, `UseMiddleware<T>`) — `Response.Headers.Append/Add/TryAdd` and indexer assignments
 - Global `[Consumes]` / `[Produces]` from MVC filter registrations
 - Request body media types from `[Consumes]` (action, then controller, then a global filter; default `application/json`); a form body uses its `[Consumes]` media type (e.g. `application/x-www-form-urlencoded`), default `multipart/form-data`
-- Document-level tags with descriptions + `externalDocs` from `c.AddTag(...)`
+- Document-level tags with descriptions, `externalDocs` and the OpenAPI 3.2 `summary` / `parent` / `kind` from `c.AddTag(...)`; `info.summary` and the license (`name`, `url`, `identifier`) from the `OpenApiInfo` of `SwaggerDoc(...)` / `AddOpenApi(...)` (options and CLI flags win field by field)
 - FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`)
 - In-project `const string` values via `SemanticModel.GetConstantValue`
 

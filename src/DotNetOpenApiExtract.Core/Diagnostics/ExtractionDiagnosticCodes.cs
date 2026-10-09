@@ -276,6 +276,13 @@ public static class ExtractionDiagnosticCodes
     /// <summary>Before 3.2, <c>$self</c> is written as <c>x-oai-$self</c>. Location: <c>#/x-oai-$self</c>.</summary>
     public const string DocumentSelfMovedToExtension = "document.self-moved-to-extension";
 
+    /// <summary>
+    /// Before 3.2, a tag's <c>summary</c>, <c>parent</c> or <c>kind</c> is written as <c>x-oas-summary</c>,
+    /// <c>x-oas-parent</c>, <c>x-oas-kind</c>; one per tag and field (the feature names the field).
+    /// Location: the extension in the tag. Subjects: the tag name.
+    /// </summary>
+    public const string DocumentTagFieldMovedToExtension = "document.tag-field-moved-to-extension";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

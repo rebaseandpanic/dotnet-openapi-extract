@@ -485,6 +485,7 @@ public sealed class OpenApiDocumentBuilder
 
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
+        var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
 
         // ── Resolve effective naming policy ───────────────────────────────────
         // Controller bodies serialize with the MVC options (AddJsonOptions) only; the HTTP
@@ -588,35 +589,48 @@ public sealed class OpenApiDocumentBuilder
             };
         }
 
-        // License: an identifier or URL without a name is a configuration error, never dropped.
-        DocumentMetadata.ValidateLicense(options.LicenseName, options.LicenseUrl, options.LicenseIdentifier);
-        if (options.LicenseName != null)
+        // License: the options and the Program.cs OpenApiLicense initializer, merged field by field, the
+        // options first. The URL and the identifier exclude each other: both in Program.cs is a
+        // configuration error; an option for either replaces both Program.cs fields without an error.
+        // A URL or identifier without a name after the merge is a configuration error, never dropped.
+        var programLicense = docTagsResult.License;
+        if (programLicense is { Url: { Length: > 0 }, Identifier: { Length: > 0 } })
+            throw new OpenApiConfigurationException(
+                "The OpenApiLicense in Program.cs sets both Identifier and Url, which are mutually exclusive: keep one of them.");
+        var optionsLinkLicense = !string.IsNullOrWhiteSpace(options.LicenseUrl) || !string.IsNullOrWhiteSpace(options.LicenseIdentifier);
+        var licenseName = !string.IsNullOrWhiteSpace(options.LicenseName) ? options.LicenseName : programLicense?.Name;
+        var licenseUrl = optionsLinkLicense ? options.LicenseUrl : programLicense?.Url;
+        var licenseIdentifier = optionsLinkLicense ? options.LicenseIdentifier : programLicense?.Identifier;
+        DocumentMetadata.ValidateLicense(licenseName, licenseUrl, licenseIdentifier);
+        if (!string.IsNullOrWhiteSpace(licenseName))
         {
             Uri? licenseUri = null;
-            if (options.LicenseUrl != null)
+            if (!string.IsNullOrWhiteSpace(licenseUrl))
             {
-                if (Uri.TryCreate(options.LicenseUrl, UriKind.Absolute, out var parsed))
+                if (Uri.TryCreate(licenseUrl, UriKind.Absolute, out var parsed))
                     licenseUri = parsed;
                 else
-                    WarnInvalidInfoUri(diagnostics, "--license-url", options.LicenseUrl, "#/info/license/url");
+                    WarnInvalidInfoUri(diagnostics, "--license-url", licenseUrl, "#/info/license/url");
             }
 
             info.License = new OpenApiLicense
             {
-                Name       = options.LicenseName,
+                Name       = licenseName,
                 Url        = licenseUri,
-                Identifier = string.IsNullOrWhiteSpace(options.LicenseIdentifier) ? null : options.LicenseIdentifier,
+                Identifier = string.IsNullOrWhiteSpace(licenseIdentifier) ? null : licenseIdentifier,
             };
         }
 
-        // info.summary exists from 3.1: a 3.0 document omits it (the form of the version), with a warning.
-        if (!string.IsNullOrWhiteSpace(options.Summary))
+        // info.summary (the option, else Program.cs) exists from 3.1: a 3.0 document omits it (the form
+        // of the version), with a warning.
+        var summary = !string.IsNullOrWhiteSpace(options.Summary) ? options.Summary : docTagsResult.InfoSummary;
+        if (!string.IsNullOrWhiteSpace(summary))
         {
             if (ledger.TargetVersion == OpenApiSpecVersion.OpenApi3_0)
                 ledger.Add(OmittedMetadata("info.summary", "#/info/summary", ExtractionDiagnosticCodes.DocumentSummaryOmitted,
                     "info.summary is omitted (requires 3.1).", OpenApiSpecVersion.OpenApi3_1));
             else
-                info.Summary = options.Summary;
+                info.Summary = summary;
         }
 
         // Terms of Service
@@ -863,7 +877,6 @@ public sealed class OpenApiDocumentBuilder
         ApplyGlobalMediaTypes(builtOperations, globalMediaTypes, schemaGenerator, ledger);
 
         // ── Step 11: Document-level tags metadata (descriptions + externalDocs) ─
-        var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
         ApplyDocumentTagsMetadata(document, docTagsResult);
 
         // ── Step 12: Deliver pending warnings against the finished document ──
@@ -2248,6 +2261,14 @@ public sealed class OpenApiDocumentBuilder
                 {
                     tag.Description = metadata.Description;
                 }
+
+                // OpenAPI 3.2 tag fields; for 3.0/3.1 the serializer writes them as x-oas-* (warned by the model rules).
+                if (string.IsNullOrEmpty(tag.Summary) && !string.IsNullOrEmpty(metadata.Summary))
+                    tag.Summary = metadata.Summary;
+                if (string.IsNullOrEmpty(tag.Kind) && !string.IsNullOrEmpty(metadata.Kind))
+                    tag.Kind = metadata.Kind;
+                if (tag.Parent == null && !string.IsNullOrEmpty(metadata.Parent))
+                    tag.Parent = new OpenApiTagReference(metadata.Parent, document);
 
                 // ExternalDocs: only fill when not already present.
                 if (tag.ExternalDocs == null &&

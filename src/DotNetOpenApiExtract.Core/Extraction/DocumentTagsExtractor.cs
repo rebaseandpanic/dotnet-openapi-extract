@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 using static DotNetOpenApiExtract.Core.SourceAnalysis.TypeSyntaxHelper;
@@ -17,7 +18,22 @@ public sealed record TagMetadata
 
     /// <summary>ExternalDocs description extracted from <c>OpenApiTag.ExternalDocs.Description</c>.</summary>
     public string? ExternalDocsDescription { get; init; }
+
+    /// <summary>Tag summary from <c>OpenApiTag.Summary</c> (OpenAPI 3.2).</summary>
+    public string? Summary { get; init; }
+
+    /// <summary>Name of the parent tag from <c>OpenApiTag.Parent = new OpenApiTagReference("…")</c> (OpenAPI 3.2).</summary>
+    public string? Parent { get; init; }
+
+    /// <summary>Tag kind from <c>OpenApiTag.Kind</c> (OpenAPI 3.2).</summary>
+    public string? Kind { get; init; }
 }
+
+/// <summary>The license of an <c>OpenApiInfo</c> initializer in <c>Program.cs</c>.</summary>
+/// <param name="Name">The license name, if given as a literal or constant.</param>
+/// <param name="Url">The license URL.</param>
+/// <param name="Identifier">The SPDX license identifier (OpenAPI 3.1).</param>
+public sealed record LicenseMetadata(string? Name, string? Url, string? Identifier);
 
 /// <summary>
 /// Result of scanning Roslyn source for document-level tag registrations and
@@ -40,6 +56,18 @@ public sealed class DocumentTagsExtractionResult
 
     /// <summary>Root-level <c>externalDocs.description</c>.</summary>
     public string? ExternalDocsDescription { get; init; }
+
+    /// <summary>
+    /// <c>info.summary</c> from an <c>OpenApiInfo { Summary = … }</c> initializer of <c>SwaggerDoc</c> /
+    /// <c>AddOpenApi</c>, chosen as <see cref="ExternalDocsUrl"/> is: the first declaration that sets it.
+    /// </summary>
+    public string? InfoSummary { get; init; }
+
+    /// <summary>
+    /// The license of an <c>OpenApiInfo { License = new OpenApiLicense { … } }</c> initializer, the first
+    /// declaration that sets one; <see langword="null"/> when none does.
+    /// </summary>
+    public LicenseMetadata? License { get; init; }
 }
 
 /// <summary>
@@ -75,11 +103,14 @@ public static class DocumentTagsExtractor
         var tagsByName = new Dictionary<string, TagMetadata>(StringComparer.Ordinal);
         string? rootExternalDocsUrl = null;
         string? rootExternalDocsDesc = null;
+        string? infoSummary = null;
+        LicenseMetadata? license = null;
+        var compilation = context.CompilationResult?.Compilation;
 
         // ── 1. AddTag(new OpenApiTag { ... }) ─────────────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddTag"))
         {
-            var metadata = TryParseAddTagInvocation(invocation);
+            var metadata = TryParseAddTagInvocation(invocation, compilation);
             if (metadata?.Name is { } name && !string.IsNullOrWhiteSpace(name))
             {
                 // First registration wins; subsequent duplicates are ignored.
@@ -88,6 +119,9 @@ public static class DocumentTagsExtractor
                     Description = metadata.Description,
                     ExternalDocsUrl = metadata.ExternalDocsUrl,
                     ExternalDocsDescription = metadata.ExternalDocsDescription,
+                    Summary = metadata.Summary,
+                    Parent = metadata.Parent,
+                    Kind = metadata.Kind,
                 });
             }
         }
@@ -105,6 +139,11 @@ public static class DocumentTagsExtractor
                     rootExternalDocsUrl ??= url;
                     rootExternalDocsDesc ??= desc;
                 }
+
+                // The other info fields follow the same choice: the first declaration that sets them.
+                var (summary, declaredLicense) = TryExtractInfoMetadata(invocation, compilation);
+                infoSummary ??= summary;
+                license ??= declaredLicense;
             }
         }
 
@@ -113,7 +152,56 @@ public static class DocumentTagsExtractor
             TagsByName = tagsByName,
             ExternalDocsUrl = rootExternalDocsUrl,
             ExternalDocsDescription = rootExternalDocsDesc,
+            InfoSummary = infoSummary,
+            License = license,
         };
+    }
+
+    /// <summary>
+    /// <c>Summary</c> and <c>License</c> of the <c>OpenApiInfo</c> initializer in a <c>SwaggerDoc</c> /
+    /// <c>AddOpenApi</c> call, from literals and in-project constants; other values are skipped, never
+    /// evaluated.
+    /// </summary>
+    private static (string? Summary, LicenseMetadata? License) TryExtractInfoMetadata(
+        InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    {
+        foreach (var objCreation in invocation.ArgumentList.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+        {
+            var typeName = GetUnqualifiedTypeName(objCreation.Type);
+            if (!typeName.Contains("OpenApiInfo", StringComparison.Ordinal) && !typeName.EndsWith("Info", StringComparison.Ordinal))
+                continue;
+
+            string? summary = null;
+            LicenseMetadata? license = null;
+            foreach (var assignment in objCreation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+            {
+                switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
+                {
+                    case "Summary":
+                        summary = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        break;
+                    case "License" when assignment.Right is BaseObjectCreationExpressionSyntax { Initializer: { } licenseInit }:
+                        string? name = null, url = null, identifier = null;
+                        foreach (var field in licenseInit.Expressions.OfType<AssignmentExpressionSyntax>())
+                        {
+                            switch ((field.Left as IdentifierNameSyntax)?.Identifier.Text)
+                            {
+                                case "Name":       name = InvocationMatcher.GetStringValue(field.Right, compilation); break;
+                                case "Identifier": identifier = InvocationMatcher.GetStringValue(field.Right, compilation); break;
+                                case "Url":        url = TryExtractUriLiteral(field.Right, compilation); break;
+                            }
+                        }
+                        if (name != null || url != null || identifier != null)
+                            license = new LicenseMetadata(name, url, identifier);
+                        break;
+                }
+            }
+
+            if (summary != null || license != null)
+                return (summary, license);
+        }
+
+        return (null, null);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -130,6 +218,9 @@ public static class DocumentTagsExtractor
         public string? Description { get; set; }
         public string? ExternalDocsUrl { get; set; }
         public string? ExternalDocsDescription { get; set; }
+        public string? Summary { get; set; }
+        public string? Parent { get; set; }
+        public string? Kind { get; set; }
     }
 
     /// <summary>
@@ -137,7 +228,7 @@ public static class DocumentTagsExtractor
     /// invocation. Returns null if the first argument is not a recognisable object-creation
     /// expression for <c>OpenApiTag</c>.
     /// </summary>
-    private static ParsedTag? TryParseAddTagInvocation(InvocationExpressionSyntax invocation)
+    private static ParsedTag? TryParseAddTagInvocation(InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
     {
         var args = invocation.ArgumentList.Arguments;
         if (args.Count < 1)
@@ -157,7 +248,7 @@ public static class DocumentTagsExtractor
         if (!typeName.Contains("OpenApiTag", StringComparison.Ordinal) && !typeName.EndsWith("Tag", StringComparison.Ordinal))
             return null;
 
-        return ParseOpenApiTagInitializer(objCreation.Initializer);
+        return ParseOpenApiTagInitializer(objCreation.Initializer, compilation);
     }
 
     /// <summary>
@@ -165,7 +256,7 @@ public static class DocumentTagsExtractor
     /// <c>OpenApiTag</c>. Returns best-effort results; unknown or complex values
     /// are silently skipped.
     /// </summary>
-    private static ParsedTag? ParseOpenApiTagInitializer(InitializerExpressionSyntax? initializer)
+    private static ParsedTag? ParseOpenApiTagInitializer(InitializerExpressionSyntax? initializer, CSharpCompilation? compilation)
     {
         if (initializer == null)
             return null;
@@ -199,6 +290,19 @@ public static class DocumentTagsExtractor
                     var (url, extDesc) = ParseExternalDocsExpression(assignment.Right);
                     tag.ExternalDocsUrl = url;
                     tag.ExternalDocsDescription = extDesc;
+                    break;
+
+                // OpenAPI 3.2 tag fields: literals and in-project constants only.
+                case "Summary":
+                    tag.Summary = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                    break;
+
+                case "Kind":
+                    tag.Kind = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                    break;
+
+                case "Parent" when assignment.Right is BaseObjectCreationExpressionSyntax { ArgumentList.Arguments: [var parentName, ..] }:
+                    tag.Parent = InvocationMatcher.GetStringValue(parentName.Expression, compilation);
                     break;
             }
         }
@@ -278,7 +382,7 @@ public static class DocumentTagsExtractor
     /// <summary>
     /// Extracts a URI string from either <c>new Uri("...")</c> or a plain string literal.
     /// </summary>
-    private static string? TryExtractUriLiteral(ExpressionSyntax expression)
+    private static string? TryExtractUriLiteral(ExpressionSyntax expression, CSharpCompilation? compilation = null)
     {
         while (expression is ParenthesizedExpressionSyntax paren)
             expression = paren.Expression;
@@ -290,6 +394,8 @@ public static class DocumentTagsExtractor
             if (arg0?.Expression is LiteralExpressionSyntax uriLit &&
                 uriLit.Token.Value is string uriStr)
                 return uriStr;
+            if (arg0 != null && compilation != null)
+                return InvocationMatcher.GetStringValue(arg0.Expression, compilation);
         }
 
         // Plain string literal (unlikely but handled gracefully)

@@ -104,6 +104,19 @@ internal static class DownlevelRules
                     OpenApiSpecVersion.OpenApi3_2, $"server name '{name}' emitted as x-oai-name (requires 3.2)", [name], targetVersion);
         }
 
+        var tagIndex = 0;
+        foreach (var tag in document.Tags ?? new HashSet<OpenApiTag>())
+        {
+            var index = (tagIndex++).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            foreach (var (field, present) in new[] { ("summary", tag.Summary != null), ("parent", tag.Parent != null), ("kind", tag.Kind != null) })
+            {
+                if (present)
+                    yield return MetadataLoss(["tags", index, $"x-oas-{field}"], $"tag.{field}",
+                        ExtractionDiagnosticCodes.DocumentTagFieldMovedToExtension, $"x-oas-{field}",
+                        OpenApiSpecVersion.OpenApi3_2, $"tag {field} of '{tag.Name}' emitted as x-oas-{field} (requires 3.2)", [tag.Name ?? string.Empty], targetVersion);
+            }
+        }
+
         if (document.Self != null)
             yield return MetadataLoss(["x-oai-$self"], "$self",
                 ExtractionDiagnosticCodes.DocumentSelfMovedToExtension, "x-oai-$self",
