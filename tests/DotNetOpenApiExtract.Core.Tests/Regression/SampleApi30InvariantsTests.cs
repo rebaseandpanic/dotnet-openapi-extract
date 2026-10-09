@@ -1,12 +1,16 @@
 using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core.Tests.Harness;
+using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.OpenApi;
 using Xunit;
 
 namespace DotNetOpenApiExtract.Core.Tests.Regression;
 
-/// <summary>Builds SampleApi for 3.0 once (with two servers) and serializes it.</summary>
+/// <summary>
+/// Builds SampleApi for 3.0 once with two servers, and once more with a Program.cs that declares
+/// security schemes and requirements, and serializes both.
+/// </summary>
 public sealed class SampleApi30Fixture
 {
     public static readonly IReadOnlyList<string> Servers = ["https://api.example.com", "https://staging.example.com/v1"];
@@ -19,18 +23,71 @@ public sealed class SampleApi30Fixture
             XmlPath      = TestPaths.SampleApiXml,
             Servers      = Servers,
         });
-        Root = VersionedDocumentHarness.SerializeAsync(
-                document, OpenApiSpecVersion.OpenApi3_0, DocumentFormat.Json, CancellationToken.None)
-            .GetAwaiter().GetResult();
+        Root = Serialize(document);
+
+        using var source = new TempDirectory();
+        File.WriteAllText(Path.Combine(source.Path, "Program.cs"), SecurityProgram);
+        File.WriteAllText(
+            Path.Combine(source.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        SecurityRoot = Serialize(VersionedDocumentHarness.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.SampleApiDll,
+            XmlPath      = TestPaths.SampleApiXml,
+            SourceRoot   = source.Path,
+        }));
     }
 
+    /// <summary>
+    /// Two declared schemes; one requirement call naming ApiKey, another naming ApiKey and Bearer:
+    /// the calls are alternatives (OR), the names inside one call are combined (AND).
+    /// </summary>
+    private const string SecurityProgram =
+        """
+        var builder = WebApplication.CreateBuilder(args);
+        builder.Services.AddSwaggerGen(c =>
+        {
+            c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.ApiKey,
+                In = ParameterLocation.Header,
+                Name = "X-Api-Key"
+            });
+            c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer"
+            });
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                { new OpenApiSecuritySchemeReference("ApiKey"), [] }
+            });
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                { new OpenApiSecuritySchemeReference("ApiKey"), [] },
+                { new OpenApiSecuritySchemeReference("Bearer"), [] }
+            });
+        });
+        builder.Build().Run();
+        """;
+
+    /// <summary>SampleApi with two servers and no security declarations.</summary>
     public JsonNode Root { get; }
+
+    /// <summary>SampleApi with the security declarations of <see cref="SecurityProgram"/>.</summary>
+    public JsonNode SecurityRoot { get; }
+
+    private static JsonNode Serialize(OpenApiDocument document) =>
+        VersionedDocumentHarness.SerializeAsync(
+                document, OpenApiSpecVersion.OpenApi3_0, DocumentFormat.Json, CancellationToken.None)
+            .GetAwaiter().GetResult();
 }
 
 /// <summary>
 /// OpenAPI 3.0 output that must not change for existing users: the 0.16.0 nullable form, the
 /// <c>allOf</c> wrapper of reference properties, operationIds of single operations, and server
-/// URLs. Expected values come from the field catalog and the 0.16.0 changelog.
+/// URLs, AND/OR structure of security requirements. Expected values come from the field catalog
+/// and the 0.16.0 changelog.
 /// </summary>
 public class SampleApi30InvariantsTests(SampleApi30Fixture fixture) : IClassFixture<SampleApi30Fixture>
 {
@@ -107,5 +164,39 @@ public class SampleApi30InvariantsTests(SampleApi30Fixture fixture) : IClassFixt
             s!.AsObject().ContainsKey("name").Should().BeFalse();
             s.AsObject().ContainsKey("x-oai-name").Should().BeFalse();
         });
+    }
+
+    [Fact]
+    public void DocumentRequirements_OneObjectPerCall_NamesInOneCallCombined()
+    {
+        // OR across AddSecurityRequirement calls, AND within one call; a declared scheme is
+        // written as {"ApiKey": []}.
+        JsonNode.DeepEquals(
+                fixture.SecurityRoot["security"],
+                JsonNode.Parse("""[{"ApiKey":[]},{"ApiKey":[],"Bearer":[]}]"""))
+            .Should().BeTrue(because: fixture.SecurityRoot["security"]?.ToJsonString());
+    }
+
+    [Fact]
+    public void PlainAuthorize_InheritsDocumentRequirements()
+    {
+        fixture.SecurityRoot["paths"]!["/api/secure"]!["get"]!.AsObject()
+            .ContainsKey("security").Should().BeFalse();
+    }
+
+    [Fact]
+    public void AllowAnonymous_WritesEmptyRequirementList()
+    {
+        JsonNode.DeepEquals(fixture.SecurityRoot["paths"]!["/api/secure/public"]!["get"]!["security"], new JsonArray())
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void AuthorizeWithScheme_IsOneRequirementOnThatScheme()
+    {
+        JsonNode.DeepEquals(
+                fixture.SecurityRoot["paths"]!["/api/secure/admin"]!["get"]!["security"],
+                JsonNode.Parse("""[{"Bearer":[]}]"""))
+            .Should().BeTrue();
     }
 }
