@@ -197,3 +197,42 @@ public sealed class Ruby : Gem
     /// <summary>Colour depth.</summary>
     public int Depth { get; set; }
 }
+
+/// <summary>A household; its only derived type has no discriminator value and is a polymorphic base itself.</summary>
+[JsonDerivedType(typeof(Flat))]
+public class Household
+{
+    /// <summary>Number of rooms.</summary>
+    public int Rooms { get; set; }
+}
+
+/// <summary>A flat; a polymorphic base of its own.</summary>
+[JsonDerivedType(typeof(Penthouse), "penthouse")]
+public class Flat : Household
+{
+    /// <summary>Floor number.</summary>
+    public int Floor { get; set; }
+}
+
+/// <summary>A penthouse.</summary>
+public sealed class Penthouse : Flat
+{
+    /// <summary>Terrace area.</summary>
+    public int Terrace { get; set; }
+}
+
+/// <summary>A sensor; the base itself is listed among its derived types without a value.</summary>
+[JsonDerivedType(typeof(Sensor))]
+[JsonDerivedType(typeof(Thermometer), "thermo")]
+public class Sensor
+{
+    /// <summary>Sensor identifier.</summary>
+    public string SerialNumber { get; set; } = string.Empty;
+}
+
+/// <summary>A thermometer.</summary>
+public sealed class Thermometer : Sensor
+{
+    /// <summary>Last reading.</summary>
+    public double Celsius { get; set; }
+}

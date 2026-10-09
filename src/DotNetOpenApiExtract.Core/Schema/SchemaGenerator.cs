@@ -775,8 +775,13 @@ public sealed class SchemaGenerator
             {
                 if (derived.DiscriminatorValue is null)
                 {
+                    // The base itself without a value is what the base branch already describes:
+                    // no second alternative, no reference from the union to itself.
+                    if (SameType(derived.Type, baseType))
+                        continue;
+
                     withoutValue.Add(derived.Type);
-                    alternatives.Add(GenerateComplexSchema(derived.Type));
+                    alternatives.Add(GenerateDirectObjectSchema(derived.Type));
                     continue;
                 }
 
@@ -852,6 +857,41 @@ public sealed class SchemaGenerator
             _generating.Remove(unionId);
         }
     }
+
+    /// <summary>
+    /// The schema of <paramref name="type"/> as System.Text.Json writes it when it is not selected by a
+    /// discriminator: a plain object of its properties, without any discriminator. For a type
+    /// without polymorphism of its own that is its usual component; a type that is itself a
+    /// polymorphic base gets a separate direct-use component <c>{T}Direct</c>, since its own id
+    /// names its union (STJ ignores the type's own configuration when it is written as a derived
+    /// type without a value of another base — measured on STJ 10).
+    /// </summary>
+    private IOpenApiSchema GenerateDirectObjectSchema(Type type)
+    {
+        if (UnionOf(type) == null)
+            return GenerateComplexSchema(type);
+
+        var fullName = (type.FullName ?? type.Name).Replace('.', '_').Replace('+', '_');
+        var directId = _schemaIds.Reserve(SchemaKey.Direct(type), $"{GetSchemaId(type)}Direct", $"{fullName}Direct");
+        if (_schemas.ContainsKey(directId) || !_generating.Add(directId))
+            return new OpenApiSchemaReference(directId, null);
+
+        try
+        {
+            var schema = new OpenApiSchema { Type = JsonSchemaType.Object };
+            _schemas[directId] = schema;
+            _schemaIdToType[directId] = type;
+            PopulateObjectSchema(type, schema);
+            return new OpenApiSchemaReference(directId, null);
+        }
+        finally
+        {
+            _generating.Remove(directId);
+        }
+    }
+
+    private static bool SameType(Type left, Type right) =>
+        string.Equals(left.FullName ?? left.Name, right.FullName ?? right.Name, StringComparison.Ordinal);
 
     /// <summary>
     /// The <c>discriminator</c> object of an exclusive union, written only when every alternative

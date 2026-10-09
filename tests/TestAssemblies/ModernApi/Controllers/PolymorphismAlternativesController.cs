@@ -44,6 +44,18 @@ public class PolymorphismAlternativesController : ControllerBase
     [HttpGet("gem")]
     public ActionResult<Gem> GetGem() => throw new NotSupportedException();
 
+    /// <summary>A household (value-less derived type that is a base of its own).</summary>
+    [HttpGet("household")]
+    public ActionResult<Household> GetHousehold() => throw new NotSupportedException();
+
+    /// <summary>A flat (polymorphic use of the nested base).</summary>
+    [HttpGet("flat")]
+    public ActionResult<Flat> GetFlat() => throw new NotSupportedException();
+
+    /// <summary>A sensor (the base listed without a value).</summary>
+    [HttpGet("sensor")]
+    public ActionResult<Sensor> GetSensor() => throw new NotSupportedException();
+
     /// <summary>A tree node (recursive hierarchy).</summary>
     [HttpGet("tree")]
     public ActionResult<TreeNode> GetTree() => throw new NotSupportedException();

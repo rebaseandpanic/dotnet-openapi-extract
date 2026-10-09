@@ -216,6 +216,39 @@ public class PolymorphismAlternativesTests(PolymorphismAlternativesFixture fixtu
         PropertyNames(schemas[branch]!).Should().Equal("nickname");
     }
 
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void DerivedWithoutValue_ThatIsABaseItself_IsItsDirectUseObject(OpenApiSpecVersion version)
+    {
+        var schemas = Schemas(version);
+        var householdId = Component(version, "/polymorphism-alt/household");
+        var flatUnion = Component(version, "/polymorphism-alt/flat");
+        var alternatives = Alternatives(schemas[householdId]!, "anyOf");
+
+        alternatives.Should().HaveCount(2, because: "Flat as written under Household, and the base branch");
+        alternatives.Should().NotContain(flatUnion, because: "STJ writes Flat under Household as a plain object");
+        alternatives.Should().NotContain(householdId);
+        var flat = schemas[alternatives.Single(a => PropertyNames(schemas[a]!).Contains("floor"))]!;
+        flat.AsObject().ContainsKey("oneOf").Should().BeFalse();
+        PropertyNames(flat).Should().BeEquivalentTo(["floor", "rooms"]);
+
+        Alternatives(schemas[flatUnion]!, "oneOf").Should().HaveCount(2, because: "Flat keeps its own union for its own polymorphic use");
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void BaseListedWithoutValue_IsTheBaseBranchOnly(OpenApiSpecVersion version)
+    {
+        var schemas = Schemas(version);
+        var sensorId = Component(version, "/polymorphism-alt/sensor");
+        var union = schemas[sensorId]!;
+
+        union.AsObject().ContainsKey("anyOf").Should().BeFalse(because: "the base without a value does not make the alternatives overlap");
+        var alternatives = Alternatives(union, "oneOf");
+        alternatives.Should().HaveCount(2);
+        alternatives.Should().NotContain(sensorId);
+    }
+
     // ── Warnings anchored on the union ───────────────────────────────────────
 
     [Theory]

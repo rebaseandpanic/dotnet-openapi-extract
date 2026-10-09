@@ -65,6 +65,8 @@ public class PolymorphismConformanceTests(PolymorphismConformanceFixture fixture
                 data.Add(version, "/polymorphism-alt/pet", new Pet { Nickname = "Generic" }, typeof(Pet));
                 data.Add(version, "/polymorphism-alt/fish", new Shark { Fins = 5, Teeth = 300 }, typeof(Fish));
                 data.Add(version, "/polymorphism-alt/fish", new Fish { Fins = 2 }, typeof(Fish));
+                data.Add(version, "/polymorphism-alt/sensor", new Sensor { SerialNumber = "s" }, typeof(Sensor));
+                data.Add(version, "/polymorphism-alt/sensor", new Thermometer { SerialNumber = "t", Celsius = 20 }, typeof(Sensor));
                 data.Add(version, "/polymorphism-alt/tree",
                     new Branch { Label = "root", Children = [new Leaf { Label = "l", Value = 1 }] }, typeof(TreeNode));
             }
@@ -125,6 +127,10 @@ public class PolymorphismConformanceTests(PolymorphismConformanceFixture fixture
                 data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":2147483648,"fins":2}""");
                 data.Add(version, "/polymorphism-alt/pet", typeof(Pet), """{"$type":true,"nickname":"x"}""");
                 data.Add(version, "/polymorphism-alt/pet", typeof(Pet), """{"$type":null,"nickname":"x"}""");
+                // The base listed without a value: unknown values are rejected.
+                data.Add(version, "/polymorphism-alt/sensor", typeof(Sensor), """{"serialNumber":"s"}""");
+                data.Add(version, "/polymorphism-alt/sensor", typeof(Sensor), """{"$type":"thermo","serialNumber":"s","celsius":1}""");
+                data.Add(version, "/polymorphism-alt/sensor", typeof(Sensor), """{"$type":"zz","serialNumber":"s"}""");
                 // Integer values, unknown values read as the base: mapping is type-sensitive.
                 data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":1,"carats":2,"depth":3}""");
                 data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":2,"carats":2}""");
@@ -167,6 +173,22 @@ public class PolymorphismConformanceTests(PolymorphismConformanceFixture fixture
         StjWire.Accepts("""{"$type":true,"fins":2}""", typeof(Fish), Wire).Should().BeFalse();
         StjWire.Accepts("""{"$type":"1","carats":2}""", typeof(Gem), Wire).Should().BeTrue();
         StjWire.Accepts("""{"$type":2147483648,"carats":2}""", typeof(Gem), Wire).Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ValueLessDerivedThatIsABaseItself_WrittenFlat_PassesTheUnion(OpenApiSpecVersion version)
+    {
+        var conformance = fixture.Conformance[version];
+        var union = Component(version, "/polymorphism-alt/household");
+
+        foreach (var value in new Household[] { new Flat { Rooms = 3, Floor = 2 }, new Household { Rooms = 1 } })
+        {
+            var instance = StjWire.Serialize(value, typeof(Household), Wire);
+            instance!.AsObject().ContainsKey("$type").Should().BeFalse(because: "STJ writes no discriminator here");
+            var result = conformance.ValidateComponent(union, instance);
+            result.IsValid.Should().BeTrue(string.Join("; ", result.Errors));
+        }
     }
 
     // ── anyOf union ──────────────────────────────────────────────────────────
