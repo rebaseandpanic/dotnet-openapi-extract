@@ -23,8 +23,11 @@ public sealed class XmlDocEntry
     public IReadOnlyDictionary<string, string> Responses { get; init; } =
         new Dictionary<string, string>();
 
-    /// <summary>The &lt;example&gt; text, if present.</summary>
+    /// <summary>The text of the first &lt;example&gt;, if present.</summary>
     public string? Example { get; init; }
+
+    /// <summary>How many &lt;example&gt; elements the member has; only the first is used.</summary>
+    public int ExampleCount { get; init; }
 
     /// <summary>Parameter examples: name → example value string.</summary>
     public IReadOnlyDictionary<string, string> ParameterExamples { get; init; } =
@@ -252,6 +255,7 @@ public sealed class XmlDocParser
         var summary = GetInnerText(member.Element("summary"));
         var remarks = GetInnerText(member.Element("remarks"));
         var example = GetInnerText(member.Element("example"));
+        var exampleCount = member.Elements("example").Count();
 
         var parameters = new Dictionary<string, string>();
         var paramExamples = new Dictionary<string, string>();
@@ -282,6 +286,7 @@ public sealed class XmlDocParser
             Summary = summary,
             Remarks = remarks,
             Example = example,
+            ExampleCount = exampleCount,
             Parameters = parameters,
             ParameterExamples = paramExamples,
             Responses = responses,

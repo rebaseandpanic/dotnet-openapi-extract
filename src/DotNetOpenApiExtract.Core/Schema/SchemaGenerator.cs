@@ -798,6 +798,7 @@ public sealed class SchemaGenerator
             _schemaIdToType[schemaId] = type;
 
             PopulateObjectSchema(type, schema, schemaId);
+            ApplyTypeExample(schema, type, schemaId);
             return new OpenApiSchemaReference(schemaId, null);
         }
         finally
@@ -898,6 +899,8 @@ public sealed class SchemaGenerator
 
             if (propSchema is OpenApiSchema withDefault)
                 ApplyDefaultValue(withDefault, propAttrData, propInfo, serializedName, componentId);
+
+            propSchema = ApplyPropertyExample(propSchema, type, propInfo, serializedName, componentId);
 
             properties[serializedName] = propSchema;
 
@@ -1178,6 +1181,7 @@ public sealed class SchemaGenerator
             _schemas[directId] = schema;
             _schemaIdToType[directId] = type;
             PopulateObjectSchema(type, schema, directId);
+            ApplyTypeExample(schema, type, directId);
             return new OpenApiSchemaReference(directId, null);
         }
         finally
@@ -1836,6 +1840,151 @@ public sealed class SchemaGenerator
             Subjects = [$"{typeName}.{property.Name}"],
         });
     }
+
+    // =========================================================================
+    // XML examples
+    // =========================================================================
+
+    /// <summary>
+    /// The XML example of a property, parsed by the property's schema and written in the version's
+    /// form: on the <c>allOf</c> wrapper of a reference (the shared component is unchanged), on the
+    /// numeric branch of a number-handling union. A value that does not parse, or several examples,
+    /// give a warning on the property.
+    /// </summary>
+    private IOpenApiSchema ApplyPropertyExample(
+        IOpenApiSchema propSchema, Type declaringType, PropertyInfo property, string serializedName, string componentId)
+    {
+        if (_docResolver == null)
+            return propSchema;
+
+        var doc = _docResolver.ResolveProperty(declaringType, property);
+        if (doc.Example == null)
+            return propSchema;
+
+        var element = $"{property.DeclaringType?.FullName ?? componentId}.{property.Name}";
+        var anchor = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]);
+        var schema = EnsureMutableSchema(propSchema);
+        WriteExample(schema, doc.Example, doc.ExampleCount, element, anchor);
+        return schema;
+    }
+
+    /// <summary>The XML example of a type, on its object component; see <see cref="ApplyPropertyExample"/>.</summary>
+    private void ApplyTypeExample(OpenApiSchema schema, Type type, string componentId)
+    {
+        if (_docResolver?.ResolveTypeExample(type) is not { } example)
+            return;
+
+        WriteExample(schema, example.Text, example.Count, type.FullName ?? componentId, new LossAnchor.Component(componentId));
+    }
+
+    private void WriteExample(OpenApiSchema schema, string text, int count, string element, LossAnchor anchor)
+    {
+        if (count > 1)
+        {
+            RecordLoss(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SchemaExampleMultiple,
+                Anchor   = anchor,
+                Message  = $"{element} has {count} <example> elements: the first is used.",
+                Feature  = "schema.example.multiple",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = [element],
+            });
+        }
+
+        var (place, jsonType, nullable) = ExampleTarget(schema);
+        if (ParseExample(text, jsonType, nullable) is { } value)
+        {
+            VersionedSchemaForms.SetExample(text == "null" ? schema : place, value, _options.OpenApiVersion);
+            return;
+        }
+
+        RecordLoss(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.SchemaExampleNotParsable,
+            Anchor   = anchor,
+            Message  = $"The <example> of {element}, \"{text}\", is not a value of its schema: no example is written.",
+            Feature  = "schema.example",
+            Action   = DiagnosticAction.Omitted,
+            Subjects = [element, text],
+        });
+    }
+
+    /// <summary>
+    /// Where an example goes and the JSON type it is parsed by: the numeric branch of a number union,
+    /// the component's type behind a reference wrapper (or its nullable <c>anyOf</c>), else the schema
+    /// itself. The type is <see langword="null"/> when the schema does not restrict it.
+    /// </summary>
+    private (OpenApiSchema Place, JsonSchemaType? Type, bool Nullable) ExampleTarget(OpenApiSchema schema)
+    {
+        static bool HasNull(JsonSchemaType? type) => type.HasValue && (type.Value & JsonSchemaType.Null) != 0;
+        static JsonSchemaType? WithoutNull(JsonSchemaType? type) =>
+            type.HasValue && (type.Value & ~JsonSchemaType.Null) != 0 ? type.Value & ~JsonSchemaType.Null : null;
+        JsonSchemaType? ComponentType(OpenApiSchemaReference reference) =>
+            reference.Reference.Id is { } id && _schemas.TryGetValue(id, out var component) ? WithoutNull(component.Type) : null;
+
+        var nullBranch = schema.AnyOf?.Any(b => b is OpenApiSchema { Type: JsonSchemaType.Null }) == true;
+
+        if (NumberUnionBranches(schema) is { } union)
+            return (union.Number, WithoutNull(union.Number.Type), HasNull(schema.Type) || nullBranch);
+
+        if (schema.AllOf is [OpenApiSchemaReference wrapped, ..])
+            return (schema, ComponentType(wrapped), false);
+
+        if (schema.AnyOf is [OpenApiSchemaReference nullableRef, ..] && nullBranch)
+            return (schema, ComponentType(nullableRef), true);
+
+        return (schema, WithoutNull(schema.Type), HasNull(schema.Type));
+    }
+
+    /// <summary>
+    /// The example text as a value of <paramref name="jsonType"/>: a string schema takes the text as
+    /// it is; numbers, booleans, objects and arrays are parsed as JSON of that kind (an integer must be
+    /// integral); the text <c>null</c> is JSON null for a nullable schema only. <see langword="null"/>
+    /// when it does not parse.
+    /// </summary>
+    private static JsonNode? ParseExample(string text, JsonSchemaType? jsonType, bool nullable)
+    {
+        if (text == "null")
+            return nullable ? JsonNullSentinel.JsonNull : null;
+
+        if (jsonType.HasValue && (jsonType.Value & JsonSchemaType.String) != 0)
+            return JsonValue.Create(text);
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(text);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+
+        if (node == null || !jsonType.HasValue)
+            return node;
+
+        var kind = node.GetValueKind();
+        var type = jsonType.Value;
+        bool Is(JsonSchemaType t) => (type & t) != 0;
+
+        return kind switch
+        {
+            System.Text.Json.JsonValueKind.Number when Is(JsonSchemaType.Number) => node,
+            System.Text.Json.JsonValueKind.Number when Is(JsonSchemaType.Integer) && IsIntegral(node.AsValue()) => node,
+            System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False when Is(JsonSchemaType.Boolean) => node,
+            System.Text.Json.JsonValueKind.Object when Is(JsonSchemaType.Object) => node,
+            System.Text.Json.JsonValueKind.Array when Is(JsonSchemaType.Array) => node,
+            _ => null,
+        };
+    }
+
+    private static bool IsIntegral(JsonValue value) =>
+        value.TryGetValue<long>(out _)
+        || value.TryGetValue<ulong>(out _)
+        || (value.TryGetValue<decimal>(out var number) && number == decimal.Truncate(number));
 
     /// <summary>
     /// <c>[Range]</c> on a numeric property: <c>minimum</c> / <c>maximum</c>, or for an exclusive side

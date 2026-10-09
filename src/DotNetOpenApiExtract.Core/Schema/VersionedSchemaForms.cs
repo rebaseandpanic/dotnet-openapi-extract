@@ -31,6 +31,19 @@ internal static class VersionedSchemaForms
     }
 
     /// <summary>
+    /// Sets the example of <paramref name="schema"/> in the form of the version: <c>example: v</c> for
+    /// 3.0, <c>examples: [v]</c> for 3.1+, where <c>example</c> is deprecated. A JSON <c>null</c> is
+    /// <see cref="JsonNullSentinel.JsonNull"/>.
+    /// </summary>
+    public static void SetExample(OpenApiSchema schema, JsonNode value, OpenApiSpecVersion version)
+    {
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            schema.Example = value;
+        else
+            schema.Examples = [value];
+    }
+
+    /// <summary>
     /// A base64 string (<c>byte[]</c>, <c>[Base64String] string</c>): <c>format: byte</c> for 3.0;
     /// <c>contentEncoding: base64</c> without <c>format</c> for 3.1+, where <c>byte</c> is not in the
     /// format registry. Nothing of the other form is set, so 3.0 output carries no

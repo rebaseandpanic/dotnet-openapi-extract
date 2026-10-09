@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core.Schema;
 using DotNetOpenApiExtract.Core.Tests.Conformance;
+using DotNetOpenApiExtract.Core.Tests.Harness;
 using Microsoft.OpenApi;
 using Xunit;
 using CoreNumberHandling = DotNetOpenApiExtract.Core.JsonNumberHandling;
@@ -12,12 +13,37 @@ using StjNumberHandling = System.Text.Json.Serialization.JsonNumberHandling;
 
 namespace DotNetOpenApiExtract.Core.Tests.Schema;
 
+/// <summary>ModernApi for every version: parsed document and diagnostics.</summary>
+public sealed class NumberHandlingDocumentFixture
+{
+    public NumberHandlingDocumentFixture()
+    {
+        foreach (var version in VersionedDocumentHarness.Versions)
+        {
+            var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+            {
+                AssemblyPath   = TestPaths.ModernApiDll,
+                XmlPath        = TestPaths.ModernApiXml,
+                OpenApiVersion = version,
+                OnDiagnostic   = onDiagnostic,
+            });
+            Documents[version] = JsonNode.Parse(
+                document.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult())!;
+            Diagnostics[version] = diagnostics;
+        }
+    }
+
+    public Dictionary<OpenApiSpecVersion, JsonNode> Documents { get; } = [];
+
+    public Dictionary<OpenApiSpecVersion, IReadOnlyList<DotNetOpenApiExtract.Core.Diagnostics.ExtractionDiagnostic>> Diagnostics { get; } = [];
+}
+
 /// <summary>
 /// The schema of a number under <c>JsonNumberHandling</c> is the union of what System.Text.Json writes
 /// and what it reads: a numeric string branch for the string flags, a named-literal branch for
 /// floating-point types; the property wins over the type, the type over the global option.
 /// </summary>
-public class NumberHandlingSchemaTests
+public class NumberHandlingSchemaTests(NumberHandlingDocumentFixture fixture) : IClassFixture<NumberHandlingDocumentFixture>
 {
     private const string IntegerPattern = "^[+-]?[0-9]+$";
     private const string FractionalPattern = "^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$";
@@ -363,5 +389,40 @@ public class NumberHandlingSchemaTests
         written["level"] = "1";
         written["notThree"] = "3";
         conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid.Should().BeFalse();
+    }
+
+    // ── Placement in a built document: constraints, example, nullable ─────────
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void RangeAndExample_AreOnTheNumericBranch_NullableOnTheWholeUnion_ItemsForACollection(OpenApiSpecVersion version)
+    {
+        const string pointer = "#/components/schemas/NumberPlacementModel/properties/";
+        var properties = fixture.Documents[version]["components"]!["schemas"]!["NumberPlacementModel"]!["properties"]!;
+        var example = version == OpenApiSpecVersion.OpenApi3_0 ? "example" : "examples";
+        string[] constraintKeys = ["minimum", "maximum", "example", "examples"];
+
+        var bounded = properties["bounded"]!.AsObject();
+        var branches = bounded["anyOf"]!.AsArray().Select(b => b!.AsObject()).ToList();
+        var number = branches[0];
+        number["type"]!.GetValue<string>().Should().Be("integer");
+        number["minimum"]!.GetValue<int>().Should().Be(1);
+        number["maximum"]!.GetValue<int>().Should().Be(10);
+        (version == OpenApiSpecVersion.OpenApi3_0 ? number[example]! : number[example]![0]!).GetValue<int>().Should().Be(5);
+        number.ContainsKey("nullable").Should().BeFalse();
+        bounded.Where(p => constraintKeys.Contains(p.Key)).Should().BeEmpty(because: "the union itself carries no constraint");
+        branches.Skip(1).Where(b => b["type"]?.GetValue<string>() == "string")
+            .Should().ContainSingle().Which.Where(p => constraintKeys.Contains(p.Key)).Should().BeEmpty();
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            bounded["nullable"]!.GetValue<bool>().Should().BeTrue();
+        else
+            branches.Should().ContainSingle(b => b["type"] != null && b["type"]!.GetValue<string>() == "null");
+
+        var items = properties["items"]!.AsObject();
+        items["type"]!.GetValue<string>().Should().Be("array");
+        items["items"]!["anyOf"]!.AsArray().Should().HaveCount(2, because: "the rule applies to the items");
+        (version == OpenApiSpecVersion.OpenApi3_0 ? items[example]! : items[example]![0]!).ToJsonString().Should().Be("[1,2]");
+
+        fixture.Diagnostics[version].Should().NotContain(d => d.Location != null && d.Location.StartsWith(pointer, StringComparison.Ordinal));
     }
 }

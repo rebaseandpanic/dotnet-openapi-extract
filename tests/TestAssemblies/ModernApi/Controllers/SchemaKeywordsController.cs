@@ -113,4 +113,20 @@ public class SchemaKeywordsController : ControllerBase
     public ActionResult<EnumWireNamesModel> EnumWireNames(
         [FromQuery] StjTint tint = StjTint.Red,
         [FromQuery] StjTint[]? tints = null) => new EnumWireNamesModel();
+
+    /// <summary>XML examples of every JSON type.</summary>
+    [HttpGet("examples")]
+    public ActionResult<ExampleModel> Examples() => new ExampleModel();
+
+    /// <summary>XML examples on a positional record.</summary>
+    [HttpGet("record-examples")]
+    public ActionResult<ExampleRecord> RecordExamples() => new ExampleRecord(1, "EUR");
+
+    /// <summary>XML examples that cannot be written.</summary>
+    [HttpGet("example-failures")]
+    public ActionResult<ExampleFailuresModel> ExampleFailures() => new ExampleFailuresModel();
+
+    /// <summary>Constraints and examples on numbers read from strings.</summary>
+    [HttpGet("number-placement")]
+    public ActionResult<NumberPlacementModel> NumberPlacement() => new NumberPlacementModel();
 }

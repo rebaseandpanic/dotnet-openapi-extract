@@ -161,6 +161,20 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SchemaDefaultNotConvertible = "schema.default-not-convertible";
 
+    /// <summary>
+    /// An XML <c>&lt;example&gt;</c> of a property or a type does not parse as a value of its schema
+    /// (not a number for a number, not JSON for an object or an array, <c>null</c> for a schema that is
+    /// not nullable): no example is written. Location: the property or the type's component.
+    /// Subjects: <c>Type.Property</c> or the type, and the example text.
+    /// </summary>
+    public const string SchemaExampleNotParsable = "schema.example-not-parsable";
+
+    /// <summary>
+    /// A property or a type has several XML <c>&lt;example&gt;</c> elements: the first is used.
+    /// Location: the property or the type's component. Subjects: <c>Type.Property</c> or the type.
+    /// </summary>
+    public const string SchemaExampleMultiple = "schema.example-multiple";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

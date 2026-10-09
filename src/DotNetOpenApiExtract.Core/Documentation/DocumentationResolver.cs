@@ -41,8 +41,15 @@ public sealed class PropertyDocumentation
     /// <summary>Description of the property.</summary>
     public string? Description { get; init; }
 
-    /// <summary>Example value for the property, if present in XML docs.</summary>
+    /// <summary>
+    /// Example value for the property, if present in XML docs: the first <c>&lt;example&gt;</c> on the
+    /// property, else the <c>example</c> attribute of the record's <c>&lt;param&gt;</c> for a
+    /// positional-record property.
+    /// </summary>
     public string? Example { get; init; }
+
+    /// <summary>How many examples the property has (<c>&lt;example&gt;</c> elements); only the first is used.</summary>
+    public int ExampleCount { get; init; }
 }
 
 /// <summary>
@@ -246,15 +253,26 @@ public sealed class DocumentationResolver
             description = null;
 
         // --- Example ---
-        // Sourced from XML <example> on the property
+        // XML <example> on the property; for a positional-record property the compiler copies the
+        // <param> text to the property but not its example attribute, so that is read from the type.
         string? example = null;
-        if (xmlPropDoc?.Example != null && !string.IsNullOrEmpty(xmlPropDoc.Example))
+        var exampleCount = 0;
+        if (!string.IsNullOrEmpty(xmlPropDoc?.Example))
+        {
             example = xmlPropDoc.Example;
+            exampleCount = xmlPropDoc.ExampleCount;
+        }
+        else if (_xmlParser.GetTypeDoc(xmlDocOwner)?.ParameterExamples.GetValueOrDefault(property.Name) is { Length: > 0 } recordExample)
+        {
+            example = recordExample;
+            exampleCount = 1;
+        }
 
         return new PropertyDocumentation
         {
             Description = description,
             Example = example,
+            ExampleCount = exampleCount,
         };
     }
 
@@ -288,6 +306,17 @@ public sealed class DocumentationResolver
             return displayText;
 
         return null;
+    }
+
+    /// <summary>
+    /// The XML <c>&lt;example&gt;</c> of a type: the text of the first one and how many there are, or
+    /// <see langword="null"/> when the type has none.
+    /// </summary>
+    internal (string Text, int Count)? ResolveTypeExample(Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        var doc = _xmlParser.GetTypeDoc(type);
+        return string.IsNullOrEmpty(doc?.Example) ? null : (doc.Example, doc.ExampleCount);
     }
 
     /// <summary>
