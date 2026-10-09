@@ -156,4 +156,69 @@ public class EnumConverterNamingPolicyTests
         json["components"]!["schemas"]!["EnumWireNamesModel"]!["properties"]!["numeric"]!["enum"]!.AsArray()
             .Select(n => n!.GetValue<string>()).Should().Equal(written);
     }
+
+    // ── Newtonsoft: the last assignment wins, with the setters' semantics ───────
+
+    private static string[] NewtonsoftWrites(Newtonsoft.Json.Converters.StringEnumConverter converter) =>
+        Enum.GetValues<Tint>().Select(v => JsonSerializer.Deserialize<string>(Newtonsoft.Json.JsonConvert.SerializeObject(v, converter))!).ToArray();
+
+#pragma warning disable CS0618 // CamelCaseText is obsolete in Newtonsoft 13 but still honoured
+    public static TheoryData<string, Func<Newtonsoft.Json.Converters.StringEnumConverter>> NewtonsoftCombinations => new()
+    {
+        { "new StringEnumConverter(new CamelCaseNamingStrategy()) { CamelCaseText = false }",
+            () => new(new CamelCaseNamingStrategy()) { CamelCaseText = false } },
+        { "new StringEnumConverter(new SnakeCaseNamingStrategy()) { CamelCaseText = false }",
+            () => new(new SnakeCaseNamingStrategy()) { CamelCaseText = false } },
+        { "new StringEnumConverter(camelCaseText: true) { NamingStrategy = null }",
+            () => new(camelCaseText: true) { NamingStrategy = null } },
+        { "new StringEnumConverter(new SnakeCaseNamingStrategy()) { CamelCaseText = true }",
+            () => new(new SnakeCaseNamingStrategy()) { CamelCaseText = true } },
+        { "new StringEnumConverter { NamingStrategy = new KebabCaseNamingStrategy(), CamelCaseText = true }",
+            () => new() { NamingStrategy = new KebabCaseNamingStrategy(), CamelCaseText = true } },
+        { "new StringEnumConverter(camelCaseText: true) { NamingStrategy = new SnakeCaseNamingStrategy() }",
+            () => new(camelCaseText: true) { NamingStrategy = new SnakeCaseNamingStrategy() } },
+        { "new StringEnumConverter(typeof(KebabCaseNamingStrategy)) { CamelCaseText = false }",
+            () => new(typeof(KebabCaseNamingStrategy)) { CamelCaseText = false } },
+    };
+#pragma warning restore CS0618
+
+    [Theory]
+    [MemberData(nameof(NewtonsoftCombinations))]
+    public void NewtonsoftConstructorAndInitializer_GiveTheNamesNewtonsoftWrites(
+        string creation, Func<Newtonsoft.Json.Converters.StringEnumConverter> converter)
+    {
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var result = JsonOptionsExtractor.Extract(Context($"o.JsonSerializerOptions.Converters.Add({creation});"), diagnostics.Add);
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            GlobalConverterTypeNames = result.Mvc.GlobalConverterTypeNames,
+            GlobalConverterEnumNamingPolicies = result.Mvc.GlobalConverterEnumNamingPolicies,
+        });
+        var json = JsonNode.Parse(generator.GenerateSchema(typeof(Tint))
+            .SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
+
+        json["enum"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal(NewtonsoftWrites(converter()));
+        diagnostics.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("new StringEnumConverter(new CamelCaseNamingStrategy()) { NamingStrategy = myStrategy }", true)]
+    [InlineData("new StringEnumConverter(myStrategy) { NamingStrategy = new SnakeCaseNamingStrategy() }", false)]
+    [InlineData("new StringEnumConverter { CamelCaseText = flag }", true)]
+    public void LaterUnreadableStrategy_ClearsTheResult_WithAWarning(string creation, bool unreadable)
+    {
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var result = JsonOptionsExtractor.Extract(Context($"o.JsonSerializerOptions.Converters.Add({creation});"), diagnostics.Add);
+
+        if (unreadable)
+        {
+            result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal([null]);
+            diagnostics.Should().ContainSingle().Which.Code.Should().Be(ExtractionDiagnosticCodes.JsonOptionsUnknownConverterNamingPolicy);
+        }
+        else
+        {
+            result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal(CoreNamingPolicy.SnakeCaseLower);
+            diagnostics.Should().BeEmpty(because: "a later readable strategy replaces the unreadable one");
+        }
+    }
 }

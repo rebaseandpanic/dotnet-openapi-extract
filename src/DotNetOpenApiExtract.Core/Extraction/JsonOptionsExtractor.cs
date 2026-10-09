@@ -451,48 +451,74 @@ public static class JsonOptionsExtractor
         if (shortName != "StringEnumConverter")
             return null;
 
-        JsonNamingPolicy? result = null;
-        foreach (var argument in arguments)
+        // Newtonsoft 13 keeps one NamingStrategy; the constructor sets it, then each initializer
+        // assignment in order, with the setters' semantics: the last one wins. "Unknown" is a strategy
+        // the extractor cannot read — it names the members in some unknown way.
+        var state = new StrategyState(null, null);
+        for (var i = 0; i < arguments.Count; i++)
         {
+            var argument = arguments[i];
             var name = argument.NameColon?.Name.Identifier.Text;
-            if (name == "allowIntegerValues" || name == "namingStrategyParameters")
+            if (name is "allowIntegerValues" or "namingStrategyParameters")
                 continue;
             if (argument.Expression is LiteralExpressionSyntax literal
                 && (literal.IsKind(SyntaxKind.TrueLiteralExpression) || literal.IsKind(SyntaxKind.FalseLiteralExpression)))
             {
-                // camelCaseText is the only leading bool; a later bool is allowIntegerValues.
-                if (name == "camelCaseText" || (name == null && argument == arguments[0]))
-                    result = literal.IsKind(SyntaxKind.TrueLiteralExpression) ? JsonNamingPolicy.CamelCase : result;
+                // StringEnumConverter(bool camelCaseText): only a leading bool; a later one is allowIntegerValues.
+                if (name == "camelCaseText" || (name == null && i == 0))
+                    state = literal.IsKind(SyntaxKind.TrueLiteralExpression)
+                        ? new StrategyState(JsonNamingPolicy.CamelCase, null)
+                        : state;
                 continue;
             }
 
-            if (NamingStrategy(argument.Expression, ref unknown) is { } strategy)
-                result = strategy;
+            state = NamingStrategy(argument.Expression);
         }
 
-        if (creation.Initializer != null)
+        foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
         {
-            foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+            switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
             {
-                var property = (assignment.Left as IdentifierNameSyntax)?.Identifier.Text;
-                if (property == "NamingStrategy" && NamingStrategy(assignment.Right, ref unknown) is { } strategy)
-                    result = strategy;
-                else if (property == "CamelCaseText" && assignment.Right is LiteralExpressionSyntax flag)
-                    result = flag.IsKind(SyntaxKind.TrueLiteralExpression) ? JsonNamingPolicy.CamelCase : result;
-                else if (property is "NamingStrategy" or "CamelCaseText")
-                    unknown ??= assignment.Right.ToString();
+                case "NamingStrategy":
+                    state = NamingStrategy(assignment.Right);
+                    break;
+
+                // CamelCaseText = true sets a camelCase strategy unless one is set; false clears a
+                // camelCase strategy and leaves any other (an unknown one stays unknown).
+                case "CamelCaseText" when assignment.Right is LiteralExpressionSyntax flag
+                                          && flag.IsKind(SyntaxKind.TrueLiteralExpression):
+                    state = new StrategyState(JsonNamingPolicy.CamelCase, null);
+                    break;
+                case "CamelCaseText" when assignment.Right is LiteralExpressionSyntax flag
+                                          && flag.IsKind(SyntaxKind.FalseLiteralExpression):
+                    if (state.Policy == JsonNamingPolicy.CamelCase)
+                        state = new StrategyState(null, null);
+                    break;
+                case "CamelCaseText":
+                    state = new StrategyState(null, assignment.Right.ToString());
+                    break;
             }
         }
 
-        return result is JsonNamingPolicy.Preserve ? null : result;
+        unknown = state.Unknown;
+        return state.Policy is JsonNamingPolicy.Preserve ? null : state.Policy;
     }
 
     /// <summary>
-    /// A Newtonsoft naming strategy given as <c>new XNamingStrategy(…)</c> or <c>typeof(XNamingStrategy)</c>;
-    /// <see langword="null"/> with <paramref name="unknown"/> set when the expression is another one.
+    /// The naming strategy of a Newtonsoft converter: its policy (<see cref="JsonNamingPolicy.Preserve"/>
+    /// for <c>DefaultNamingStrategy</c>), none, or — when it cannot be read — the expression text.
     /// </summary>
-    private static JsonNamingPolicy? NamingStrategy(ExpressionSyntax expression, ref string? unknown)
+    private readonly record struct StrategyState(JsonNamingPolicy? Policy, string? Unknown);
+
+    /// <summary>
+    /// A Newtonsoft naming strategy given as <c>new XNamingStrategy(…)</c>, <c>typeof(XNamingStrategy)</c>
+    /// or <c>null</c> (no strategy); any other expression is unknown.
+    /// </summary>
+    private static StrategyState NamingStrategy(ExpressionSyntax expression)
     {
+        if (expression is LiteralExpressionSyntax nullLiteral && nullLiteral.IsKind(SyntaxKind.NullLiteralExpression))
+            return new StrategyState(null, null);
+
         var type = expression switch
         {
             ObjectCreationExpressionSyntax created => created.Type,
@@ -509,9 +535,7 @@ public static class JsonOptionsExtractor
             "DefaultNamingStrategy"   => JsonNamingPolicy.Preserve,
             _                         => null,
         };
-        if (policy == null)
-            unknown ??= expression.ToString();
-        return policy;
+        return policy != null ? new StrategyState(policy, null) : new StrategyState(null, expression.ToString());
     }
 
     /// <summary>
