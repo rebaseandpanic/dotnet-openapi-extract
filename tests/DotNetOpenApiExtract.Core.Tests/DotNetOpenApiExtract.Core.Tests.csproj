@@ -17,6 +17,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Each integration test class holds 300-400 MB of loaded assemblies and Roslyn
+         compilations; with one worker per core the run outgrows a small machine's memory.
+         Two workers finish as fast as four. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\DotNetOpenApiExtract.Core\DotNetOpenApiExtract.Core.csproj" />
   </ItemGroup>
 
