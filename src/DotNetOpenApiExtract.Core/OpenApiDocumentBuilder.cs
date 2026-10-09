@@ -1714,17 +1714,21 @@ public sealed class OpenApiDocumentBuilder
 
         // One Security Requirement Object per AddSecurityRequirement call: names within it
         // are combined (AND), separate objects in the array are alternatives (OR).
-        foreach (var schemeNames in securityResult.GlobalRequirements)
+        foreach (var entries in securityResult.GlobalRequirementEntries)
         {
             var requirement = new OpenApiSecurityRequirement();
-            foreach (var schemeName in schemeNames)
+            foreach (var (schemeName, scopes) in entries)
             {
                 // The host document is required for serialization: Microsoft.OpenApi writes a
                 // requirement key only if its reference resolves against the host document's
                 // components/securitySchemes (OpenApiSecurityRequirement.CanSerializeSecurityScheme);
                 // with a null host document every key is dropped and the requirement becomes {}.
                 var reference = new OpenApiSecuritySchemeReference(schemeName, document, null);
-                requirement[reference] = [];
+
+                // The values of an OAuth2 / OpenID Connect scheme are its scopes; other schemes keep [].
+                var isOAuth = securityResult.Schemes.TryGetValue(schemeName, out var declared)
+                              && declared.Type is SecuritySchemeType.OAuth2 or SecuritySchemeType.OpenIdConnect;
+                requirement[reference] = isOAuth ? scopes.ToList() : [];
             }
 
             document.Security ??= new List<OpenApiSecurityRequirement>();

@@ -225,6 +225,12 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SecurityDeprecatedMovedToExtension = "security.deprecated-moved-to-extension";
 
+    /// <summary>
+    /// The scopes listed for a scheme in <c>AddSecurityRequirement</c> cannot be resolved statically;
+    /// they are written as an empty list. Subjects: the scopes expression.
+    /// </summary>
+    public const string SecurityRequirementNonLiteralScopes = "security.requirement-non-literal-scopes";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

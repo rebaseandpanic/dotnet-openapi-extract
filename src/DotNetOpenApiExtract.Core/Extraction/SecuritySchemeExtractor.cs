@@ -30,6 +30,26 @@ public sealed class SecuritySchemeExtractionResult
     public IReadOnlyList<IReadOnlyList<string>> GlobalRequirements { get; init; } = [];
 
     /// <summary>
+    /// The document-level requirements with their scopes, in the order of
+    /// <see cref="GlobalRequirements"/>: one entry per <c>AddSecurityRequirement</c> call, each a list
+    /// of (scheme name, scopes) pairs — the scopes listed next to the scheme reference
+    /// (<c>{ ref, ["read"] }</c> or <c>[ref] = ["read"]</c>); empty when none are listed. When set,
+    /// <see cref="GlobalRequirements"/> holds the same names.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<SecurityRequirementEntry>> GlobalRequirementEntries
+    {
+        get => _entries ?? GlobalRequirements.Select(names => (IReadOnlyList<SecurityRequirementEntry>)names
+            .Select(name => new SecurityRequirementEntry(name, [])).ToList()).ToList();
+        init
+        {
+            _entries = value;
+            GlobalRequirements = value.Select(entry => (IReadOnlyList<string>)entry.Select(e => e.SchemeName).ToList()).ToList();
+        }
+    }
+
+    private readonly IReadOnlyList<IReadOnlyList<SecurityRequirementEntry>>? _entries;
+
+    /// <summary>
     /// Names of <c>AddSecurityDefinition</c> declarations that are omitted because a value they
     /// need (OAuth2 flows and their URLs and scopes, the OpenID Connect URL, the OAuth2 metadata
     /// URL, <c>Deprecated</c>) cannot be resolved statically: a variable, a call, configuration.
@@ -49,6 +69,11 @@ public sealed class SecuritySchemeExtractionResult
         init => GlobalRequirements = value.Count > 0 ? [value] : [];
     }
 }
+
+/// <summary>One scheme of a security requirement and the scopes listed for it.</summary>
+/// <param name="SchemeName">The scheme name.</param>
+/// <param name="Scopes">The scopes (OAuth2 / OpenID Connect) listed next to the scheme reference.</param>
+public sealed record SecurityRequirementEntry(string SchemeName, IReadOnlyList<string> Scopes);
 
 /// <summary>
 /// Scans a Roslyn <see cref="SourceAnalysisContext"/> for security-scheme registrations
@@ -99,7 +124,7 @@ public static class SecuritySchemeExtractor
             return new SecuritySchemeExtractionResult();
 
         var schemes = new Dictionary<string, OpenApiSecurityScheme>(StringComparer.Ordinal);
-        var globalRequirements = new List<IReadOnlyList<string>>();
+        var globalRequirements = new List<IReadOnlyList<SecurityRequirementEntry>>();
         var omitted = new List<string>();
 
         // ── 1. AddJwtBearer registrations ─────────────────────────────────────
@@ -169,16 +194,16 @@ public static class SecuritySchemeExtractor
         {
             // One call = one Security Requirement Object: its names are combined (AND),
             // separate calls are alternatives (OR).
-            var names = TryExtractRequirementSchemeNames(
+            var entries = TryExtractRequirementSchemeNames(
                 invocation, context.CompilationResult?.Compilation, onDiagnostic);
-            if (names.Count > 0)
-                globalRequirements.Add(names);
+            if (entries.Count > 0)
+                globalRequirements.Add(entries);
         }
 
         return new SecuritySchemeExtractionResult
         {
             Schemes = schemes,
-            GlobalRequirements = globalRequirements,
+            GlobalRequirementEntries = globalRequirements,
             OmittedSchemes = omitted.Where(n => !schemes.ContainsKey(n)).ToList(),
         };
     }
@@ -498,7 +523,7 @@ public static class SecuritySchemeExtractor
     /// Optional compilation used to resolve scheme names given as in-project
     /// <c>const string</c> members. Pass <see langword="null"/> to accept literals only.
     /// </param>
-    private static IReadOnlyList<string> TryExtractRequirementSchemeNames(
+    private static IReadOnlyList<SecurityRequirementEntry> TryExtractRequirementSchemeNames(
         InvocationExpressionSyntax invocation,
         CSharpCompilation? compilation,
         Action<ExtractionDiagnostic>? onDiagnostic)
@@ -520,13 +545,13 @@ public static class SecuritySchemeExtractor
         // AddSecurityRequirement(doc => new OpenApiSecurityRequirement { ... })
         // are handled without special-casing.
 
-        var names = new List<string>();
+        var names = new List<SecurityRequirementEntry>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        void AddName(string name)
+        void AddName(string name, SyntaxNode reference)
         {
             if (!string.IsNullOrWhiteSpace(name) && seen.Add(name))
-                names.Add(name);
+                names.Add(new SecurityRequirementEntry(name, ScopesOf(reference, invocation, compilation, onDiagnostic)));
         }
 
         // ── Pattern A: referenceId argument of new OpenApiSecuritySchemeReference(...) ──
@@ -549,7 +574,7 @@ public static class SecuritySchemeExtractor
             if (resolvedName == null)
                 WarnNonLiteralRequirementSchemeName(onDiagnostic);
             else
-                AddName(resolvedName);
+                AddName(resolvedName, objCreation);
         }
 
         // ── Pattern B: Id = "<literal>" or Id = <const> inside an object initializer that
@@ -595,10 +620,59 @@ public static class SecuritySchemeExtractor
             if (idValue == null)
                 WarnNonLiteralRequirementSchemeName(onDiagnostic);
             else
-                AddName(idValue);
+                AddName(idValue, objCreation);
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// The scopes listed for the scheme reference <paramref name="reference"/> in its requirement: the
+    /// value of its pair <c>{ key, scopes }</c> or <c>[key] = scopes</c>, where the key is the reference
+    /// or the expression that contains it. Scopes are a collection expression, an array or a list
+    /// initializer of literal or constant strings; empty when the pair is not found. Scopes that are
+    /// not literals are dropped with a warning.
+    /// </summary>
+    private static IReadOnlyList<string> ScopesOf(
+        SyntaxNode reference, InvocationExpressionSyntax invocation, CSharpCompilation? compilation, Action<ExtractionDiagnostic>? onDiagnostic)
+    {
+        for (var node = reference; node != null && node != invocation; node = node.Parent)
+        {
+            ExpressionSyntax? value = node.Parent switch
+            {
+                InitializerExpressionSyntax { RawKind: (int)SyntaxKind.ComplexElementInitializerExpression, Expressions: [var key, var scopeValue] }
+                    when key == node => scopeValue,
+                BracketedArgumentListSyntax { Parent: ImplicitElementAccessSyntax { Parent: AssignmentExpressionSyntax indexed } }
+                    when node is ArgumentSyntax => indexed.Right,
+                _ => null,
+            };
+            if (value == null)
+                continue;
+
+            IEnumerable<ExpressionSyntax>? items = value switch
+            {
+                CollectionExpressionSyntax collection => collection.Elements.OfType<ExpressionElementSyntax>().Select(e => e.Expression),
+                ArrayCreationExpressionSyntax { Initializer: { } array } => array.Expressions,
+                ImplicitArrayCreationExpressionSyntax { Initializer: { } implicitArray } => implicitArray.Expressions,
+                BaseObjectCreationExpressionSyntax created => created.Initializer?.Expressions ?? [],
+                _ => null,
+            };
+            var scopes = items?.Select(item => InvocationMatcher.GetStringValue(item, compilation)).ToList();
+            if (scopes == null || scopes.Any(scope => scope == null))
+            {
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code    = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes,
+                    Message = $"AddSecurityRequirement: the scopes {value} cannot be resolved statically — written as an empty list.",
+                    Subjects = [value.ToString()],
+                });
+                return [];
+            }
+
+            return scopes!;
+        }
+
+        return [];
     }
 
     /// <summary>
