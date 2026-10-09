@@ -295,7 +295,7 @@ public sealed class SchemaGenerator
             {
                 var converterHint = JsonConverterRegistry.TryGet(converterFullName);
                 if (converterHint != null && JsonConverterRegistry.AppliesToType(converterHint, isEnum: false, type.FullName))
-                    return BuildSchemaFromHint(converterHint, type);
+                    return BuildSchemaFromHint(converterHint);
             }
 
             var schema = new OpenApiSchema { Type = primitive.SchemaType };
@@ -409,9 +409,10 @@ public sealed class SchemaGenerator
     /// Also emits <c>x-enum-descriptions</c>, <c>x-enum-varnames</c>, and a markdown
     /// auto-description when the doc resolver is available and options permit.
     /// </summary>
-    private IOpenApiSchema GenerateEnumSchema(Type enumType)
+    private IOpenApiSchema GenerateEnumSchema(Type enumType, EnumWireNaming? propertyNaming = null)
     {
-        var naming = TypeEnumNaming(enumType);
+        // A string converter on the property names the members; otherwise the type's converters do.
+        var naming = propertyNaming ?? TypeEnumNaming(enumType);
         bool asString = naming.HasValue;
 
         var fields = enumType.GetFields(BindingFlags.Public | BindingFlags.Static);
@@ -736,31 +737,12 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Builds an <see cref="OpenApiSchema"/> from a <see cref="ConverterSchemaHint"/>.
-    /// For enum types with a string-type hint, the enum values are the members' names on the wire.
-    /// For other types, a simple schema with the specified type/format/description is returned.
+    /// Builds the scalar schema a converter writes for a non-enum type (<c>DateTime</c> under
+    /// <c>IsoDateTimeConverter</c>, …): its type, format and description. String enums are built by
+    /// <see cref="GenerateEnumSchema"/> with the converter's naming.
     /// </summary>
-    private static IOpenApiSchema BuildSchemaFromHint(ConverterSchemaHint hint, Type targetType)
+    private static IOpenApiSchema BuildSchemaFromHint(ConverterSchemaHint hint)
     {
-        // For string enum override: produce enum values as names (string schema with enum).
-        if (hint.SchemaType == JsonSchemaType.String && targetType.IsEnum)
-        {
-            var fields = targetType.GetFields(BindingFlags.Public | BindingFlags.Static);
-            var enumValues = fields
-                .Select(f => (JsonNode)JsonValue.Create(EnumWireName(f, hint.EnumNaming))!)
-                .ToList();
-
-            var enumSchema = new OpenApiSchema
-            {
-                Type = JsonSchemaType.String,
-                Enum = enumValues,
-            };
-            if (!string.IsNullOrEmpty(hint.Description))
-                enumSchema.Description = hint.Description;
-            return enumSchema;
-        }
-
-        // For all other types (DateTime → IsoDateTimeConverter, etc.): plain scalar schema.
         var schema = new OpenApiSchema { Type = hint.SchemaType };
         if (!string.IsNullOrEmpty(hint.Format))
             schema.Format = hint.Format;
@@ -871,7 +853,12 @@ public sealed class SchemaGenerator
             if (propConverterHint != null)
             {
                 var underlying = IsNullableValueType(propType) ? propType.GetGenericArguments()[0] : null;
-                propSchema = BuildSchemaFromHint(propConverterHint, underlying ?? propType);
+                var converted = underlying ?? propType;
+                // A string enum is the enum's own schema under the converter's naming, so it keeps
+                // x-enum-varnames / x-enum-descriptions (CLR members) parallel to the wire names.
+                propSchema = converted.IsEnum && propConverterHint.SchemaType == JsonSchemaType.String
+                    ? GenerateEnumSchema(converted, propConverterHint.EnumNaming)
+                    : BuildSchemaFromHint(propConverterHint);
                 if (underlying != null)
                     propSchema = MakeNullable(propSchema);
             }

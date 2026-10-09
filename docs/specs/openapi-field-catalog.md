@@ -552,7 +552,7 @@ Polymorphism (`[JsonPolymorphic]` with `TypeDiscriminatorPropertyName`, `IgnoreU
 | `schema.readOnly` / `writeOnly` | 3.0 | see §24.5 | see §24.5 | = | = | see §24.5 | — | supported | — |
 | `schema.deprecated` | 3.0 | see §24.5 | — | — | — | — | — | supported | — |
 | `schema.x-enum-varnames` | — (extension) | enum member names (CLR), parallel to `enum`; disable with `--no-enum-varnames` | written | = | = | — | — | supported | — |
-| `schema.x-enum-varnames` with wire names | — (extension) | string-serialized enum whose `enum` values become wire names (§24.3) | stays the CLR member names, same order and length as `enum` | = | = | — | — | supported | — |
+| `schema.x-enum-varnames` with wire names | — (extension) | string-serialized enum whose `enum` values become wire names (§24.3), the converter on the type, the property or global | stays the CLR member names, same order and length as `enum`; `x-enum-descriptions` likewise | = | = | — | — | supported | — |
 | `schema.x-enum-descriptions` | — (extension) | XML `<summary>` → `[Description]` per enum value | written | = | = | — | `enum.value-description` | supported | — |
 
 ## 25. Discriminator Object

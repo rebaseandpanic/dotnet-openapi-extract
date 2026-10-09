@@ -125,6 +125,31 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
         values.Should().HaveCount(Enum.GetNames<StjTint>().Length);
     }
 
+    public static TheoryData<OpenApiSpecVersion, string, Type> PropertyConverterCases()
+    {
+        var data = new TheoryData<OpenApiSpecVersion, string, Type>();
+        foreach (var version in VersionedDocumentHarness.Versions)
+        {
+            data.Add(version, "propertyStj", typeof(Tint));
+            data.Add(version, "propertyNewtonsoft", typeof(Tint));
+            data.Add(version, "propertyOverType", typeof(StjTint));
+            data.Add(version, "nullablePropertyStj", typeof(Tint));
+        }
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(PropertyConverterCases))]
+    public void PropertyConverter_KeepsVarnamesAndDescriptions_ParallelToTheWireNames(OpenApiSpecVersion version, string property, Type enumType)
+    {
+        var schema = Property(version, property);
+
+        Strings(schema["x-enum-varnames"]).Should().Equal(Enum.GetNames(enumType));
+        Strings(schema["x-enum-descriptions"]).Should().Equal(
+            "Renamed for System.Text.Json.", "Renamed for Newtonsoft.Json.", "Renamed for both serializers.", "Not renamed.");
+        Strings(schema["enum"]).Should().HaveCount(Enum.GetNames(enumType).Length);
+    }
+
     [Theory]
     [MemberData(nameof(AllVersions))]
     public void WithoutConverter_TheEnumStaysNumeric(OpenApiSpecVersion version)
