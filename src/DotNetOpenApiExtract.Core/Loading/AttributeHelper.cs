@@ -162,6 +162,8 @@ public static class AttributeHelper
         public const string SwaggerTag = "Swashbuckle.AspNetCore.Annotations.SwaggerTagAttribute";
         public const string SwaggerSchema = "Swashbuckle.AspNetCore.Annotations.SwaggerSchemaAttribute";
         public const string SwaggerRequestBody = "Swashbuckle.AspNetCore.Annotations.SwaggerRequestBodyAttribute";
+        public const string SwaggerDiscriminator = "Swashbuckle.AspNetCore.Annotations.SwaggerDiscriminatorAttribute";
+        public const string SwaggerSubType = "Swashbuckle.AspNetCore.Annotations.SwaggerSubTypeAttribute";
 
         // DataAnnotations
         public const string Required = "System.ComponentModel.DataAnnotations.RequiredAttribute";
@@ -200,6 +202,8 @@ public static class AttributeHelper
         // System.Text.Json.Serialization — advanced
         public const string JsonUnmappedMemberHandling = "System.Text.Json.Serialization.JsonUnmappedMemberHandlingAttribute";
         public const string JsonConverter = "System.Text.Json.Serialization.JsonConverterAttribute";
+        public const string JsonPolymorphic = "System.Text.Json.Serialization.JsonPolymorphicAttribute";
+        public const string JsonDerivedType = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
 
         // Asp.Versioning (current namespace)
         public const string ApiVersion = "Asp.Versioning.ApiVersionAttribute";

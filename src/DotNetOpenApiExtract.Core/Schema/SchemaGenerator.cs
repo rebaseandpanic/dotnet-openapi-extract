@@ -28,6 +28,7 @@ public sealed class SchemaGenerator
     private readonly SchemaOptions _options;
     private readonly DocumentationResolver? _docResolver;
     private readonly DiagnosticBag _diagnostics; // per-instance deduplication of warnings
+    private readonly Dictionary<string, PolymorphismInfo?> _polymorphism = new(StringComparer.Ordinal); // base type → union, cached
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
     // GetCustomAttributesData() scans on the same type when processing its properties.
@@ -587,6 +588,9 @@ public sealed class SchemaGenerator
     /// </summary>
     private IOpenApiSchema GenerateComplexSchema(Type type)
     {
+        if (UnionOf(type) is { } polymorphism)
+            return GenerateUnionSchema(polymorphism);
+
         var schemaId = GetSchemaId(type);
 
         // If already fully generated, return $ref immediately.
@@ -604,75 +608,205 @@ public sealed class SchemaGenerator
             _schemas[schemaId] = schema;
             _schemaIdToType[schemaId] = type;
 
-            // Collect all properties including inherited ones.
-            var allProperties = CollectProperties(type);
-
-            var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
-            var required = new HashSet<string>(StringComparer.Ordinal);
-
-            foreach (var (propName, propType, propInfo) in allProperties)
-            {
-                // Cache attribute data once per property to avoid repeated GetCustomAttributesData() calls.
-                // Positional record parameters store their default-target attributes on the primary-ctor
-                // parameter, not the synthesized property — merge them in (see AttributeHelper).
-                var propAttrData = AttributeHelper.GetMergedPropertyAttributes(propInfo);
-
-                // Skip [JsonIgnore(Condition = Always)]
-                if (ShouldIgnoreProperty(propAttrData))
-                    continue;
-
-                // Determine the serialized property name.
-                var serializedName = ResolvePropertyName(propAttrData, propName);
-
-                // Generate the property schema.
-                var propSchema = GenerateSchema(propType);
-
-                // Apply property-level [JsonConverter] override.
-                // This handles cases such as [JsonConverter(typeof(JsonStringEnumConverter))]
-                // placed on a property whose enum type does not carry the converter itself.
-                var propConverterHint = GetConverterHintForType(propType, propAttrData);
-                if (propConverterHint != null)
-                {
-                    propSchema = BuildSchemaFromHint(propConverterHint, propType);
-                }
-
-                // Apply nullable flag for reference type properties (matches Swashbuckle behavior).
-                // Swashbuckle marks all reference type properties as nullable unless NRT
-                // annotates them as non-nullable (byte=1).
-                if (!propType.IsValueType && IsNullableReferenceProperty(propAttrData, propInfo))
-                {
-                    propSchema = MakeNullable(propSchema);
-                }
-
-                // Apply validation and documentation attributes to the property schema.
-                // OpenAPI forbids sibling keywords on a bare $ref (3.0) or treats them ambiguously (3.1).
-                // When the property schema is a reference AND there are attributes that write sibling
-                // keywords, wrap it in allOf so the keywords are valid on the enclosing schema.
-                if (propSchema is OpenApiSchemaReference && HasAnySiblingAttribute(propAttrData))
-                    propSchema = EnsureMutableSchema(propSchema);
-
-                if (propSchema is OpenApiSchema inlinePropSchema)
-                    ApplyValidationAttributes(inlinePropSchema, propAttrData);
-
-                properties[serializedName] = propSchema;
-
-                // Mark as required if annotated or non-nullable (NRT).
-                if (IsPropertyRequired(propAttrData, propType, propInfo))
-                    required.Add(serializedName);
-            }
-
-            schema.Properties = properties.Count > 0 ? properties : null;
-            schema.Required = required.Count > 0 ? required : null;
-
-            // [JsonUnmappedMemberHandling(Disallow)] on the type → additionalProperties: false
-            ApplyTypeAttributes(schema, type);
-
+            PopulateObjectSchema(type, schema);
             return new OpenApiSchemaReference(schemaId, null);
         }
         finally
         {
             _generating.Remove(schemaId);
         }
+    }
+
+    /// <summary>
+    /// Fills <paramref name="schema"/> with the properties of <paramref name="type"/> as System.Text.Json
+    /// writes them when the type is used directly (base properties flattened in).
+    /// </summary>
+    private void PopulateObjectSchema(Type type, OpenApiSchema schema)
+    {
+        // Collect all properties including inherited ones.
+        var allProperties = CollectProperties(type);
+
+        var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+        var required = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (propName, propType, propInfo) in allProperties)
+        {
+            // Cache attribute data once per property to avoid repeated GetCustomAttributesData() calls.
+            // Positional record parameters store their default-target attributes on the primary-ctor
+            // parameter, not the synthesized property — merge them in (see AttributeHelper).
+            var propAttrData = AttributeHelper.GetMergedPropertyAttributes(propInfo);
+
+            // Skip [JsonIgnore(Condition = Always)]
+            if (ShouldIgnoreProperty(propAttrData))
+                continue;
+
+            // Determine the serialized property name.
+            var serializedName = ResolvePropertyName(propAttrData, propName);
+
+            // Generate the property schema.
+            var propSchema = GenerateSchema(propType);
+
+            // Apply property-level [JsonConverter] override.
+            // This handles cases such as [JsonConverter(typeof(JsonStringEnumConverter))]
+            // placed on a property whose enum type does not carry the converter itself.
+            var propConverterHint = GetConverterHintForType(propType, propAttrData);
+            if (propConverterHint != null)
+            {
+                propSchema = BuildSchemaFromHint(propConverterHint, propType);
+            }
+
+            // Apply nullable flag for reference type properties (matches Swashbuckle behavior).
+            // Swashbuckle marks all reference type properties as nullable unless NRT
+            // annotates them as non-nullable (byte=1).
+            if (!propType.IsValueType && IsNullableReferenceProperty(propAttrData, propInfo))
+            {
+                propSchema = MakeNullable(propSchema);
+            }
+
+            // Apply validation and documentation attributes to the property schema.
+            // OpenAPI forbids sibling keywords on a bare $ref (3.0) or treats them ambiguously (3.1).
+            // When the property schema is a reference AND there are attributes that write sibling
+            // keywords, wrap it in allOf so the keywords are valid on the enclosing schema.
+            if (propSchema is OpenApiSchemaReference && HasAnySiblingAttribute(propAttrData))
+                propSchema = EnsureMutableSchema(propSchema);
+
+            if (propSchema is OpenApiSchema inlinePropSchema)
+                ApplyValidationAttributes(inlinePropSchema, propAttrData);
+
+            properties[serializedName] = propSchema;
+
+            // Mark as required if annotated or non-nullable (NRT).
+            if (IsPropertyRequired(propAttrData, propType, propInfo))
+                required.Add(serializedName);
+        }
+
+        schema.Properties = properties.Count > 0 ? properties : null;
+        schema.Required = required.Count > 0 ? required : null;
+
+        // [JsonUnmappedMemberHandling(Disallow)] on the type → additionalProperties: false
+        ApplyTypeAttributes(schema, type);
+    }
+
+    // =========================================================================
+    // Polymorphism
+    // =========================================================================
+
+    /// <summary>
+    /// The polymorphism of <paramref name="type"/> when the generator writes it as a union, or
+    /// <see langword="null"/>. Written today: an abstract base or an interface whose every declared
+    /// derived type has a discriminator value. Other declarations keep the flattened schema.
+    /// </summary>
+    private PolymorphismInfo? UnionOf(Type type)
+    {
+        var key = type.FullName ?? type.Name;
+        if (_polymorphism.TryGetValue(key, out var cached))
+            return cached;
+
+        var info = PolymorphismReader.Read(type);
+        if (info != null
+            && !((type.IsAbstract || type.IsInterface) && info.DerivedTypes.All(d => d.DiscriminatorValue != null)))
+            info = null;
+
+        _polymorphism[key] = info;
+        return info;
+    }
+
+    /// <summary>
+    /// The component of a polymorphic base: <c>oneOf</c> of its variants plus a
+    /// <c>discriminator</c> whose <c>mapping</c> keys are the values as strings. Each variant
+    /// <c>{D}As{B}</c> is the derived type's direct-use properties plus the discriminator property,
+    /// required, accepting only its value. The derived type's own component (direct use) never
+    /// carries the discriminator.
+    /// </summary>
+    private IOpenApiSchema GenerateUnionSchema(PolymorphismInfo polymorphism)
+    {
+        var baseType = polymorphism.BaseType;
+        var unionId = GetSchemaId(baseType);
+
+        if (_schemas.ContainsKey(unionId) || !_generating.Add(unionId))
+            return new OpenApiSchemaReference(unionId, null);
+
+        try
+        {
+            var union = new OpenApiSchema();
+            _schemas[unionId] = union;
+            _schemaIdToType[unionId] = baseType;
+
+            var alternatives = new List<IOpenApiSchema>();
+            var mapping = new Dictionary<string, OpenApiSchemaReference>(StringComparer.Ordinal);
+
+            foreach (var derived in polymorphism.DerivedTypes)
+            {
+                var variantId = ReserveVariantId(derived.Type, baseType, unionId);
+                if (!_schemas.ContainsKey(variantId) && _generating.Add(variantId))
+                {
+                    try
+                    {
+                        var variant = new OpenApiSchema { Type = JsonSchemaType.Object };
+                        _schemas[variantId] = variant;
+                        _schemaIdToType[variantId] = derived.Type;
+                        PopulateVariantSchema(variant, derived, polymorphism.PropertyName);
+                    }
+                    finally
+                    {
+                        _generating.Remove(variantId);
+                    }
+                }
+
+                alternatives.Add(new OpenApiSchemaReference(variantId, null));
+                mapping[Convert.ToString(derived.DiscriminatorValue, System.Globalization.CultureInfo.InvariantCulture)!] =
+                    new OpenApiSchemaReference(variantId, null);
+            }
+
+            union.OneOf = alternatives;
+            union.Discriminator = new OpenApiDiscriminator
+            {
+                PropertyName = polymorphism.PropertyName,
+                Mapping      = mapping,
+            };
+            return new OpenApiSchemaReference(unionId, null);
+        }
+        finally
+        {
+            _generating.Remove(unionId);
+        }
+    }
+
+    /// <summary>
+    /// The derived type's properties with the discriminator property first, required and limited
+    /// to the variant's value. A derived property serialized under the discriminator's name is a
+    /// contract System.Text.Json rejects, so it is an extraction error.
+    /// </summary>
+    private void PopulateVariantSchema(OpenApiSchema variant, DerivedTypeInfo derived, string propertyName)
+    {
+        PopulateObjectSchema(derived.Type, variant);
+
+        if (variant.Properties != null && variant.Properties.ContainsKey(propertyName))
+        {
+            var member = CollectProperties(derived.Type)
+                .Where(p => ResolvePropertyName(AttributeHelper.GetMergedPropertyAttributes(p.Info), p.Name) == propertyName)
+                .Select(p => p.Info.Name)
+                .FirstOrDefault()
+                ?? propertyName;
+            throw new OpenApiExtractionException(
+                $"{derived.Type.FullName}.{member} is serialized as '{propertyName}', the discriminator property " +
+                "of its polymorphic base; System.Text.Json rejects this contract. Rename the property or the discriminator.",
+                derived.Type.FullName ?? derived.Type.Name,
+                member);
+        }
+
+        var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            [propertyName] = VersionedSchemaForms.SingleValue(derived.DiscriminatorValue!, _options.OpenApiVersion),
+        };
+        foreach (var (name, schema) in variant.Properties ?? new Dictionary<string, IOpenApiSchema>())
+            properties[name] = schema;
+        variant.Properties = properties;
+
+        var required = new HashSet<string>(StringComparer.Ordinal) { propertyName };
+        foreach (var name in variant.Required ?? new HashSet<string>())
+            required.Add(name);
+        variant.Required = required;
     }
 
     // =========================================================================
@@ -1068,10 +1202,17 @@ public sealed class SchemaGenerator
             return ReserveNonGenericId(type);
 
         return _schemaIds.Reserve(
-            SchemaKey.Direct(type),
+            OwnKey(type),
             candidate: GenericIdCandidate(type, fullBaseName: false),
             fallback:  GenericIdCandidate(type, fullBaseName: true));
     }
+
+    /// <summary>
+    /// The key of the component a type's own id names: the union for a polymorphic base (whose
+    /// component is the union, so references at its uses stay unchanged), the direct schema otherwise.
+    /// </summary>
+    private SchemaKey OwnKey(Type type) =>
+        UnionOf(type) != null ? SchemaKey.Union(type) : SchemaKey.Direct(type);
 
     /// <summary>
     /// A non-generic type's id is its short name, or its full name when another type holds the
@@ -1082,9 +1223,26 @@ public sealed class SchemaGenerator
     {
         var typeFullName = type.FullName ?? type.Name;
         return _schemaIds.Reserve(
-            SchemaKey.Direct(type),
+            OwnKey(type),
             candidate: type.Name,
             fallback:  typeFullName.Replace('.', '_').Replace('+', '_'));
+    }
+
+    /// <summary>
+    /// Id of the variant of <paramref name="derived"/> in the polymorphic use of the base whose
+    /// union is <paramref name="unionId"/>: <c>{D}As{B}</c>, or the derived type's full name
+    /// (<c>.</c>/<c>+</c> → <c>_</c>) + <c>As{B}</c> when another component holds that name.
+    /// </summary>
+    private string ReserveVariantId(Type derived, Type baseType, string unionId)
+    {
+        var derivedName = derived.IsGenericType ? GenericIdCandidate(derived, fullBaseName: false) : derived.Name;
+        var derivedFullName = derived.IsGenericType
+            ? GenericIdCandidate(derived, fullBaseName: true)
+            : (derived.FullName ?? derived.Name).Replace('.', '_').Replace('+', '_');
+        return _schemaIds.Reserve(
+            SchemaKey.Variant(derived, baseType),
+            candidate: $"{derivedName}As{unionId}",
+            fallback:  $"{derivedFullName}As{unionId}");
     }
 
     /// <summary>

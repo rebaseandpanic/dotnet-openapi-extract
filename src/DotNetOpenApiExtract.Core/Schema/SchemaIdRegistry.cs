@@ -12,17 +12,32 @@ internal enum SchemaRole
 {
     /// <summary>The type itself, as written when it is used directly.</summary>
     Direct,
+
+    /// <summary>A polymorphic base: the union of its alternatives (<c>oneOf</c> / <c>anyOf</c>).</summary>
+    Union,
+
+    /// <summary>A derived type in the polymorphic use of one base: its properties plus the discriminator.</summary>
+    Variant,
 }
 
 /// <summary>
-/// Identity of one component schema: the CLR type, the serialization context and the role.
+/// Identity of one component schema: the CLR type, the serialization context and the role (for a
+/// variant, also the base it is a variant of).
 /// The type is identified by its full name, so closed generic types with different arguments
 /// (or different definitions) are different keys.
 /// </summary>
-internal readonly record struct SchemaKey(string TypeIdentity, SchemaContext Context, SchemaRole Role)
+internal readonly record struct SchemaKey(string TypeIdentity, SchemaContext Context, SchemaRole Role, string? RoleBase = null)
 {
     public static SchemaKey Direct(Type type) =>
-        new(type.FullName ?? type.Name, SchemaContext.Mvc, SchemaRole.Direct);
+        new(Identity(type), SchemaContext.Mvc, SchemaRole.Direct);
+
+    public static SchemaKey Union(Type baseType) =>
+        new(Identity(baseType), SchemaContext.Mvc, SchemaRole.Union);
+
+    public static SchemaKey Variant(Type derivedType, Type baseType) =>
+        new(Identity(derivedType), SchemaContext.Mvc, SchemaRole.Variant, Identity(baseType));
+
+    private static string Identity(Type type) => type.FullName ?? type.Name;
 }
 
 /// <summary>
