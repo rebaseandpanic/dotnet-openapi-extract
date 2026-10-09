@@ -256,7 +256,7 @@ public class NumberHandlingSchemaTests
 
     // ── Allowed / denied values and ranges on the union ──────────────────────
 
-    [JsonNumberHandling(StjNumberHandling.WriteAsString)]
+    [JsonNumberHandling(StjNumberHandling.WriteAsString | StjNumberHandling.AllowReadingFromString)]
     public sealed class ValuesOnUnions
     {
         [AllowedValues(1, 2)] public int Level { get; set; } = 1;
@@ -294,7 +294,8 @@ public class NumberHandlingSchemaTests
         var number = (OpenApiSchema)level.AnyOf![0];
         var text = (OpenApiSchema)level.AnyOf[1];
         number.Enum!.Select(e => e!.ToJsonString()).Should().Equal("1", "2");
-        text.Enum!.Select(e => e!.GetValue<string>()).Should().Equal("1", "2");
+        text.Enum.Should().BeNull(because: "STJ reads other spellings of an allowed number; the string branch keeps its grammar");
+        text.Pattern.Should().Be(IntegerPattern);
 
         var notThree = (OpenApiSchema)Values(version).Properties["notThree"];
         ((OpenApiSchema)notThree.AnyOf![0]).Not!.Enum!.Select(e => e!.ToJsonString()).Should().Equal(["3"]);
@@ -352,8 +353,13 @@ public class NumberHandlingSchemaTests
         var result = conformance.ValidateComponent(nameof(ValuesOnUnions), written);
         result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors));
 
-        written["level"] = "3";
-        conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid.Should().BeFalse();
+        StjWire.Accepts("{\"level\":\"+1\"}", typeof(ValuesOnUnions), StjWire.Mvc()).Should().BeTrue();
+        written["level"] = "+1";
+        conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid
+            .Should().BeTrue(because: "a spelling STJ reads passes the schema");
+        written["level"] = 3;
+        conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid
+            .Should().BeFalse(because: "3 is not an allowed number");
         written["level"] = "1";
         written["notThree"] = "3";
         conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid.Should().BeFalse();

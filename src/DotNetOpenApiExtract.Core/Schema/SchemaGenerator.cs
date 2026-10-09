@@ -1473,10 +1473,11 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
-    /// Allowed / denied values on a number-handling union, per branch with its own JSON type: the
-    /// numbers on the numeric branch, their string forms (as System.Text.Json writes them with
-    /// <c>WriteAsString</c>) on the numeric-string branch; the named-literal branch is dropped by
-    /// allowed values, which are finite numbers. Values are checked against the numeric branch's type.
+    /// Allowed / denied values on a number-handling union. Allowed values constrain the numeric branch
+    /// only (the numeric-string branch keeps its grammar: STJ also reads "+1" and "01") and drop the
+    /// named-literal branch, since they are finite numbers. Denied values exclude the numbers on the
+    /// numeric branch and their written string forms on the numeric-string branch. Values are checked
+    /// against the numeric branch's type.
     /// </summary>
     private void ApplyValuesToNumberUnion(
         OpenApiSchema schema, NumberUnion union, CustomAttributeData? allowed, CustomAttributeData? denied,
@@ -1489,9 +1490,9 @@ public sealed class SchemaGenerator
 
         if (allowed != null && ConvertValues(allowed, numberType, null, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
         {
+            // Only the numeric branch: the numeric-string branch keeps its grammar, since STJ reads
+            // other spellings of an allowed number ("+1", "01") and the schema is never narrower.
             union.Number.Enum = allowedValues;
-            if (union.NumericString != null)
-                union.NumericString.Enum = AsStrings(allowedValues);
             if (union.Named != null)
                 schema.AnyOf!.Remove(union.Named);
         }
