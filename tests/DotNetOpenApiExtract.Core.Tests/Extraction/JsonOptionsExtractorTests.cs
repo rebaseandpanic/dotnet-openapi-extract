@@ -500,7 +500,7 @@ public class JsonOptionsExtractorTests
         var context = method == "AddJsonOptions" ? result.Mvc : result.Http;
 
         context.GlobalConverterTypeNames.Should().ContainSingle().Which.Should().Contain("JsonStringEnumConverter");
-        context.GlobalConverterEnumNamingPolicies.Should().Equal(JsonNamingPolicy.CamelCase);
+        context.GlobalConverterEnumNamingPolicies.Select(n => n?.Policy).Should().Equal(JsonNamingPolicy.CamelCase);
         context.NumberHandling.Should().Be(DotNetOpenApiExtract.Core.JsonNumberHandling.AllowReadingFromString);
     }
 

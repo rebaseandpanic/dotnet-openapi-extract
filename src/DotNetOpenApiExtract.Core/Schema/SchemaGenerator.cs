@@ -588,7 +588,11 @@ public sealed class SchemaGenerator
         if (GetConverterHintForType(enumType, enumType.GetCustomAttributesData()) is { SchemaType: JsonSchemaType.String } typeHint)
             naming = typeHint.EnumNaming;
         else if (GlobalEnumConverter() is { } global)
-            naming = global.Hint.EnumNaming with { Policy = global.Policy };
+            naming = global.Hint.EnumNaming with
+            {
+                Policy = global.Naming?.Policy,
+                OverrideSpecifiedNames = global.Naming?.OverrideSpecifiedNames ?? false,
+            };
         else if (_options.EnumAsString)
             naming = EnumWireNaming.JsonStringEnumMemberName;
 
@@ -628,8 +632,11 @@ public sealed class SchemaGenerator
             var renamed = naming.Rename == EnumMemberRename.JsonStringEnumMemberName
                 ? AttributeHelper.GetConstructorArgument<string>(attribute, 0)
                 : AttributeHelper.GetNamedArgument<string>(attribute, "Value");
+            // A Newtonsoft strategy with OverrideSpecifiedNames renames the specified name too.
             if (renamed != null)
-                return renamed;
+                return naming.OverrideSpecifiedNames && naming.Policy is { } specifiedPolicy and not JsonNamingPolicy.Preserve
+                    ? ApplyNamingPolicy(renamed, specifiedPolicy)
+                    : renamed;
         }
 
         return naming.Policy is { } policy and not JsonNamingPolicy.Preserve
@@ -729,7 +736,7 @@ public sealed class SchemaGenerator
     /// that applies to enum types, as System.Text.Json picks the first converter that can convert;
     /// <see langword="null"/> when there is none.
     /// </summary>
-    private (ConverterSchemaHint Hint, JsonNamingPolicy? Policy)? GlobalEnumConverter()
+    private (ConverterSchemaHint Hint, EnumConverterNaming? Naming)? GlobalEnumConverter()
     {
         for (var i = 0; i < _options.GlobalConverterTypeNames.Count; i++)
         {
@@ -3016,7 +3023,7 @@ public sealed class SchemaOptions
     /// means none. It is applied to the member names a string-enum converter writes, after the member
     /// attribute the converter reads (<c>new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)</c>).
     /// </summary>
-    public IReadOnlyList<JsonNamingPolicy?> GlobalConverterEnumNamingPolicies { get; init; } = [];
+    public IReadOnlyList<EnumConverterNaming?> GlobalConverterEnumNamingPolicies { get; init; } = [];
 
     /// <summary>
     /// When <see langword="true"/> (default), the generator builds a markdown-formatted

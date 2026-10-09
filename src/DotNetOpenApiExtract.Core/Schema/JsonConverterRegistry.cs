@@ -284,7 +284,7 @@ internal enum EnumMemberRename
 /// How a string-enum converter names a member on the wire: the member attribute it reads, else its
 /// naming policy applied to the member's name, else the member's name.
 /// </summary>
-internal sealed record EnumWireNaming(EnumMemberRename Rename, JsonNamingPolicy? Policy = null)
+internal sealed record EnumWireNaming(EnumMemberRename Rename, JsonNamingPolicy? Policy = null, bool OverrideSpecifiedNames = false)
 {
     /// <summary>The member's name, unchanged.</summary>
     public static EnumWireNaming MemberName { get; } = new(EnumMemberRename.None);

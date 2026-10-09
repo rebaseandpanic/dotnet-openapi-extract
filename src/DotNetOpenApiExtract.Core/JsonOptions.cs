@@ -67,3 +67,15 @@ public enum JsonNumberHandling
     /// <summary>Allow reading and writing special floating-point values (Infinity, NaN).</summary>
     AllowNamedFloatingPointLiterals = 4,
 }
+
+/// <summary>
+/// The naming a global string-enum converter applies to enum members: its naming policy, and for a
+/// Newtonsoft naming strategy whether it also renames members whose name is specified by
+/// <c>[EnumMember(Value)]</c> (<c>OverrideSpecifiedNames</c>).
+/// </summary>
+/// <param name="Policy">The naming policy.</param>
+/// <param name="OverrideSpecifiedNames">
+/// <see langword="true"/> when the policy is applied to the specified name as well; System.Text.Json
+/// never applies its policy to a <c>[JsonStringEnumMemberName]</c>.
+/// </param>
+public sealed record EnumConverterNaming(JsonNamingPolicy Policy, bool OverrideSpecifiedNames = false);

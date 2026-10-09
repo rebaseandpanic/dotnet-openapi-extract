@@ -44,7 +44,7 @@ public class CamelCaseAcronymTests
         var generator = new SchemaGenerator(new SchemaOptions
         {
             GlobalConverterTypeNames = ["System.Text.Json.Serialization.JsonStringEnumConverter"],
-            GlobalConverterEnumNamingPolicies = [JsonNamingPolicy.CamelCase],
+            GlobalConverterEnumNamingPolicies = [new EnumConverterNaming(JsonNamingPolicy.CamelCase)],
         });
         var json = JsonNode.Parse(generator.GenerateSchema(typeof(Members))
             .SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;

@@ -43,7 +43,7 @@ public sealed class JsonContextOptions
     /// <c>KebabCaseNamingStrategy</c>). <see langword="null"/> when none is passed or it is not
     /// recognised (that gives a warning).
     /// </summary>
-    public IReadOnlyList<JsonNamingPolicy?> GlobalConverterEnumNamingPolicies { get; init; } = [];
+    public IReadOnlyList<EnumConverterNaming?> GlobalConverterEnumNamingPolicies { get; init; } = [];
 
     /// <summary>
     /// <see langword="true"/> when at least one of the options above was detected for this context.
@@ -189,7 +189,7 @@ public static class JsonOptionsExtractor
         JsonIgnoreCondition? defaultIgnoreCondition = null;
         JsonNumberHandling? numberHandling = null;
         var converterTypeNames = new List<string>();
-        var converterPolicies = new List<JsonNamingPolicy?>();
+        var converterPolicies = new List<EnumConverterNaming?>();
 
         foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
         {
@@ -260,7 +260,7 @@ public static class JsonOptionsExtractor
         ref JsonIgnoreCondition? defaultIgnoreCondition,
         ref JsonNumberHandling? numberHandling,
         List<string> converterTypeNames,
-        List<JsonNamingPolicy?> converterPolicies,
+        List<EnumConverterNaming?> converterPolicies,
         SourceAnalysisContext context,
         Action<ExtractionDiagnostic>? onDiagnostic)
     {
@@ -344,7 +344,7 @@ public static class JsonOptionsExtractor
                 arg = paren.Expression;
 
             string? converterTypeName = null;
-            JsonNamingPolicy? converterPolicy = null;
+            EnumConverterNaming? converterPolicy = null;
 
             if (arg is ObjectCreationExpressionSyntax objCreation)
             {
@@ -427,7 +427,7 @@ public static class JsonOptionsExtractor
     /// for other converters, and when the expression is not recognised — then
     /// <paramref name="unknown"/> holds its text.
     /// </summary>
-    private static JsonNamingPolicy? ParseConverterEnumNamingPolicy(
+    private static EnumConverterNaming? ParseConverterEnumNamingPolicy(
         ObjectCreationExpressionSyntax creation, string converterTypeName, out string? unknown)
     {
         unknown = null;
@@ -445,7 +445,7 @@ public static class JsonOptionsExtractor
             var policy = ParseNamingPolicy(policyArgument.Expression);
             if (policy == null)
                 unknown = policyArgument.Expression.ToString();
-            return policy is JsonNamingPolicy.Preserve ? null : policy;
+            return policy is null or JsonNamingPolicy.Preserve ? null : new EnumConverterNaming(policy.Value);
         }
 
         if (shortName != "StringEnumConverter")
@@ -454,7 +454,7 @@ public static class JsonOptionsExtractor
         // Newtonsoft 13 keeps one NamingStrategy; the constructor sets it, then each initializer
         // assignment in order, with the setters' semantics: the last one wins. "Unknown" is a strategy
         // the extractor cannot read — it names the members in some unknown way.
-        var state = new StrategyState(null, null);
+        var state = new StrategyState(null, false, null);
         for (var i = 0; i < arguments.Count; i++)
         {
             var argument = arguments[i];
@@ -467,12 +467,18 @@ public static class JsonOptionsExtractor
                 // StringEnumConverter(bool camelCaseText): only a leading bool; a later one is allowIntegerValues.
                 if (name == "camelCaseText" || (name == null && i == 0))
                     state = literal.IsKind(SyntaxKind.TrueLiteralExpression)
-                        ? new StrategyState(JsonNamingPolicy.CamelCase, null)
+                        ? new StrategyState(JsonNamingPolicy.CamelCase, false, null)
                         : state;
                 continue;
             }
 
-            state = NamingStrategy(argument.Expression);
+            // typeof(X) with namingStrategyParameters: the strategy's constructor arguments.
+            var parameters = arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.Text == "namingStrategyParameters")
+                ?? (argument.Expression is TypeOfExpressionSyntax && i + 1 < arguments.Count && arguments[i + 1].NameColon == null
+                    ? arguments[i + 1] : null);
+            state = NamingStrategy(argument.Expression, parameters?.Expression);
+            if (parameters != null && parameters == (i + 1 < arguments.Count ? arguments[i + 1] : null))
+                i++;
         }
 
         foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
@@ -480,44 +486,50 @@ public static class JsonOptionsExtractor
             switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
             {
                 case "NamingStrategy":
-                    state = NamingStrategy(assignment.Right);
+                    state = NamingStrategy(assignment.Right, null);
                     break;
 
                 // CamelCaseText = true sets a camelCase strategy unless one is set; false clears a
                 // camelCase strategy and leaves any other (an unknown one stays unknown).
                 case "CamelCaseText" when assignment.Right is LiteralExpressionSyntax flag
                                           && flag.IsKind(SyntaxKind.TrueLiteralExpression):
-                    state = new StrategyState(JsonNamingPolicy.CamelCase, null);
+                    if (state.Policy != JsonNamingPolicy.CamelCase)
+                        state = new StrategyState(JsonNamingPolicy.CamelCase, false, null);
                     break;
                 case "CamelCaseText" when assignment.Right is LiteralExpressionSyntax flag
                                           && flag.IsKind(SyntaxKind.FalseLiteralExpression):
                     if (state.Policy == JsonNamingPolicy.CamelCase)
-                        state = new StrategyState(null, null);
+                        state = new StrategyState(null, false, null);
                     break;
                 case "CamelCaseText":
-                    state = new StrategyState(null, assignment.Right.ToString());
+                    state = new StrategyState(null, false, assignment.Right.ToString());
                     break;
             }
         }
 
         unknown = state.Unknown;
-        return state.Policy is JsonNamingPolicy.Preserve ? null : state.Policy;
+        return state.Policy is null or JsonNamingPolicy.Preserve
+            ? null
+            : new EnumConverterNaming(state.Policy.Value, state.OverrideSpecifiedNames);
     }
 
     /// <summary>
     /// The naming strategy of a Newtonsoft converter: its policy (<see cref="JsonNamingPolicy.Preserve"/>
     /// for <c>DefaultNamingStrategy</c>), none, or — when it cannot be read — the expression text.
     /// </summary>
-    private readonly record struct StrategyState(JsonNamingPolicy? Policy, string? Unknown);
+    private readonly record struct StrategyState(JsonNamingPolicy? Policy, bool OverrideSpecifiedNames, string? Unknown);
 
     /// <summary>
-    /// A Newtonsoft naming strategy given as <c>new XNamingStrategy(…)</c>, <c>typeof(XNamingStrategy)</c>
-    /// or <c>null</c> (no strategy); any other expression is unknown.
+    /// A Newtonsoft naming strategy given as <c>new XNamingStrategy(…) { … }</c>, <c>typeof(XNamingStrategy)</c>
+    /// (with <paramref name="typeParameters"/>, its constructor arguments as <c>new object[] { … }</c>) or
+    /// <c>null</c> (no strategy); any other expression is unknown. <c>OverrideSpecifiedNames</c> is read
+    /// from the constructor (<c>(processDictionaryKeys, overrideSpecifiedNames, …)</c>) and the
+    /// initializer; a value that is not a literal makes the strategy unknown.
     /// </summary>
-    private static StrategyState NamingStrategy(ExpressionSyntax expression)
+    private static StrategyState NamingStrategy(ExpressionSyntax expression, ExpressionSyntax? typeParameters)
     {
         if (expression is LiteralExpressionSyntax nullLiteral && nullLiteral.IsKind(SyntaxKind.NullLiteralExpression))
-            return new StrategyState(null, null);
+            return new StrategyState(null, false, null);
 
         var type = expression switch
         {
@@ -535,7 +547,57 @@ public static class JsonOptionsExtractor
             "DefaultNamingStrategy"   => JsonNamingPolicy.Preserve,
             _                         => null,
         };
-        return policy != null ? new StrategyState(policy, null) : new StrategyState(null, expression.ToString());
+        if (policy == null)
+            return new StrategyState(null, false, expression.ToString());
+
+        // The strategy's constructor arguments: from new X(…), or the parameters array of typeof(X).
+        IEnumerable<(string? Name, ExpressionSyntax Value)> constructorArguments = expression switch
+        {
+            ObjectCreationExpressionSyntax created => created.ArgumentList?.Arguments.Select(a => (a.NameColon?.Name.Identifier.Text, a.Expression)) ?? [],
+            _ when typeParameters is ArrayCreationExpressionSyntax { Initializer: { } values } =>
+                values.Expressions.Select(e => ((string?)null, e)),
+            _ when typeParameters is ImplicitArrayCreationExpressionSyntax { Initializer: { } implicitValues } =>
+                implicitValues.Expressions.Select(e => ((string?)null, e)),
+            _ when typeParameters is CollectionExpressionSyntax collection =>
+                collection.Elements.OfType<ExpressionElementSyntax>().Select(e => ((string?)null, e.Expression)),
+            _ when typeParameters != null => [(null, typeParameters)],
+            _ => [],
+        };
+
+        var overrideSpecified = false;
+        var position = 0;
+        foreach (var (argName, value) in constructorArguments)
+        {
+            var isOverride = argName == "overrideSpecifiedNames" || (argName == null && position == 1);
+            position++;
+            if (argName != null && !isOverride)
+                continue;
+            if (value is not LiteralExpressionSyntax flag
+                || !(flag.IsKind(SyntaxKind.TrueLiteralExpression) || flag.IsKind(SyntaxKind.FalseLiteralExpression)))
+            {
+                if (isOverride || argName == null)
+                    return new StrategyState(null, false, value.ToString());
+                continue;
+            }
+            if (isOverride)
+                overrideSpecified = flag.IsKind(SyntaxKind.TrueLiteralExpression);
+        }
+
+        if (expression is ObjectCreationExpressionSyntax { Initializer: { } initializer })
+        {
+            foreach (var assignment in initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+            {
+                if ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text != "OverrideSpecifiedNames")
+                    continue;
+                if (assignment.Right is LiteralExpressionSyntax flag
+                    && (flag.IsKind(SyntaxKind.TrueLiteralExpression) || flag.IsKind(SyntaxKind.FalseLiteralExpression)))
+                    overrideSpecified = flag.IsKind(SyntaxKind.TrueLiteralExpression);
+                else
+                    return new StrategyState(null, false, assignment.Right.ToString());
+            }
+        }
+
+        return new StrategyState(policy, overrideSpecified, null);
     }
 
     /// <summary>

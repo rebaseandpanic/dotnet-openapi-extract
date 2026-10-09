@@ -62,7 +62,7 @@ public class EnumConverterNamingPolicyTests
         var result = JsonOptionsExtractor.Extract(Context($"o.JsonSerializerOptions.Converters.Add({creation});"), diagnostics.Add);
 
         result.Mvc.GlobalConverterTypeNames.Should().ContainSingle();
-        result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal(expected);
+        result.Mvc.GlobalConverterEnumNamingPolicies.Select(n => n?.Policy).Should().Equal(expected);
         diagnostics.Should().BeEmpty();
     }
 
@@ -85,7 +85,7 @@ public class EnumConverterNamingPolicyTests
         var generator = new SchemaGenerator(new SchemaOptions
         {
             GlobalConverterTypeNames = [converter],
-            GlobalConverterEnumNamingPolicies = [policy],
+            GlobalConverterEnumNamingPolicies = [new EnumConverterNaming(policy)],
         });
         var json = JsonNode.Parse(generator.GenerateSchema(typeof(Tint))
             .SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
@@ -217,8 +217,65 @@ public class EnumConverterNamingPolicyTests
         }
         else
         {
-            result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal(CoreNamingPolicy.SnakeCaseLower);
+            result.Mvc.GlobalConverterEnumNamingPolicies.Select(n => n?.Policy).Should().Equal(CoreNamingPolicy.SnakeCaseLower);
             diagnostics.Should().BeEmpty(because: "a later readable strategy replaces the unreadable one");
         }
+    }
+
+    // ── Newtonsoft OverrideSpecifiedNames ───────────────────────────────────────
+
+    public enum Shade
+    {
+        [System.Runtime.Serialization.EnumMember(Value = "DarkRed")] Red,
+        LightBlue,
+    }
+
+    public static TheoryData<string, Func<Newtonsoft.Json.Converters.StringEnumConverter>> OverrideCombinations => new()
+    {
+        { "new StringEnumConverter(new CamelCaseNamingStrategy { OverrideSpecifiedNames = true })",
+            () => new(new CamelCaseNamingStrategy { OverrideSpecifiedNames = true }) },
+        { "new StringEnumConverter(new CamelCaseNamingStrategy(false, true))",
+            () => new(new CamelCaseNamingStrategy(false, true)) },
+        { "new StringEnumConverter(new SnakeCaseNamingStrategy(processDictionaryKeys: false, overrideSpecifiedNames: true))",
+            () => new(new SnakeCaseNamingStrategy(processDictionaryKeys: false, overrideSpecifiedNames: true)) },
+        { "new StringEnumConverter(new CamelCaseNamingStrategy())",
+            () => new(new CamelCaseNamingStrategy()) },
+        { "new StringEnumConverter(typeof(CamelCaseNamingStrategy), new object[] { false, true })",
+            () => new(typeof(CamelCaseNamingStrategy), new object[] { false, true }) },
+        { "new StringEnumConverter(new KebabCaseNamingStrategy { OverrideSpecifiedNames = false })",
+            () => new(new KebabCaseNamingStrategy { OverrideSpecifiedNames = false }) },
+    };
+
+    [Theory]
+    [MemberData(nameof(OverrideCombinations))]
+    public void OverrideSpecifiedNames_RenamesEnumMemberValues_AsNewtonsoftWrites(
+        string creation, Func<Newtonsoft.Json.Converters.StringEnumConverter> converter)
+    {
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var result = JsonOptionsExtractor.Extract(Context($"o.JsonSerializerOptions.Converters.Add({creation});"), diagnostics.Add);
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            GlobalConverterTypeNames = result.Mvc.GlobalConverterTypeNames,
+            GlobalConverterEnumNamingPolicies = result.Mvc.GlobalConverterEnumNamingPolicies,
+        });
+        var json = JsonNode.Parse(generator.GenerateSchema(typeof(Shade))
+            .SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
+        var written = Enum.GetValues<Shade>()
+            .Select(v => JsonSerializer.Deserialize<string>(Newtonsoft.Json.JsonConvert.SerializeObject(v, converter()))!).ToArray();
+
+        json["enum"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal(written);
+        diagnostics.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void UnreadableOverrideSpecifiedNames_IsAnUnknownPolicy()
+    {
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var result = JsonOptionsExtractor.Extract(Context(
+            "o.JsonSerializerOptions.Converters.Add(new StringEnumConverter(new CamelCaseNamingStrategy { OverrideSpecifiedNames = flag }));"),
+            diagnostics.Add);
+
+        result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal([null]);
+        diagnostics.Should().ContainSingle().Which.Code.Should().Be(ExtractionDiagnosticCodes.JsonOptionsUnknownConverterNamingPolicy);
     }
 }
