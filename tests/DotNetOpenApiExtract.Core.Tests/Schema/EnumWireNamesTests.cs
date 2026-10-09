@@ -84,6 +84,8 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
             data.Add(version, "propertyStj", typeof(Tint), Writer.StjConverter);
             data.Add(version, "propertyNewtonsoft", typeof(Tint), Writer.Newtonsoft);
             data.Add(version, "propertyOverType", typeof(StjTint), Writer.Newtonsoft);
+            data.Add(version, "nullablePropertyStj", typeof(Tint), Writer.StjConverter);
+            data.Add(version, "nullablePropertyNewtonsoft", typeof(Tint), Writer.Newtonsoft);
         }
         return data;
     }
@@ -188,5 +190,39 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
         Strings(Generate(typeof(NewtonsoftConverter).FullName!, typeof(Tint))["enum"]).Should().Equal(Written<Tint>(Writer.Newtonsoft));
         Strings(Generate(typeof(JsonStringEnumConverter).FullName!, typeof(Tint))["enum"]).Should().Equal(Written<Tint>(Writer.StjConverter));
         Strings(Generate(typeof(NewtonsoftConverter).FullName!, typeof(StjTint))["enum"]).Should().Equal(Written<StjTint>(Writer.StjOnType));
+    }
+
+    private sealed class NullableHolder
+    {
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public Tint? Property { get; set; }
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void ConverterOnANullableEnumProperty_GivesNullableWireNames_WithDefaultAndAllowedValues(OpenApiSpecVersion version)
+    {
+        // STJ lifts the property's converter to Nullable<T>: the value is written by name.
+        JsonSerializer.Serialize(new NullableHolder { Property = Tint.Red }).Should().Be("{\"Property\":\"ruby\"}");
+
+        foreach (var name in new[] { "nullablePropertyStj", "nullablePropertyNewtonsoft" })
+        {
+            var schema = Property(version, name);
+            if (version == OpenApiSpecVersion.OpenApi3_0)
+            {
+                schema["type"]!.GetValue<string>().Should().Be("string", because: name);
+                schema["nullable"]!.GetValue<bool>().Should().BeTrue(because: name);
+            }
+            else
+            {
+                schema["type"]!.AsArray().Select(t => t!.GetValue<string>()).Should().BeEquivalentTo(["string", "null"], because: name);
+            }
+        }
+
+        var stj = Written<Tint>(Writer.StjConverter);
+        var constrained = Property(version, "nullableConstrained");
+        constrained["default"]!.GetValue<string>().Should().Be(stj[(int)Tint.Crimson]);
+        var allowed = constrained["allOf"]!.AsArray().Select(n => n!.AsObject()).Single(s => s["type"] == null && s["enum"] != null);
+        Strings(allowed["enum"]).Should().Equal(stj[(int)Tint.Red], stj[(int)Tint.Plain]);
     }
 }

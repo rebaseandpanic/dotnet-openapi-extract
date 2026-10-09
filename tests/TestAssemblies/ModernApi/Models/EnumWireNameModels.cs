@@ -76,6 +76,18 @@ public class EnumWireNamesModel
     [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
     public StjTint PropertyOverType { get; set; }
 
+    /// <summary>Nullable, System.Text.Json's converter on the property.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public Tint? NullablePropertyStj { get; set; }
+
+    /// <summary>Nullable, Newtonsoft.Json's converter on the property.</summary>
+    [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
+    public Tint? NullablePropertyNewtonsoft { get; set; }
+
+    /// <summary>Nullable, converter on the property, with a default and allowed values.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter)), DefaultValue(Tint.Crimson), AllowedValues(Tint.Red, Tint.Plain)]
+    public Tint? NullableConstrained { get; set; } = Tint.Crimson;
+
     /// <summary>No converter: numbers.</summary>
     public Tint Numeric { get; set; }
 

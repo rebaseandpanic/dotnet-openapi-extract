@@ -601,14 +601,15 @@ public sealed class SchemaGenerator
     /// </summary>
     private EnumWireNaming? PropertyEnumNaming(Type propertyType, IList<CustomAttributeData> attrData)
     {
-        if (propertyType.IsEnum
-            && GetConverterHintForType(propertyType, attrData) is { SchemaType: JsonSchemaType.String } propertyHint)
-            return propertyHint.EnumNaming;
-
         var enumType = propertyType.IsEnum ? propertyType
             : IsNullableValueType(propertyType) && propertyType.GetGenericArguments()[0].IsEnum ? propertyType.GetGenericArguments()[0]
             : null;
-        return enumType != null ? TypeEnumNaming(enumType) : null;
+        if (enumType == null)
+            return null;
+
+        return GetConverterHintForType(propertyType, attrData) is { SchemaType: JsonSchemaType.String } propertyHint
+            ? propertyHint.EnumNaming
+            : TypeEnumNaming(enumType);
     }
 
     /// <summary>The name of the enum member <paramref name="field"/> on the wire under <paramref name="naming"/>.</summary>
@@ -708,7 +709,9 @@ public sealed class SchemaGenerator
         }
 
         // Verify that the hint applies to the target type.
-        if (!JsonConverterRegistry.AppliesToType(hint, targetType.IsEnum, targetType.FullName))
+        // A converter of T applies to a Nullable<T> member as well.
+        var converted = IsNullableValueType(targetType) ? targetType.GetGenericArguments()[0] : targetType;
+        if (!JsonConverterRegistry.AppliesToType(hint, converted.IsEnum, converted.FullName))
             return null;
 
         return hint;
@@ -862,10 +865,15 @@ public sealed class SchemaGenerator
             // Apply property-level [JsonConverter] override.
             // This handles cases such as [JsonConverter(typeof(JsonStringEnumConverter))]
             // placed on a property whose enum type does not carry the converter itself.
+            // On a Nullable<T> property the converter converts T (STJ and Newtonsoft both lift it):
+            // the schema is the converter's form of T in the version's nullable form.
             var propConverterHint = GetConverterHintForType(propType, propAttrData);
             if (propConverterHint != null)
             {
-                propSchema = BuildSchemaFromHint(propConverterHint, propType);
+                var underlying = IsNullableValueType(propType) ? propType.GetGenericArguments()[0] : null;
+                propSchema = BuildSchemaFromHint(propConverterHint, underlying ?? propType);
+                if (underlying != null)
+                    propSchema = MakeNullable(propSchema);
             }
             else if (propType.FullName == "System.String"
                      && AttributeHelper.HasAttribute(propAttrData, AttributeHelper.Names.Base64String))
