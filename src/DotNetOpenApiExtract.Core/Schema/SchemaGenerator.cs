@@ -1404,6 +1404,12 @@ public sealed class SchemaGenerator
         if ((allowed == null && denied == null) || propSchema is not OpenApiSchema schema)
             return propSchema;
 
+        if (NumberUnionBranches(schema) is { } numberUnion)
+        {
+            ApplyValuesToNumberUnion(schema, numberUnion, allowed, denied, property, serializedName, componentId);
+            return schema;
+        }
+
         var isWrapper = schema.AllOf is { Count: > 0 } && schema.AllOf[0] is OpenApiSchemaReference;
         var jsonType = isWrapper ? null : schema.Type;
         var propertyType = property.PropertyType;
@@ -1442,6 +1448,60 @@ public sealed class SchemaGenerator
             ((OpenApiSchema)result).Not = new OpenApiSchema { Enum = deniedValues };
 
         return result;
+    }
+
+    /// <summary>The branches of a number-handling union (<see cref="ApplyNumberHandling"/>).</summary>
+    private sealed record NumberUnion(OpenApiSchema Number, OpenApiSchema? NumericString, OpenApiSchema? Named);
+
+    /// <summary>
+    /// The branches when <paramref name="schema"/> is the union number handling produces: an
+    /// untyped (or, in its 3.0 nullable form, <c>null</c>-typed) <c>anyOf</c> whose first branch is a
+    /// number; <see langword="null"/> otherwise.
+    /// </summary>
+    private static NumberUnion? NumberUnionBranches(OpenApiSchema schema)
+    {
+        if ((schema.Type.HasValue && schema.Type.Value != JsonSchemaType.Null)
+            || schema.AnyOf is not [OpenApiSchema { Type: { } first } number, ..]
+            || (first & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)
+            return null;
+
+        var rest = schema.AnyOf.Skip(1).OfType<OpenApiSchema>().ToList();
+        return new NumberUnion(
+            number,
+            rest.FirstOrDefault(b => b.Type == JsonSchemaType.String && b.Pattern != null),
+            rest.FirstOrDefault(b => b.Type == null && b.Enum is { Count: > 0 }));
+    }
+
+    /// <summary>
+    /// Allowed / denied values on a number-handling union, per branch with its own JSON type: the
+    /// numbers on the numeric branch, their string forms (as System.Text.Json writes them with
+    /// <c>WriteAsString</c>) on the numeric-string branch; the named-literal branch is dropped by
+    /// allowed values, which are finite numbers. Values are checked against the numeric branch's type.
+    /// </summary>
+    private void ApplyValuesToNumberUnion(
+        OpenApiSchema schema, NumberUnion union, CustomAttributeData? allowed, CustomAttributeData? denied,
+        PropertyInfo property, string serializedName, string componentId)
+    {
+        var numberType = union.Number.Type!.Value & ~JsonSchemaType.Null;
+
+        static List<JsonNode?> AsStrings(List<JsonNode?> values) =>
+            values.Select(v => (JsonNode?)JsonValue.Create(v!.ToJsonString())).ToList();
+
+        if (allowed != null && ConvertValues(allowed, numberType, null, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        {
+            union.Number.Enum = allowedValues;
+            if (union.NumericString != null)
+                union.NumericString.Enum = AsStrings(allowedValues);
+            if (union.Named != null)
+                schema.AnyOf!.Remove(union.Named);
+        }
+
+        if (denied != null && ConvertValues(denied, numberType, null, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+        {
+            union.Number.Not = new OpenApiSchema { Enum = deniedValues };
+            if (union.NumericString != null)
+                union.NumericString.Not = new OpenApiSchema { Enum = AsStrings(deniedValues) };
+        }
     }
 
     /// <summary>One allowed value: <c>const</c> for a string in 3.1+, otherwise a one-element <c>enum</c>.</summary>
@@ -1647,8 +1707,8 @@ public sealed class SchemaGenerator
         }
 
         // With number handling the number is the first branch of an anyOf: the range constrains it only.
-        if (!schema.Type.HasValue && schema.AnyOf is [OpenApiSchema numberBranch, ..])
-            schema = numberBranch;
+        if (NumberUnionBranches(schema) is { } union)
+            schema = union.Number;
 
         if (!schema.Type.HasValue
             || (schema.Type.Value & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)

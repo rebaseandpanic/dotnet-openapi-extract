@@ -253,4 +253,109 @@ public class NumberHandlingSchemaTests
             result.IsValid.Should().BeTrue(because: $"STJ writes {written} for {type.Name} with {flags}: {string.Join("; ", result.Errors)}");
         }
     }
+
+    // ── Allowed / denied values and ranges on the union ──────────────────────
+
+    [JsonNumberHandling(StjNumberHandling.WriteAsString)]
+    public sealed class ValuesOnUnions
+    {
+        [AllowedValues(1, 2)] public int Level { get; set; } = 1;
+
+        [DeniedValues(3)] public int NotThree { get; set; } = 4;
+
+        [AllowedValues(true)] public int Mismatch { get; set; }
+
+        [AllowedValues(1.5, 2.5)] public double Ratio { get; set; } = 1.5;
+
+        [Range(1, 10)] public int? Bounded { get; set; } = 5;
+
+        [AllowedValues(1, 2)] public int? OptionalLevel { get; set; } = 2;
+    }
+
+    private static (IDictionary<string, IOpenApiSchema> Properties, List<DotNetOpenApiExtract.Core.Diagnostics.ExtractionDiagnostic> Diagnostics, SchemaGenerator Generator)
+        Values(OpenApiSpecVersion version)
+    {
+        var diagnostics = new List<DotNetOpenApiExtract.Core.Diagnostics.ExtractionDiagnostic>();
+        var generator = new SchemaGenerator(new SchemaOptions { OpenApiVersion = version, OnDiagnostic = diagnostics.Add });
+        generator.GenerateSchema(typeof(ValuesOnUnions));
+        return (generator.Schemas[nameof(ValuesOnUnions)].Properties!, diagnostics, generator);
+    }
+
+    public static TheoryData<OpenApiSpecVersion> AllVersions =>
+        [OpenApiSpecVersion.OpenApi3_0, OpenApiSpecVersion.OpenApi3_1, OpenApiSpecVersion.OpenApi3_2];
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void AllowedValues_ConstrainEachBranchWithItsOwnJsonType(OpenApiSpecVersion version)
+    {
+        var level = (OpenApiSchema)Values(version).Properties["level"];
+
+        level.Enum.Should().BeNull(because: "a numeric enum outside the union would reject the string STJ writes");
+        var number = (OpenApiSchema)level.AnyOf![0];
+        var text = (OpenApiSchema)level.AnyOf[1];
+        number.Enum!.Select(e => e!.ToJsonString()).Should().Equal("1", "2");
+        text.Enum!.Select(e => e!.GetValue<string>()).Should().Equal("1", "2");
+
+        var notThree = (OpenApiSchema)Values(version).Properties["notThree"];
+        ((OpenApiSchema)notThree.AnyOf![0]).Not!.Enum!.Select(e => e!.ToJsonString()).Should().Equal(["3"]);
+        ((OpenApiSchema)notThree.AnyOf[1]).Not!.Enum!.Select(e => e!.GetValue<string>()).Should().Equal(["3"]);
+
+        var ratio = (OpenApiSchema)Values(version).Properties["ratio"];
+        ratio.AnyOf.Should().HaveCount(2, because: "the allowed finite numbers exclude the NaN / Infinity branch");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void ValueOfAnotherJsonType_OnAUnion_IsReported(OpenApiSpecVersion version)
+    {
+        var (properties, diagnostics, _) = Values(version);
+
+        ((OpenApiSchema)((OpenApiSchema)properties["mismatch"]).AnyOf![0]).Enum.Should().BeNull();
+        diagnostics.Should().ContainSingle(d => d.Code == DotNetOpenApiExtract.Core.Diagnostics.ExtractionDiagnosticCodes.SchemaValueNotConvertible);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void NullableUnion_KeepsRangeAndValuesOnTheNumericBranch(OpenApiSpecVersion version)
+    {
+        var (properties, diagnostics, _) = Values(version);
+
+        var bounded = (OpenApiSchema)properties["bounded"];
+        var number = (OpenApiSchema)bounded.AnyOf![0];
+        number.Minimum.Should().Be("1");
+        number.Maximum.Should().Be("10");
+
+        var optional = (OpenApiSchema)properties["optionalLevel"];
+        ((OpenApiSchema)optional.AnyOf![0]).Enum!.Select(e => e!.ToJsonString()).Should().Equal("1", "2");
+        diagnostics.Where(d => d.Subjects.Any(s => s.EndsWith(".OptionalLevel", StringComparison.Ordinal))).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
+    public void ObjectWrittenByStj_PassesTheConstrainedUnions_AndAForbiddenStringFails(OpenApiSpecVersion version)
+    {
+        var (_, _, generator) = Values(version);
+        var document = new OpenApiDocument
+        {
+            Info = new OpenApiInfo { Title = "t", Version = "1" },
+            Paths = new OpenApiPaths(),
+            Components = new OpenApiComponents
+            {
+                Schemas = generator.Schemas.ToDictionary(p => p.Key, p => (IOpenApiSchema)p.Value),
+            },
+        };
+        var conformance = SchemaConformance.For(JsonNode.Parse(document.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult())!);
+
+        var written = JsonNode.Parse(JsonSerializer.Serialize(new ValuesOnUnions(), StjWire.Mvc()))!;
+        written["level"]!.GetValue<string>().Should().Be("1", because: "WriteAsString writes the number as a string");
+        var result = conformance.ValidateComponent(nameof(ValuesOnUnions), written);
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors));
+
+        written["level"] = "3";
+        conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid.Should().BeFalse();
+        written["level"] = "1";
+        written["notThree"] = "3";
+        conformance.ValidateComponent(nameof(ValuesOnUnions), written).IsValid.Should().BeFalse();
+    }
 }
