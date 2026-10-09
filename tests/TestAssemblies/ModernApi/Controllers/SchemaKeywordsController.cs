@@ -141,4 +141,20 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>A polymorphic base whose examples cannot be written.</summary>
     [HttpGet("example-broken-shape")]
     public ActionResult<ExampleBrokenShape> ExampleBrokenShape() => new ExampleBrokenSquare();
+
+    /// <summary>A polymorphic base whose example is not an object.</summary>
+    [HttpGet("numberexampleshape")]
+    public ActionResult<NumberExampleShape> NumberExampleShape() => new NumberExampleShapeItem();
+
+    /// <summary>A polymorphic base whose example is not an object.</summary>
+    [HttpGet("booleanexampleshape")]
+    public ActionResult<BooleanExampleShape> BooleanExampleShape() => new BooleanExampleShapeItem();
+
+    /// <summary>A polymorphic base whose example is not an object.</summary>
+    [HttpGet("stringexampleshape")]
+    public ActionResult<StringExampleShape> StringExampleShape() => new StringExampleShapeItem();
+
+    /// <summary>A polymorphic base whose example is not an object.</summary>
+    [HttpGet("arrayexampleshape")]
+    public ActionResult<ArrayExampleShape> ArrayExampleShape() => new ArrayExampleShapeItem();
 }

@@ -202,3 +202,63 @@ public sealed class ExampleBrokenSquare : ExampleBrokenShape
     /// <summary>Side.</summary>
     public int Side { get; set; }
 }
+
+/// <summary>A polymorphic base whose example is not an object.</summary>
+/// <example>42</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(NumberExampleShapeItem), "item")]
+public abstract class NumberExampleShape
+{
+}
+
+/// <summary>The only alternative.</summary>
+public sealed class NumberExampleShapeItem : NumberExampleShape
+{
+    /// <summary>Size.</summary>
+    public int Size { get; set; }
+}
+
+/// <summary>A polymorphic base whose example is not an object.</summary>
+/// <example>true</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(BooleanExampleShapeItem), "item")]
+public abstract class BooleanExampleShape
+{
+}
+
+/// <summary>The only alternative.</summary>
+public sealed class BooleanExampleShapeItem : BooleanExampleShape
+{
+    /// <summary>Size.</summary>
+    public int Size { get; set; }
+}
+
+/// <summary>A polymorphic base whose example is not an object.</summary>
+/// <example>"x"</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(StringExampleShapeItem), "item")]
+public abstract class StringExampleShape
+{
+}
+
+/// <summary>The only alternative.</summary>
+public sealed class StringExampleShapeItem : StringExampleShape
+{
+    /// <summary>Size.</summary>
+    public int Size { get; set; }
+}
+
+/// <summary>A polymorphic base whose example is not an object.</summary>
+/// <example>[]</example>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(ArrayExampleShapeItem), "item")]
+public abstract class ArrayExampleShape
+{
+}
+
+/// <summary>The only alternative.</summary>
+public sealed class ArrayExampleShapeItem : ArrayExampleShape
+{
+    /// <summary>Size.</summary>
+    public int Size { get; set; }
+}

@@ -205,4 +205,30 @@ public class SchemaExampleTests(SchemaExampleFixture fixture) : IClassFixture<Sc
         fixture.Diagnostics[version].Where(d => d.Location == "#/components/schemas/ExampleBrokenShape").Select(d => d.Code)
             .Should().BeEquivalentTo([ExampleMultiple, ExampleNotParsable]);
     }
+
+    public static TheoryData<OpenApiSpecVersion, string, string> NonObjectUnionExamples()
+    {
+        var data = new TheoryData<OpenApiSpecVersion, string, string>();
+        foreach (var version in VersionedDocumentHarness.Versions)
+        {
+            data.Add(version, "NumberExampleShape", "42");
+            data.Add(version, "BooleanExampleShape", "true");
+            data.Add(version, "StringExampleShape", "\"x\"");
+            data.Add(version, "ArrayExampleShape", "[]");
+        }
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(NonObjectUnionExamples))]
+    public void PolymorphicBaseExample_ThatIsNotAnObject_IsNotWritten_OneWarning(OpenApiSpecVersion version, string union, string text)
+    {
+        var location = $"#/components/schemas/{union}";
+
+        Component(version, union).ContainsKey("oneOf").Should().BeTrue();
+        Example(Component(version, union), version).Should().BeNull();
+        var warning = fixture.Diagnostics[version].Where(d => d.Location == location).Should().ContainSingle().Which;
+        warning.Code.Should().Be(ExampleNotParsable);
+        warning.Subjects.Should().Equal($"ModernApi.Models.Keywords.{union}", text);
+    }
 }

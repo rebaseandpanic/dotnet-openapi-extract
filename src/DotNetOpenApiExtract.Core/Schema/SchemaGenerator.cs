@@ -1078,7 +1078,7 @@ public sealed class SchemaGenerator
             _schemaIdToType[unionId] = baseType;
 
             // The base's XML example describes the union (any alternative); variants do not copy it.
-            ApplyTypeExample(union, baseType, unionId);
+            ApplyTypeExample(union, baseType, unionId, alternativesType: JsonSchemaType.Object);
 
             var alternatives = new List<IOpenApiSchema>();
             var mapping = new Dictionary<string, OpenApiSchemaReference>(StringComparer.Ordinal);
@@ -1939,15 +1939,20 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>The XML example of a type, on its object component; see <see cref="ApplyPropertyExample"/>.</summary>
-    private void ApplyTypeExample(OpenApiSchema schema, Type type, string componentId)
+    /// <remarks>
+    /// A union has no type of its own: <paramref name="alternativesType"/> is the JSON type its
+    /// alternatives share (every alternative of a polymorphic base is an object), which the example
+    /// must have.
+    /// </remarks>
+    private void ApplyTypeExample(OpenApiSchema schema, Type type, string componentId, JsonSchemaType? alternativesType = null)
     {
         if (_docResolver?.ResolveTypeExample(type) is not { } example)
             return;
 
-        WriteExample(schema, example.Text, example.Count, type.FullName ?? componentId, new LossAnchor.Component(componentId));
+        WriteExample(schema, example.Text, example.Count, type.FullName ?? componentId, new LossAnchor.Component(componentId), alternativesType);
     }
 
-    private void WriteExample(OpenApiSchema schema, string text, int count, string element, LossAnchor anchor)
+    private void WriteExample(OpenApiSchema schema, string text, int count, string element, LossAnchor anchor, JsonSchemaType? typeOverride = null)
     {
         if (count > 1)
         {
@@ -1964,7 +1969,7 @@ public sealed class SchemaGenerator
         }
 
         var (place, jsonType, nullable) = ExampleTarget(schema);
-        if (ParseExample(text, jsonType, nullable) is { } value)
+        if (ParseExample(text, typeOverride ?? jsonType, nullable) is { } value)
         {
             VersionedSchemaForms.SetExample(text == "null" ? schema : place, value, _options.OpenApiVersion);
             return;
