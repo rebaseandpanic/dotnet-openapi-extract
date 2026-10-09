@@ -96,7 +96,13 @@ public class MutualTlsTests(MutualTlsFixture fixture) : IClassFixture<MutualTlsF
         var warning = diagnostics.Where(d => d.Location == Location).Should().ContainSingle().Which;
         warning.Code.Should().Be(Removed);
         warning.Action.Should().Be(DiagnosticAction.SemanticsChanged);
-        warning.Subjects.Should().Equal("mtls", "#/security/0: {mtls, key} → {key}", "#/security/1: {mtls} → removed");
+        // The document's requirements, and the operations that copy them to carry their roles.
+        string[] Pair(string where) => [$"{where}/0: {{mtls, key}} → {{key}}", $"{where}/1: {{mtls}} → removed"];
+        warning.Subjects.Should().Equal(
+        [
+            "mtls", .. Pair("#/security"), .. Pair("GET /roles/inherited security"), .. Pair("GET /roles/large security"),
+            .. Pair("GET /controller-roles/plain security"),
+        ]);
         diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme && d.Subjects.Contains("mtls"),
             because: "the removal is reported once");
     }

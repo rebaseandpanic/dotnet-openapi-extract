@@ -188,8 +188,7 @@ public class OAuthOidcSchemeTests(OAuthOidcSchemeFixture fixture) : IClassFixtur
         fixture.Documents[version]["components"]!["securitySchemes"]!.AsObject().ContainsKey("Dynamic").Should().BeFalse();
         fixture.Documents[version].AsObject().ContainsKey("security").Should().BeFalse(because: "the only requirement named the omitted scheme");
 
-        var warning = fixture.Diagnostics[version].Where(d => d.Subjects.Contains("Dynamic")).Should().ContainSingle().Which;
-        warning.Code.Should().Be(ExtractionDiagnosticCodes.SecuritySchemeNotStatic);
+        var warning = fixture.Diagnostics[version].Where(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeNotStatic).Should().ContainSingle().Which;
         warning.Location.Should().Be("#/components/securitySchemes/Dynamic");
         warning.Subjects.Should().Equal("Dynamic");
     }

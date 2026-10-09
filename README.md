@@ -149,7 +149,7 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 - Rate limiting (`[EnableRateLimiting]`, `[DisableRateLimiting]`) as `x-rate-limit-*` extensions
 - Response caching (`[ResponseCache]`, `[OutputCache]`) as `Cache-Control` header description
 - Well-known `[JsonConverter]` types (`JsonStringEnumConverter`, `IsoDateTimeConverter`, `UnixDateTimeConverter`, `StringEnumConverter`, etc.) mapped via built-in registry
-- Per-endpoint security from `[Authorize]` / `[AllowAnonymous]` / `[Authorize(AuthenticationSchemes=...)]`
+- Per-endpoint security from `[Authorize]` / `[AllowAnonymous]` / `[Authorize(AuthenticationSchemes=...)]`; `[Authorize(Roles=...)]` roles in the requirement values for OpenAPI 3.1/3.2 (OR inside an attribute, AND across attributes)
 
 From `Program.cs` via Roslyn (when sources are available):
 

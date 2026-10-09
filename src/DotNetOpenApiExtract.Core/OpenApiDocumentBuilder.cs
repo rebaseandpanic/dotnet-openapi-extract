@@ -1206,7 +1206,7 @@ public sealed class OpenApiDocumentBuilder
             RecordUnknownResultStatus(ledger, operation, action.Method.ReturnType, unknownResults);
 
         // ── Per-operation security ────────────────────────────────────────────
-        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document);
+        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document, ledger);
 
         return operation;
     }
@@ -1930,7 +1930,8 @@ public sealed class OpenApiDocumentBuilder
         IList<System.Reflection.CustomAttributeData> actionAttrs,
         IList<System.Reflection.CustomAttributeData> controllerAttrs,
         SecuritySchemeExtractionResult securityResult,
-        OpenApiDocument document)
+        OpenApiDocument document,
+        LossLedger ledger)
     {
         var auth = AuthorizationExtractor.Extract(actionAttrs, controllerAttrs);
 
@@ -1938,6 +1939,12 @@ public sealed class OpenApiDocumentBuilder
         {
             // Empty security list overrides any global security requirement.
             operation.Security = [];
+            return;
+        }
+
+        if (auth.RoleAlternatives is { Count: > 0 } roles)
+        {
+            ApplyRoleRequirements(operation, auth, roles, securityResult, document, ledger);
             return;
         }
 
@@ -1960,6 +1967,105 @@ public sealed class OpenApiDocumentBuilder
         // If only RequiresAuthorization (no explicit schemes), we do nothing —
         // the operation inherits the global security requirement if one is set.
         // This avoids emitting a requirement with an unknown scheme name.
+    }
+
+    /// <summary>
+    /// The requirements of an operation with <c>[Authorize(Roles)]</c>. The effective schemes are the
+    /// attribute's explicit <c>AuthenticationSchemes</c> (one requirement) or, without them, the
+    /// document's requirements, copied onto the operation. Every scheme requirement is combined with
+    /// every role alternative (both lists are OR, the product is written in full): a non-OAuth scheme
+    /// carries the alternative's roles (3.1+), an OAuth2 / OpenID Connect scheme keeps its scopes.
+    /// Roles the document cannot carry are reported once per operation and case; without any
+    /// requirement the roles are reported and no scheme is invented.
+    /// </summary>
+    private static void ApplyRoleRequirements(
+        OpenApiOperation operation,
+        AuthorizationInfo auth,
+        IReadOnlyList<IReadOnlyList<string>> roleAlternatives,
+        SecuritySchemeExtractionResult securityResult,
+        OpenApiDocument document,
+        LossLedger ledger)
+    {
+        var allRoles = roleAlternatives.SelectMany(r => r).Distinct(StringComparer.Ordinal).ToList();
+        IReadOnlyList<IReadOnlyList<SecurityRequirementEntry>> schemeRequirements = auth.AuthenticationSchemes is { Count: > 0 } explicitSchemes
+            ? [explicitSchemes.Select(name => new SecurityRequirementEntry(name, [])).ToList()]
+            : securityResult.GlobalRequirementEntries;
+
+        if (schemeRequirements.Count == 0)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SecurityRolesWithoutRequirement,
+                Anchor   = new LossAnchor.Operation(operation),
+                Message  = $"[Authorize(Roles)] requires {string.Join(", ", allRoles)}, but the operation has no security " +
+                           "requirement (no AuthenticationSchemes, none in the document): the roles are not written.",
+                Feature  = "security.roles",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = allRoles,
+            });
+            return;
+        }
+
+        bool IsOAuth(string name) => securityResult.Schemes.TryGetValue(name, out var scheme)
+                                     && scheme.Type is SecuritySchemeType.OAuth2 or SecuritySchemeType.OpenIdConnect;
+        var writesRoles = ledger.TargetVersion != OpenApiSpecVersion.OpenApi3_0;
+
+        var requirements = new List<OpenApiSecurityRequirement>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var schemeRequirement in schemeRequirements)
+        foreach (var roles in roleAlternatives)
+        {
+            var values = schemeRequirement
+                .Select(entry => (entry.SchemeName, Values: IsOAuth(entry.SchemeName) ? entry.Scopes : writesRoles ? roles : []))
+                .ToList();
+
+            // Without roles in the values (3.0, OAuth schemes) alternatives repeat: written once.
+            var key = string.Join("\u0001", values.Select(v => v.SchemeName + "\u0000" + string.Join("\u0000", v.Values)));
+            if (!seen.Add(key))
+                continue;
+
+            var requirement = new OpenApiSecurityRequirement();
+            foreach (var (schemeName, scheme) in values)
+                requirement[new OpenApiSecuritySchemeReference(schemeName, document, null)] = scheme.ToList();
+            requirements.Add(requirement);
+        }
+
+        operation.Security = requirements;
+
+        var schemes = schemeRequirements.SelectMany(r => r).Select(e => e.SchemeName).Distinct(StringComparer.Ordinal).ToList();
+        var oauth = schemes.Where(IsOAuth).ToList();
+        var other = schemes.Where(s => !IsOAuth(s)).ToList();
+        if (!writesRoles && other.Count > 0)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SecurityRolesNotWritten,
+                Anchor   = new LossAnchor.Operation(operation),
+                Message  = $"roles {string.Join(", ", allRoles)} of [Authorize(Roles)] are not written for {string.Join(", ", other)}: " +
+                           "OpenAPI 3.0 requires empty values for schemes other than oauth2 and openIdConnect (roles need 3.1).",
+                Feature  = "security.roles",
+                Action   = DiagnosticAction.Omitted,
+                RequiredVersion = OpenApiSpecVersion.OpenApi3_1,
+                Subjects = [.. other, .. allRoles],
+            });
+        }
+
+        if (oauth.Count > 0)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SecurityRolesNotWritten,
+                Anchor   = new LossAnchor.Operation(operation),
+                Message  = $"roles {string.Join(", ", allRoles)} of [Authorize(Roles)] are not written for {string.Join(", ", oauth)}: " +
+                           "the values of oauth2 and openIdConnect schemes are scopes.",
+                Feature  = "security.roles.oauth",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = [.. oauth, .. allRoles],
+            });
+        }
     }
 
     // =========================================================================

@@ -240,6 +240,21 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SecurityMutualTlsRemoved = "security.mutual-tls-removed";
 
+    /// <summary>
+    /// <c>[Authorize(Roles)]</c> roles that the document cannot carry: for a 3.0 target on the
+    /// operation's non-OAuth schemes (3.0 requires empty values), in every version on its OAuth2 /
+    /// OpenID Connect schemes (their values are scopes). One per operation and case. Location: the
+    /// operation. Subjects: the schemes concerned, then the roles.
+    /// </summary>
+    public const string SecurityRolesNotWritten = "security.roles-not-written";
+
+    /// <summary>
+    /// <c>[Authorize(Roles)]</c> on an operation that has no security requirement at all (no explicit
+    /// schemes, none in the document): the roles are not written and no scheme is invented. Location:
+    /// the operation. Subjects: the roles.
+    /// </summary>
+    public const string SecurityRolesWithoutRequirement = "security.roles-without-requirement";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

@@ -33,6 +33,15 @@ public sealed class AuthorizationInfo
     /// or <see langword="null"/> if no policy was specified.
     /// </summary>
     public IReadOnlyList<string>? Policies { get; init; }
+
+    /// <summary>
+    /// The role combinations that satisfy <c>[Authorize(Roles = …)]</c>, or <see langword="null"/> when
+    /// no attribute names roles. Roles inside one attribute are alternatives (any one, OR); every
+    /// attribute that names roles must be satisfied (AND), the controller's first, then the action's.
+    /// Each entry is one alternative — all of its roles are required — so the list is the product of
+    /// the attributes' role lists, written in full.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>>? RoleAlternatives { get; init; }
 }
 
 /// <summary>
@@ -105,7 +114,34 @@ public static class AuthorizationExtractor
             RequiresAuthorization = true,
             AuthenticationSchemes = schemes.Count > 0 ? schemes : null,
             Policies              = policies.Count > 0 ? policies : null,
+            RoleAlternatives      = RoleAlternativesOf(controllerAttrs, actionAttrs),
         };
+    }
+
+    /// <summary>
+    /// The product of the role lists of every <c>[Authorize(Roles)]</c> (controller first, then action):
+    /// one alternative per choice of one role from each attribute, roles in attribute order, without
+    /// repeats inside an alternative and without repeated alternatives.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyList<string>>? RoleAlternativesOf(
+        IList<CustomAttributeData> controllerAttrs, IList<CustomAttributeData> actionAttrs)
+    {
+        var roleLists = AttributeHelper.GetAttributes(controllerAttrs, AttributeHelper.Names.Authorize)
+            .Concat(AttributeHelper.GetAttributes(actionAttrs, AttributeHelper.Names.Authorize))
+            .Select(attr => AttributeHelper.GetNamedArgument<string>(attr, "Roles"))
+            .Where(roles => !string.IsNullOrWhiteSpace(roles))
+            .Select(roles => roles!.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).ToList())
+            .Where(roles => roles.Count > 0)
+            .ToList();
+        if (roleLists.Count == 0)
+            return null;
+
+        IEnumerable<List<string>> alternatives = [[]];
+        foreach (var roles in roleLists)
+            alternatives = alternatives.SelectMany(prefix => roles.Select(role => prefix.Contains(role) ? prefix : [.. prefix, role]));
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return alternatives.Where(a => seen.Add(string.Join("\u0000", a))).Select(a => (IReadOnlyList<string>)a).ToList();
     }
 
     private static void CollectAuthorizeAttr(
