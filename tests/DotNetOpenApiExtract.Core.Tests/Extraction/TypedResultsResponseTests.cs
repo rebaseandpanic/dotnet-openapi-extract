@@ -208,6 +208,21 @@ public class TypedResultsResponseTests(TypedResultsFixture fixture) : IClassFixt
 
     [Theory]
     [MemberData(nameof(AllVersions))]
+    public void ProducesType_RanksAboveTheResultValue_AndBelowADeclaredType(OpenApiSpecVersion version)
+    {
+        var build = fixture.Builds[version];
+
+        BodyRef(Responses(build.Document, "/typed-results/produces-over-ok"), "200")
+            .Should().Be("#/components/schemas/ProducedResultItem");
+        BodyRef(Responses(build.Document, "/typed-results/produces-untyped"), "200")
+            .Should().Be("#/components/schemas/ProducedResultItem");
+        Warnings(build, "GET /typed-results/produces-untyped").Should().BeEmpty(because: "[Produces] documents the result");
+        BodyRef(Responses(build.Document, "/typed-results/declared-over-produces"), "200")
+            .Should().Be("#/components/schemas/ResultError");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
     public void ResultOfUnknownStatus_WithADeclaredResponse_UsesItWithoutWarning(OpenApiSpecVersion version)
     {
         var build = fixture.Builds[version];

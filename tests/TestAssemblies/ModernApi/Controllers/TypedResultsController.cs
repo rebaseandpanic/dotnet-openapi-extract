@@ -76,6 +76,22 @@ public class TypedResultsController : ControllerBase
     [HttpGet("status-only-and-unknown")]
     public Results<NotFound, JsonHttpResult<ResultItem>> StatusOnlyAndUnknown() => TypedResults.NotFound();
 
+    /// <summary>[Produces(typeof(T))] gives the 200 body ahead of the result's value type.</summary>
+    [HttpGet("produces-over-ok")]
+    [Produces(typeof(ProducedResultItem))]
+    public Ok<ResultItem> ProducesOverOk() => TypedResults.Ok(Item);
+
+    /// <summary>[Produces&lt;T&gt;] documents an untyped result.</summary>
+    [HttpGet("produces-untyped")]
+    [Produces<ProducedResultItem>]
+    public IResult ProducesUntyped() => Results.Ok(Item);
+
+    /// <summary>A 200 declared with its own type wins over [Produces].</summary>
+    [HttpGet("declared-over-produces")]
+    [ProducesResponseType(typeof(ResultError), StatusCodes.Status200OK)]
+    [Produces(typeof(ProducedResultItem))]
+    public Ok<ResultItem> DeclaredOverProduces() => TypedResults.Ok(Item);
+
     /// <summary>An untyped result with a declared response.</summary>
     [HttpGet("untyped-declared")]
     [ProducesResponseType(typeof(ResultItem), StatusCodes.Status200OK)]

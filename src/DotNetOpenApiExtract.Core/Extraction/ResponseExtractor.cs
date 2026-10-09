@@ -149,7 +149,10 @@ public static class ResponseExtractor
 
         // A typed IResult declares its own responses; explicit declarations win per status code.
         if (signatureType != null && TypedResults.IsResult(signatureType))
-            return MergeWithResultResponses(declared.Select(d => d.Response).ToList(), signatureType, unknownResults);
+        {
+            return MergeWithResultResponses(
+                declared.Select(d => d.Response).ToList(), signatureType, producesType, defaultContentTypes, unknownResults);
+        }
 
         if (declared.Count == 0 && producesType == null)
             return InferFromReturnType(signatureType, defaultContentTypes, contentTypesExplicit);
@@ -196,7 +199,11 @@ public static class ResponseExtractor
     /// them); when no response is known at all, a 200 response without a body stands in.
     /// </summary>
     private static IReadOnlyList<ResponseInfo> MergeWithResultResponses(
-        List<ResponseInfo> declared, Type resultType, List<Type> unknownResults)
+        List<ResponseInfo> declared,
+        Type resultType,
+        Type? producesType,
+        IReadOnlyList<string> defaultContentTypes,
+        List<Type> unknownResults)
     {
         // Whatever an IResult action declares is still written by the result, with the HTTP JSON options.
         var responses = declared
@@ -212,6 +219,29 @@ public static class ResponseExtractor
             .ToList();
         var codes = declared.Select(r => r.StatusCode).ToHashSet();
 
+        // [Produces(typeof(T))] ranks above the signature: the 200 body is T, not the result's value
+        // type; only a 200 declared with a type of its own keeps that type.
+        if (producesType != null)
+        {
+            var index = responses.FindIndex(r => r.StatusCode == 200);
+            if (index < 0 || responses[index].BodyType == null)
+            {
+                var typeless = index < 0 ? null : responses[index];
+                var produced = new ResponseInfo
+                {
+                    StatusCode           = 200,
+                    BodyType             = producesType,
+                    Description          = typeless?.Description,
+                    ContentTypes         = typeless is { ContentTypes.Count: > 0 } ? typeless.ContentTypes : defaultContentTypes,
+                    ContentTypesExplicit = typeless?.ContentTypesExplicit ?? false,
+                    BodyFromHttpResult   = true,
+                };
+                if (index < 0) responses.Add(produced);
+                else responses[index] = produced;
+                codes.Add(200);
+            }
+        }
+
         var (known, unknown) = TypedResults.Analyze(resultType);
         foreach (var response in known)
         {
@@ -219,7 +249,7 @@ public static class ResponseExtractor
                 responses.Add(response);
         }
 
-        if (declared.Count == 0)
+        if (declared.Count == 0 && producesType == null)
             unknownResults.AddRange(unknown);
 
         if (responses.Count == 0)
