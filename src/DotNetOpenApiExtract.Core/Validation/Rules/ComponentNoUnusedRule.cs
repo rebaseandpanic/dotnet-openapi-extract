@@ -30,21 +30,20 @@ public sealed class ComponentNoUnusedRule : IValidationRule
 
         var referencedIds = new HashSet<string>(StringComparer.Ordinal);
 
-        // Walk paths/operations to collect all referenced schema IDs
-        if (document.Paths != null)
+        // Walk path items and operations (paths and webhooks, any method) to collect all
+        // referenced schema IDs
+        foreach (var pathItemInterface in (document.Paths?.Values ?? Enumerable.Empty<IOpenApiPathItem>())
+                     .Concat(document.Webhooks?.Values ?? Enumerable.Empty<IOpenApiPathItem>()))
         {
-            foreach (var (_, pathItem) in document.Paths)
+            if (pathItemInterface is OpenApiPathItem { Parameters: not null } item)
+                foreach (var p in item.Parameters)
+                    CollectFromSchema(p?.Schema, referencedIds);
+        }
+
+        {
+            foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
             {
-                if (pathItem is not OpenApiPathItem item) continue;
-
-                // Path-level parameters
-                if (item.Parameters != null)
-                    foreach (var p in item.Parameters)
-                        CollectFromSchema(p?.Schema, referencedIds);
-
-                if (item.Operations == null) continue;
-
-                foreach (var (_, operation) in item.Operations)
+                var operation = op.Operation;
                 {
                     // Operation parameters
                     if (operation.Parameters != null)

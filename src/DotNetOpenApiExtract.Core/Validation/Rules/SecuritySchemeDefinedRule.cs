@@ -14,7 +14,6 @@ public sealed class SecuritySchemeDefinedRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
 
         var definedSchemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (document.Components?.SecuritySchemes != null)
@@ -39,22 +38,18 @@ public sealed class SecuritySchemeDefinedRule : IValidationRule
             }
         }
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            if (operation.Security == null) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            foreach (var requirement in operation.Security)
             {
-                if (operation.Security == null) continue;
-
-                foreach (var requirement in operation.Security)
+                foreach (var (scheme, _) in requirement)
                 {
-                    foreach (var (scheme, _) in requirement)
-                    {
-                        var name = GetSchemeName(scheme);
-                        if (name != null)
-                            referencedSchemes.Add((name, JsonPointerHelper.ForOperation(path, method.ToString())));
-                    }
+                    var name = GetSchemeName(scheme);
+                    if (name != null)
+                        referencedSchemes.Add((name, op.Pointer));
                 }
             }
         }

@@ -15,41 +15,36 @@ public sealed class ParameterOptionalHasDefaultRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            if (operation.Parameters == null) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            foreach (var param in operation.Parameters.OfType<OpenApiParameter>().OrderBy(p => p.Name))
             {
-                if (operation.Parameters == null) continue;
+                if (param.Required) continue;
+                if (param.Schema is not OpenApiSchema schema) continue;
 
-                foreach (var param in operation.Parameters.OfType<OpenApiParameter>().OrderBy(p => p.Name))
+                // Only flag value types: integer, number, boolean (not string, object, array)
+                bool isValueType = schema.Type == JsonSchemaType.Integer
+                    || schema.Type == JsonSchemaType.Number
+                    || schema.Type == JsonSchemaType.Boolean;
+
+                if (!isValueType) continue;
+
+                // Check if schema has a default value
+                bool hasDefault = schema.Default != null;
+                if (!hasDefault)
                 {
-                    if (param.Required) continue;
-                    if (param.Schema is not OpenApiSchema schema) continue;
-
-                    // Only flag value types: integer, number, boolean (not string, object, array)
-                    bool isValueType = schema.Type == JsonSchemaType.Integer
-                        || schema.Type == JsonSchemaType.Number
-                        || schema.Type == JsonSchemaType.Boolean;
-
-                    if (!isValueType) continue;
-
-                    // Check if schema has a default value
-                    bool hasDefault = schema.Default != null;
-                    if (!hasDefault)
-                    {
-                        var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                        yield return new ValidationViolation(
-                            Id,
-                            DefaultSeverity,
-                            JsonPointerHelper.ForParameter(path, method.ToString(), param.Name ?? "?"),
-                            resolver.ForOperation(key),
-                            $"Optional value-type parameter '{param.Name}' has no default value specified.");
-                    }
+                    var key = op.Key;
+                    yield return new ValidationViolation(
+                        Id,
+                        DefaultSeverity,
+                        JsonPointerHelper.ForParameterOf(op.Pointer, param.Name ?? "?"),
+                        resolver.ForOperation(key),
+                        $"Optional value-type parameter '{param.Name}' has no default value specified.");
                 }
             }
         }

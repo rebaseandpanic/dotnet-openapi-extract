@@ -13,31 +13,26 @@ public sealed class ResponseDescriptionRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            if (operation.Responses == null) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            foreach (var (statusCode, response) in operation.Responses.OrderBy(kv => kv.Key))
             {
-                if (operation.Responses == null) continue;
+                if (response is not OpenApiResponse apiResponse) continue;
 
-                foreach (var (statusCode, response) in operation.Responses.OrderBy(kv => kv.Key))
+                if (string.IsNullOrWhiteSpace(apiResponse.Description))
                 {
-                    if (response is not OpenApiResponse apiResponse) continue;
-
-                    if (string.IsNullOrWhiteSpace(apiResponse.Description))
-                    {
-                        var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                        yield return new ValidationViolation(
-                            Id,
-                            DefaultSeverity,
-                            JsonPointerHelper.ForResponse(path, method.ToString(), statusCode),
-                            resolver.ForOperation(key),
-                            $"Response '{statusCode}' is missing a description.");
-                    }
+                    var key = op.Key;
+                    yield return new ValidationViolation(
+                        Id,
+                        DefaultSeverity,
+                        JsonPointerHelper.ForResponseOf(op.Pointer, statusCode),
+                        resolver.ForOperation(key),
+                        $"Response '{statusCode}' is missing a description.");
                 }
             }
         }

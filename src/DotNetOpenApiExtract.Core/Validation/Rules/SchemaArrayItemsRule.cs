@@ -27,58 +27,54 @@ public sealed class SchemaArrayItemsRule : IValidationRule
         }
 
         // Walk inline schemas on operations (parameters, request body, responses)
-        if (document.Paths != null)
+        // Operations in paths and webhooks
         {
-            foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+            foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
             {
-                if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+                var operation = op.Operation;
+                var opPtr = op.Pointer;
 
-                foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+                // Parameters
+                if (operation.Parameters != null)
                 {
-                    var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
-
-                    // Parameters
-                    if (operation.Parameters != null)
+                    for (int i = 0; i < operation.Parameters.Count; i++)
                     {
-                        for (int i = 0; i < operation.Parameters.Count; i++)
+                        var param = operation.Parameters[i];
+                        if (param?.Schema is OpenApiSchema ps)
                         {
-                            var param = operation.Parameters[i];
-                            if (param?.Schema is OpenApiSchema ps)
-                            {
-                                foreach (var v in WalkSchema(ps, $"{opPtr}/parameters/{i}/schema"))
-                                    yield return v;
-                            }
+                            foreach (var v in WalkSchema(ps, $"{opPtr}/parameters/{i}/schema"))
+                                yield return v;
                         }
                     }
+                }
 
-                    // Request body
-                    if (operation.RequestBody?.Content != null)
+                // Request body
+                if (operation.RequestBody?.Content != null)
+                {
+                    foreach (var (mt, mediaType) in operation.RequestBody.Content)
                     {
-                        foreach (var (mt, mediaType) in operation.RequestBody.Content)
+                        if (mediaType?.Schema is OpenApiSchema rbs)
                         {
-                            if (mediaType?.Schema is OpenApiSchema rbs)
-                            {
-                                var ptr = $"{opPtr}/requestBody/content/{JsonPointerHelper.EncodeSegment(mt)}/schema";
-                                foreach (var v in WalkSchema(rbs, ptr))
-                                    yield return v;
-                            }
+                            var ptr = $"{opPtr}/requestBody/content/{JsonPointerHelper.EncodeSegment(mt)}/schema";
+                            foreach (var v in WalkSchema(rbs, ptr))
+                                yield return v;
                         }
                     }
+                }
 
-                    // Responses
-                    if (operation.Responses != null)
+                // Responses
+                if (operation.Responses != null)
+                {
+                    foreach (var (status, response) in operation.Responses.OrderBy(kv => kv.Key))
                     {
-                        foreach (var (status, response) in operation.Responses.OrderBy(kv => kv.Key))
+                        if (response?.Content == null) continue;
+                        foreach (var (mt, mediaType) in response.Content)
                         {
-                            if (response?.Content == null) continue;
-                            foreach (var (mt, mediaType) in response.Content)
+                            if (mediaType?.Schema is OpenApiSchema rs)
                             {
-                                if (mediaType?.Schema is OpenApiSchema rs)
-                                {
-                                    var ptr = $"{opPtr}/responses/{status}/content/{JsonPointerHelper.EncodeSegment(mt)}/schema";
-                                    foreach (var v in WalkSchema(rs, ptr))
-                                        yield return v;
-                                }
+                                var ptr = $"{opPtr}/responses/{status}/content/{JsonPointerHelper.EncodeSegment(mt)}/schema";
+                                foreach (var v in WalkSchema(rs, ptr))
+                                    yield return v;
                             }
                         }
                     }

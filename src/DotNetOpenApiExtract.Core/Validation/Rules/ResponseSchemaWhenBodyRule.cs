@@ -13,34 +13,29 @@ public sealed class ResponseSchemaWhenBodyRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            if (operation.Responses == null) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            foreach (var (statusCode, response) in operation.Responses.OrderBy(kv => kv.Key))
             {
-                if (operation.Responses == null) continue;
+                if (response is not OpenApiResponse apiResponse) continue;
+                if (apiResponse.Content == null || apiResponse.Content.Count == 0) continue;
 
-                foreach (var (statusCode, response) in operation.Responses.OrderBy(kv => kv.Key))
+                foreach (var (mediaType, mediaTypeObj) in apiResponse.Content.OrderBy(kv => kv.Key))
                 {
-                    if (response is not OpenApiResponse apiResponse) continue;
-                    if (apiResponse.Content == null || apiResponse.Content.Count == 0) continue;
-
-                    foreach (var (mediaType, mediaTypeObj) in apiResponse.Content.OrderBy(kv => kv.Key))
+                    if (mediaTypeObj is not OpenApiMediaType mt || mt.Schema == null)
                     {
-                        if (mediaTypeObj is not OpenApiMediaType mt || mt.Schema == null)
-                        {
-                            var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                            yield return new ValidationViolation(
-                                Id,
-                                DefaultSeverity,
-                                $"{JsonPointerHelper.ForResponse(path, method.ToString(), statusCode)}/content/{JsonPointerHelper.EncodeSegment(mediaType)}",
-                                resolver.ForOperation(key),
-                                $"Response '{statusCode}' media-type '{mediaType}' has no schema defined.");
-                        }
+                        var key = op.Key;
+                        yield return new ValidationViolation(
+                            Id,
+                            DefaultSeverity,
+                            $"{JsonPointerHelper.ForResponseOf(op.Pointer, statusCode)}/content/{JsonPointerHelper.EncodeSegment(mediaType)}",
+                            resolver.ForOperation(key),
+                            $"Response '{statusCode}' media-type '{mediaType}' has no schema defined.");
                     }
                 }
             }

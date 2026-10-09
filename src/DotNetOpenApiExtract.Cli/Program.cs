@@ -84,8 +84,9 @@ var validationReportOption = new Option<string?>("--validation-report")
 var requireResponseCodeOption = new Option<string[]>("--require-response-code")
 {
     Description = "Required response codes for specific HTTP methods. Format: METHOD:CODE. Method can be: " +
-                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating (POST/PUT/PATCH/DELETE), " +
-                  "safe (GET/HEAD/OPTIONS), or * for any. Repeatable. Activates " +
+                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, QUERY, " +
+                  "safe (GET/HEAD/OPTIONS/TRACE/QUERY), mutating (any other method, including non-standard ones), " +
+                  "or * for any. Repeatable. Activates " +
                   "operation.has-required-response-codes rule (requires --enable-rule). " +
                   "Example: --require-response-code mutating:422 --require-response-code *:401",
     AllowMultipleArgumentsPerToken = false,
@@ -617,8 +618,9 @@ var validateSubReportOption = new Option<string?>("--validation-report")
 var validateSubRequireResponseCodeOption = new Option<string[]>("--require-response-code")
 {
     Description = "Required response codes for specific HTTP methods. Format: METHOD:CODE. Method can be: " +
-                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating (POST/PUT/PATCH/DELETE), " +
-                  "safe (GET/HEAD/OPTIONS), or * for any. Repeatable. Activates " +
+                  "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, QUERY, " +
+                  "safe (GET/HEAD/OPTIONS/TRACE/QUERY), mutating (any other method, including non-standard ones), " +
+                  "or * for any. Repeatable. Activates " +
                   "operation.has-required-response-codes rule (requires --enable-rule). " +
                   "Example: --require-response-code mutating:422 --require-response-code *:401",
     AllowMultipleArgumentsPerToken = false,
@@ -852,7 +854,7 @@ static List<(string MethodFilter, int Code)> ParseRequireResponseCodes(string[]?
         {
             Console.Error.WriteLine(
                 $"Warning: --require-response-code '{entry}' has unknown method filter '{methodPart}'. " +
-                "Valid values: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, mutating, safe, *. Skipping.");
+                "Valid values: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, QUERY, mutating, safe, *. Skipping.");
             continue;
         }
 

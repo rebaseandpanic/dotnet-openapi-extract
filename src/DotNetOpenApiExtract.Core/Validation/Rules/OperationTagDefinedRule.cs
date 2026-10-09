@@ -15,7 +15,6 @@ public sealed class OperationTagDefinedRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
 
         var definedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (document.Tags != null)
@@ -25,27 +24,24 @@ public sealed class OperationTagDefinedRule : IValidationRule
                     definedTags.Add(tag.Name);
         }
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var path = op.Name;
+            var operation = op.Operation;
+            if (operation.Tags == null) continue;
+            var opPtr = op.Pointer;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            foreach (var tag in operation.Tags.OrderBy(t => t?.Name ?? ""))
             {
-                if (operation.Tags == null) continue;
-                var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
-
-                foreach (var tag in operation.Tags.OrderBy(t => t?.Name ?? ""))
+                if (tag?.Name == null) continue;
+                if (!definedTags.Contains(tag.Name))
                 {
-                    if (tag?.Name == null) continue;
-                    if (!definedTags.Contains(tag.Name))
-                    {
-                        yield return new ValidationViolation(
-                            Id,
-                            DefaultSeverity,
-                            opPtr,
-                            null,
-                            $"Tag '{tag.Name}' used on operation {method.ToString().ToUpperInvariant()} '{path}' is not defined in the top-level tags array.");
-                    }
+                    yield return new ValidationViolation(
+                        Id,
+                        DefaultSeverity,
+                        opPtr,
+                        null,
+                        $"Tag '{tag.Name}' used on operation {op.MethodName} '{path}' is not defined in the top-level tags array.");
                 }
             }
         }

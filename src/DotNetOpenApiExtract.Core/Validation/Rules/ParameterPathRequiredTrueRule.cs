@@ -44,7 +44,7 @@ public sealed class ParameterPathRequiredTrueRule : IValidationRule
             foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
             {
                 if (operation.Parameters == null) continue;
-                var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
+                var opPtr = JsonPointerHelper.ForOperation(path, method.Method, context.OpenApiSpecVersion ?? Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0);
 
                 foreach (var param in operation.Parameters.OrderBy(p => p?.Name ?? ""))
                 {

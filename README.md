@@ -68,7 +68,7 @@ This means you can generate OpenAPI specs:
 | `--strict` | no | `false` | Treat all warnings as errors (CI-strict mode) |
 | `--min-description-length <N>` | no | `5` | Minimum length for description-rule checks (global default) |
 | `--rule-min-length <id>:<N>` | no | — | Per-rule override for min-description-length (repeatable). Example: `--rule-min-length enum.value-description:3` |
-| `--require-response-code <method>:<code>` | no | — | Required response code for a method filter (repeatable). Activates `operation.has-required-response-codes` rule. Method: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS` or groups `mutating`/`safe`/`*` |
+| `--require-response-code <method>:<code>` | no | — | Required response code for a method filter (repeatable). Activates `operation.has-required-response-codes` rule. Method: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`QUERY` or groups `safe` (GET, HEAD, OPTIONS, TRACE, QUERY), `mutating` (any other method, including non-standard ones) and `*` |
 | `--exclude-validation-path <prefix>` | no | — | Path prefixes skipped by `operation.has-error-response`, `operation.success-response`, `operation.has-required-response-codes` (repeatable) |
 | `--validation-report <path>` | no | — | Write JSON report to file (else printed to stdout) |
 

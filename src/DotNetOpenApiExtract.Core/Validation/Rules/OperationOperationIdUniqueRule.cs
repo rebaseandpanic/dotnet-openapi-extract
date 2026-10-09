@@ -15,31 +15,26 @@ public sealed class OperationOperationIdUniqueRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
 
         // Collect all operationIds with their pointers
         var seen = new Dictionary<string, string>(StringComparer.Ordinal);
         var duplicates = new List<(string operationId, string pointer)>();
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            var opId = operation.OperationId;
+            if (string.IsNullOrWhiteSpace(opId)) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            var pointer = op.Pointer;
+
+            if (seen.ContainsKey(opId))
             {
-                var opId = operation.OperationId;
-                if (string.IsNullOrWhiteSpace(opId)) continue;
-
-                var pointer = JsonPointerHelper.ForOperation(path, method.ToString());
-
-                if (seen.ContainsKey(opId))
-                {
-                    duplicates.Add((opId, pointer));
-                }
-                else
-                {
-                    seen[opId] = pointer;
-                }
+                duplicates.Add((opId, pointer));
+            }
+            else
+            {
+                seen[opId] = pointer;
             }
         }
 

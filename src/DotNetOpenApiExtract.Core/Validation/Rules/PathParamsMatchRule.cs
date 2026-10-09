@@ -46,7 +46,7 @@ public sealed class PathParamsMatchRule : IValidationRule
 
             foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
             {
-                var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
+                var opPtr = JsonPointerHelper.ForOperation(path, method.Method, context.OpenApiSpecVersion ?? Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0);
 
                 // Collect in:path parameter names for this operation (operation-level overrides path-level)
                 var opPathParams = new HashSet<string>(pathLevelParams, StringComparer.OrdinalIgnoreCase);

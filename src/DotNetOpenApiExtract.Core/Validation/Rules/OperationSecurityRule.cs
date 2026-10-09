@@ -20,41 +20,36 @@ public sealed class OperationSecurityRule : IValidationRule
     {
         // Without CLR bindings we cannot determine whether [Authorize] was present.
         if (context.ActionByOperationKey == null) yield break;
-        if (document.Paths == null) yield break;
 
         bool hasGlobalSecurity = document.Security is { Count: > 0 };
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            var key = op.Key;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            if (!context.ActionByOperationKey.TryGetValue(key, out var info))
+                continue;
+
+            // Check if [Authorize] is present on action or controller
+            bool isAuthorized = IsAuthorized(info.Action, info.Controller);
+            bool isAnonymous = IsAnonymous(info.Action, info.Controller);
+
+            if (!isAuthorized || isAnonymous) continue;
+            if (hasGlobalSecurity) continue;
+
+            // Operation has [Authorize], no [AllowAnonymous], no global security —
+            // must declare its own security
+            bool hasOperationSecurity = operation.Security is { Count: > 0 };
+            if (!hasOperationSecurity)
             {
-                var key = $"{method.ToString().ToUpperInvariant()} {path}";
-
-                if (!context.ActionByOperationKey.TryGetValue(key, out var info))
-                    continue;
-
-                // Check if [Authorize] is present on action or controller
-                bool isAuthorized = IsAuthorized(info.Action, info.Controller);
-                bool isAnonymous = IsAnonymous(info.Action, info.Controller);
-
-                if (!isAuthorized || isAnonymous) continue;
-                if (hasGlobalSecurity) continue;
-
-                // Operation has [Authorize], no [AllowAnonymous], no global security —
-                // must declare its own security
-                bool hasOperationSecurity = operation.Security is { Count: > 0 };
-                if (!hasOperationSecurity)
-                {
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        "Operation is protected by [Authorize] but has no security requirement declared and no global security is defined.");
-                }
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    "Operation is protected by [Authorize] but has no security requirement declared and no global security is defined.");
             }
         }
     }

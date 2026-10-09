@@ -78,19 +78,13 @@ internal static class DownlevelPass
             {
                 var location = OperationPlacement.SlotOf(method.Method, version) == OperationSlot.ExtensionAdditionalOperations
                     ? Validation.JsonPointerHelper.ForOperation(path, method.Method, version)
-                    : $"{OperationKeyMethod(method)} {path}";
+                    : $"{OperationPlacement.NormalizeMethod(method.Method)} {path}";
                 index[operation] = (order++, location);
             }
         }
 
         return index;
     }
-
-    /// <summary>Standard methods in upper case; others keep the literal written to the output.</summary>
-    private static string OperationKeyMethod(HttpMethod method) =>
-        OperationPlacement.SlotOf(method.Method, OpenApiSpecVersion.OpenApi3_2) == OperationSlot.OwnField
-            ? method.Method.ToUpperInvariant()
-            : method.Method;
 
     private static bool TryLocate(
         LossAnchor anchor,

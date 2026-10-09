@@ -19,31 +19,27 @@ public sealed class OperationOperationIdPascalCaseRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var path = op.Name;
+            var operation = op.Operation;
+            var opId = operation.OperationId;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            // Skip operations without an operationId — that's operation.operation-id's job
+            if (string.IsNullOrWhiteSpace(opId)) continue;
+
+            if (!PascalCaseRegex.IsMatch(opId))
             {
-                var opId = operation.OperationId;
-
-                // Skip operations without an operationId — that's operation.operation-id's job
-                if (string.IsNullOrWhiteSpace(opId)) continue;
-
-                if (!PascalCaseRegex.IsMatch(opId))
-                {
-                    var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        $"Operation '{method.ToString().ToUpperInvariant()} {path}' has operationId '{opId}' " +
-                        $"which is not PascalCase (must match ^[A-Z][A-Za-z0-9]*$).");
-                }
+                var key = op.Key;
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    $"Operation '{op.MethodName} {path}' has operationId '{opId}' " +
+                    $"which is not PascalCase (must match ^[A-Z][A-Za-z0-9]*$).");
             }
         }
     }

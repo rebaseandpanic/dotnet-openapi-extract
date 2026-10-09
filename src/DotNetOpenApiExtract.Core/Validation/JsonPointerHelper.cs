@@ -27,14 +27,30 @@ internal static class JsonPointerHelper
     /// (the method keeps its capitalization there).
     /// </summary>
     public static string ForOperation(string path, string method, Microsoft.OpenApi.OpenApiSpecVersion version)
+        => ForOperation("paths", path, method, version);
+
+    /// <summary>
+    /// Same as <see cref="ForOperation(string, string, Microsoft.OpenApi.OpenApiSpecVersion)"/> for an
+    /// operation under <paramref name="root"/> (<c>paths</c> or <c>webhooks</c>) and key
+    /// <paramref name="name"/> (path or webhook name).
+    /// </summary>
+    public static string ForOperation(string root, string name, string method, Microsoft.OpenApi.OpenApiSpecVersion version)
         => Versioning.OperationPlacement.SlotOf(method, version) switch
         {
             Versioning.OperationSlot.AdditionalOperations
-                => $"#/paths/{EncodeSegment(path)}/additionalOperations/{EncodeSegment(method)}",
+                => $"#/{root}/{EncodeSegment(name)}/additionalOperations/{EncodeSegment(method)}",
             Versioning.OperationSlot.ExtensionAdditionalOperations
-                => $"#/paths/{EncodeSegment(path)}/{Versioning.OperationPlacement.ExtensionName}/{EncodeSegment(method)}",
-            _ => ForOperation(path, method),
+                => $"#/{root}/{EncodeSegment(name)}/{Versioning.OperationPlacement.ExtensionName}/{EncodeSegment(method)}",
+            _ => $"#/{root}/{EncodeSegment(name)}/{method.ToLowerInvariant()}",
         };
+
+    /// <summary>Pointer of a parameter of the operation at <paramref name="operationPointer"/>.</summary>
+    public static string ForParameterOf(string operationPointer, string paramName)
+        => $"{operationPointer}/parameters/{EncodeSegment(paramName)}";
+
+    /// <summary>Pointer of a response of the operation at <paramref name="operationPointer"/>.</summary>
+    public static string ForResponseOf(string operationPointer, string statusCode)
+        => $"{operationPointer}/responses/{statusCode}";
 
     /// <summary>
     /// Builds a JSON Pointer for a parameter on an operation.

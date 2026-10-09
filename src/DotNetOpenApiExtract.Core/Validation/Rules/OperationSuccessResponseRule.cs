@@ -20,35 +20,30 @@ public sealed class OperationSuccessResponseRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (context.ExcludedPathPrefixes.Any(prefix =>
-                    path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            if (op.Root == OperationRoot.Paths && context.ExcludedPathPrefixes.Any(prefix =>
+                    op.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
                 continue;
 
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            var hasSuccess = operation.Responses != null &&
+                operation.Responses.Keys.Any(k =>
+                    (int.TryParse(k, out var code) && (code >= 200 && code < 400)) ||
+                    k.StartsWith("2", StringComparison.Ordinal) ||
+                    k.StartsWith("3", StringComparison.Ordinal));
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            if (!hasSuccess)
             {
-                var hasSuccess = operation.Responses != null &&
-                    operation.Responses.Keys.Any(k =>
-                        (int.TryParse(k, out var code) && (code >= 200 && code < 400)) ||
-                        k.StartsWith("2", StringComparison.Ordinal) ||
-                        k.StartsWith("3", StringComparison.Ordinal));
-
-                if (!hasSuccess)
-                {
-                    var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        "Operation has no 2xx or 3xx success response declared.");
-                }
+                var key = op.Key;
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    "Operation has no 2xx or 3xx success response declared.");
             }
         }
     }

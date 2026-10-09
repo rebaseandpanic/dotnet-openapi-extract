@@ -14,28 +14,23 @@ public sealed class OperationDescriptionRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
-
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            var operation = op.Operation;
+            var desc = operation.Description;
+            var actual = desc?.Length ?? 0;
+            var minLen = context.GetMinDescriptionLength(Id);
+            if (string.IsNullOrWhiteSpace(desc) || actual < minLen)
             {
-                var desc = operation.Description;
-                var actual = desc?.Length ?? 0;
-                var minLen = context.GetMinDescriptionLength(Id);
-                if (string.IsNullOrWhiteSpace(desc) || actual < minLen)
-                {
-                    var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        $"Operation description is missing or shorter than {minLen} characters (actual: {actual}).");
-                }
+                var key = op.Key;
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    $"Operation description is missing or shorter than {minLen} characters (actual: {actual}).");
             }
         }
     }

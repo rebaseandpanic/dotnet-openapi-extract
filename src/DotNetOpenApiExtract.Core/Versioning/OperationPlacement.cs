@@ -30,6 +30,19 @@ internal static class OperationPlacement
         "GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE",
     };
 
+    /// <summary>Standard HTTP methods (as in <c>HttpMethods.*</c>), written in upper case whatever the literal.</summary>
+    private static readonly HashSet<string> StandardMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "CONNECT", "QUERY",
+    };
+
+    /// <summary>
+    /// The method as declared and keyed: standard methods upper case, any other method keeps the
+    /// capitalization of the literal (what goes into the request).
+    /// </summary>
+    public static string NormalizeMethod(string method) =>
+        StandardMethods.Contains(method) ? method.ToUpperInvariant() : method;
+
     public static OperationSlot SlotOf(string method, OpenApiSpecVersion version)
     {
         if (Fields30.Contains(method))

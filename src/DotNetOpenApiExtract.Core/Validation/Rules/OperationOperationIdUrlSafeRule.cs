@@ -18,26 +18,21 @@ public sealed class OperationOperationIdUrlSafeRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            var opId = operation.OperationId;
+            if (string.IsNullOrWhiteSpace(opId)) continue; // operation.operation-id covers missing
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            if (!UrlSafeRegex.IsMatch(opId))
             {
-                var opId = operation.OperationId;
-                if (string.IsNullOrWhiteSpace(opId)) continue; // operation.operation-id covers missing
-
-                if (!UrlSafeRegex.IsMatch(opId))
-                {
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        null,
-                        $"operationId '{opId}' contains characters that are not URL-safe. Use only a-z, A-Z, 0-9, '_', or '-'.");
-                }
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    null,
+                    $"operationId '{opId}' contains characters that are not URL-safe. Use only a-z, A-Z, 0-9, '_', or '-'.");
             }
         }
     }

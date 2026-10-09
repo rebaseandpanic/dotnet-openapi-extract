@@ -13,25 +13,20 @@ public sealed class OperationSummaryRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
-
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            var operation = op.Operation;
+            if (string.IsNullOrWhiteSpace(operation.Summary))
             {
-                if (string.IsNullOrWhiteSpace(operation.Summary))
-                {
-                    var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        $"Operation is missing a summary.");
-                }
+                var key = op.Key;
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    $"Operation is missing a summary.");
             }
         }
     }

@@ -39,24 +39,21 @@ public sealed class SpecNoEvalInMarkdownRule : IValidationRule
         }
 
         // Paths / operations
-        if (document.Paths != null)
+        // Operations in paths and webhooks
         {
-            foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+            foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
             {
-                if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+                var path = op.Name;
+                var operation = op.Operation;
+                var opPtr = op.Pointer;
 
-                foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
-                {
-                    var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
+                if (ContainsEval(operation.Description))
+                    yield return new ValidationViolation(Id, DefaultSeverity, opPtr, null,
+                        $"Operation {op.MethodName} '{path}' description contains 'eval('.");
 
-                    if (ContainsEval(operation.Description))
-                        yield return new ValidationViolation(Id, DefaultSeverity, opPtr, null,
-                            $"Operation {method.ToString().ToUpperInvariant()} '{path}' description contains 'eval('.");
-
-                    if (ContainsEval(operation.Summary))
-                        yield return new ValidationViolation(Id, DefaultSeverity, opPtr, null,
-                            $"Operation {method.ToString().ToUpperInvariant()} '{path}' summary contains 'eval('.");
-                }
+                if (ContainsEval(operation.Summary))
+                    yield return new ValidationViolation(Id, DefaultSeverity, opPtr, null,
+                        $"Operation {op.MethodName} '{path}' summary contains 'eval('.");
             }
         }
 

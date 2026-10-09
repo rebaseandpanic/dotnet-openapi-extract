@@ -41,7 +41,7 @@ public sealed class SpecNoRefSiblingsRule : IValidationRule
             yield break;
         }
 
-        if (document.Components?.Schemas == null && document.Paths == null)
+        if (document.Components?.Schemas == null && document.Paths == null && document.Webhooks == null)
             yield break;
 
         // Walk all schema references in components
@@ -70,16 +70,12 @@ public sealed class SpecNoRefSiblingsRule : IValidationRule
         }
 
         // Walk schemas used in paths/operations
-        if (document.Paths != null)
         {
-            foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+            foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
             {
-                if (pathItem is not OpenApiPathItem item) continue;
-                if (item.Operations == null) continue;
-
-                foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+                var operation = op.Operation;
                 {
-                    var opPtr = JsonPointerHelper.ForOperation(path, method.ToString());
+                    var opPtr = op.Pointer;
 
                     // Parameters
                     if (operation.Parameters != null)

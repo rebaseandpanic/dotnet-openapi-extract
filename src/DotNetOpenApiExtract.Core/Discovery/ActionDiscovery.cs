@@ -72,12 +72,6 @@ public static class ActionDiscovery
             [AttributeHelper.Names.HttpOptions] = "OPTIONS",
         };
 
-    /// <summary>Methods written in upper case whatever the literal's capitalization (as <c>HttpMethods.*</c>).</summary>
-    private static readonly HashSet<string> StandardMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "CONNECT", "QUERY",
-    };
-
     /// <summary>
     /// Discovers all actions declared directly on the given <paramref name="controller"/>.
     /// Warnings are printed to <c>Console.Error</c>.
@@ -192,7 +186,7 @@ public static class ActionDiscovery
 
         void Add(string httpMethod, string? route, string? name, int order)
         {
-            var normalized = StandardMethods.Contains(httpMethod) ? httpMethod.ToUpperInvariant() : httpMethod;
+            var normalized = Versioning.OperationPlacement.NormalizeMethod(httpMethod);
             if (seen.Add((normalized.ToUpperInvariant(), route)))
                 found.Add((normalized, route, name, order));
         }

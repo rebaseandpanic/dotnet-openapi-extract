@@ -19,28 +19,23 @@ public sealed class OperationDeprecatedHasNoteRule : IValidationRule
 
     public IEnumerable<ValidationViolation> Validate(OpenApiDocument document, ValidationContext context)
     {
-        if (document.Paths == null) yield break;
         var resolver = new ViolationLocationResolver(context);
 
-        foreach (var (path, pathItem) in document.Paths.OrderBy(kv => kv.Key))
+        foreach (var op in OperationEnumerator.Enumerate(document, context.OpenApiSpecVersion))
         {
-            if (pathItem is not OpenApiPathItem item || item.Operations == null) continue;
+            var operation = op.Operation;
+            if (!operation.Deprecated) continue;
 
-            foreach (var (method, operation) in item.Operations.OrderBy(kv => kv.Key.ToString()))
+            var desc = operation.Description ?? string.Empty;
+            if (!DeprecationNotePattern.IsMatch(desc))
             {
-                if (!operation.Deprecated) continue;
-
-                var desc = operation.Description ?? string.Empty;
-                if (!DeprecationNotePattern.IsMatch(desc))
-                {
-                    var key = $"{method.ToString().ToUpperInvariant()} {path}";
-                    yield return new ValidationViolation(
-                        Id,
-                        DefaultSeverity,
-                        JsonPointerHelper.ForOperation(path, method.ToString()),
-                        resolver.ForOperation(key),
-                        "Deprecated operation description must mention a replacement (keywords: \"replacement\", \"use instead\", \"removed\").");
-                }
+                var key = op.Key;
+                yield return new ValidationViolation(
+                    Id,
+                    DefaultSeverity,
+                    op.Pointer,
+                    resolver.ForOperation(key),
+                    "Deprecated operation description must mention a replacement (keywords: \"replacement\", \"use instead\", \"removed\").");
             }
         }
     }
