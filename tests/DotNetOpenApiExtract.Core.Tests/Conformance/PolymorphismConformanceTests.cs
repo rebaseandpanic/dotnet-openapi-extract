@@ -115,6 +115,29 @@ public class PolymorphismConformanceTests(PolymorphismConformanceFixture fixture
                 data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":"shark","fins":5,"teeth":300}""");
                 data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"fins":2}""");
                 data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":"whale","fins":2}""");
+                // What STJ reads as a discriminator: a string or an Int32 integer, nothing else.
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":7,"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":true,"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":null,"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":1.5,"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":{},"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":[],"fins":2}""");
+                data.Add(version, "/polymorphism-alt/fish", typeof(Fish), """{"$type":2147483648,"fins":2}""");
+                data.Add(version, "/polymorphism-alt/pet", typeof(Pet), """{"$type":true,"nickname":"x"}""");
+                data.Add(version, "/polymorphism-alt/pet", typeof(Pet), """{"$type":null,"nickname":"x"}""");
+                // Integer values, unknown values read as the base: mapping is type-sensitive.
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":1,"carats":2,"depth":3}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":2,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":"1","carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":"x","carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":2147483647,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":2147483648,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":-2147483649,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":true,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":null,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":1.5,"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":{},"carats":2}""");
+                data.Add(version, "/polymorphism-alt/gem", typeof(Gem), """{"$type":[],"carats":2}""");
             }
             return data;
         }
@@ -141,6 +164,9 @@ public class PolymorphismConformanceTests(PolymorphismConformanceFixture fixture
         // Guard for the test above: the unknown value is rejected by STJ for Pet and read for Fish.
         StjWire.Accepts("""{"$type":"unicorn","nickname":"Unknown"}""", typeof(Pet), Wire).Should().BeFalse();
         StjWire.Accepts("""{"$type":"whale","fins":2}""", typeof(Fish), Wire).Should().BeTrue();
+        StjWire.Accepts("""{"$type":true,"fins":2}""", typeof(Fish), Wire).Should().BeFalse();
+        StjWire.Accepts("""{"$type":"1","carats":2}""", typeof(Gem), Wire).Should().BeTrue();
+        StjWire.Accepts("""{"$type":2147483648,"carats":2}""", typeof(Gem), Wire).Should().BeFalse();
     }
 
     // ── anyOf union ──────────────────────────────────────────────────────────

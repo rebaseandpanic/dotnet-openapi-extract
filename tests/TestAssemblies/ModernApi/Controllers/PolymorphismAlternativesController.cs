@@ -40,6 +40,10 @@ public class PolymorphismAlternativesController : ControllerBase
     [HttpGet("fruit")]
     public ActionResult<Fruit> GetFruit() => throw new NotSupportedException();
 
+    /// <summary>A gem (concrete base, integer discriminators, unknown values read as the base).</summary>
+    [HttpGet("gem")]
+    public ActionResult<Gem> GetGem() => throw new NotSupportedException();
+
     /// <summary>A tree node (recursive hierarchy).</summary>
     [HttpGet("tree")]
     public ActionResult<TreeNode> GetTree() => throw new NotSupportedException();

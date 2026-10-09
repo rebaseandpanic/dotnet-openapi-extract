@@ -902,7 +902,8 @@ public sealed class SchemaGenerator
     /// <paramref name="mappedValues"/> (every alternative has a value) it also excludes every
     /// object a variant takes: without <c>IgnoreUnrecognizedTypeDiscriminators</c>
     /// <c>not: {required: [property]}</c> (no discriminator at all — STJ rejects unknown values);
-    /// with it, the discriminator, if present, must be none of the mapped values.
+    /// with it, the discriminator, if present, must be a value STJ reads as a discriminator and none
+    /// of the mapped values (<see cref="UnmappedDiscriminatorSchema"/>).
     /// </summary>
     private IOpenApiSchema GenerateBaseBranch(PolymorphismInfo polymorphism, string unionId, IReadOnlyList<object>? mappedValues)
     {
@@ -926,10 +927,7 @@ public sealed class SchemaGenerator
                 {
                     var properties = new Dictionary<string, IOpenApiSchema>(branch.Properties ?? new Dictionary<string, IOpenApiSchema>(), StringComparer.Ordinal)
                     {
-                        [polymorphism.PropertyName] = new OpenApiSchema
-                        {
-                            Not = new OpenApiSchema { Enum = mappedValues.Select(DiscriminatorValueNode).ToList() },
-                        },
+                        [polymorphism.PropertyName] = UnmappedDiscriminatorSchema(mappedValues),
                     };
                     branch.Properties = properties;
                 }
@@ -946,6 +944,31 @@ public sealed class SchemaGenerator
             _generating.Remove(branchId);
         }
     }
+
+    /// <summary>
+    /// The discriminator values the base branch takes when unrecognized values are read as the base:
+    /// what System.Text.Json reads as a type discriminator — any JSON string or an integer within
+    /// Int32 range, whatever the declared values' type (measured on STJ 10: <c>true</c>, <c>null</c>,
+    /// <c>1.5</c>, objects, arrays and integers outside Int32 are rejected) — except the mapped values.
+    /// Mapping is type-sensitive (the number <c>1</c> does not select a variant declared with
+    /// <c>"1"</c>), and so is <c>enum</c>. Written as <c>anyOf</c> rather than a type array, so the same
+    /// form is valid in 3.0.
+    /// </summary>
+    private static OpenApiSchema UnmappedDiscriminatorSchema(IReadOnlyList<object> mappedValues) => new()
+    {
+        AnyOf =
+        [
+            new OpenApiSchema { Type = JsonSchemaType.String },
+            new OpenApiSchema
+            {
+                Type    = JsonSchemaType.Integer,
+                Format  = "int32",
+                Minimum = int.MinValue.ToString(CultureInfo.InvariantCulture),
+                Maximum = int.MaxValue.ToString(CultureInfo.InvariantCulture),
+            },
+        ],
+        Not = new OpenApiSchema { Enum = mappedValues.Select(DiscriminatorValueNode).ToList() },
+    };
 
     private static JsonNode DiscriminatorValueNode(object value) => value switch
     {

@@ -181,3 +181,19 @@ public sealed class PercentCoupon : Coupon
     /// <summary>Discount percentage.</summary>
     public int Percent { get; set; }
 }
+
+/// <summary>A gem; a concrete base with integer discriminators, unknown discriminators read as the base.</summary>
+[JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = true)]
+[JsonDerivedType(typeof(Ruby), 1)]
+public class Gem
+{
+    /// <summary>Carats.</summary>
+    public int Carats { get; set; }
+}
+
+/// <summary>A ruby.</summary>
+public sealed class Ruby : Gem
+{
+    /// <summary>Colour depth.</summary>
+    public int Depth { get; set; }
+}
