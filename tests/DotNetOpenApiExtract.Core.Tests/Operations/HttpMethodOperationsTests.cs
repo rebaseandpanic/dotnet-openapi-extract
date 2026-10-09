@@ -138,6 +138,20 @@ public class HttpMethodOperationsTests(HttpMethodOperationsFixture fixture) : IC
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public void RepeatedMethodAndRoute_KeepsTheGivenName(OpenApiSpecVersion version)
+    {
+        OperationId(version, "/http-methods/names/merged", "get").Should().Be("MergedName");
+        OperationId(version, "/http-methods/names/clash", "get").Should().Be("FirstName");
+        OperationId(version, "/http-methods/names/same", "get").Should().Be("SameName");
+
+        var conflicts = fixture.Diagnostics[version]
+            .Where(d => d.Code == ExtractionDiagnosticCodes.DiscoveryConflictingOperationNames)
+            .ToList();
+        conflicts.Should().ContainSingle().Which.Subjects.Should().Equal("FirstName", "SecondName");
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public void ConflictOnExcludedPath_NotReported(OpenApiSpecVersion version)
     {
         fixture.Diagnostics[version]

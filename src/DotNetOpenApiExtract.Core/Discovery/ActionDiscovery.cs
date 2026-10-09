@@ -182,13 +182,38 @@ public static class ActionDiscovery
         ControllerInfo controller, MethodInfo method, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         var found = new List<(string Method, string? Route, string? Name, int Order)>();
-        var seen = new HashSet<(string, string?)>();
+        var seen = new Dictionary<(string, string?), int>();
 
+        // A (method, route) pair declared twice is one operation. Its Name is the first one given:
+        // a later Name fills an empty one; two different Names keep the first, with a warning.
         void Add(string httpMethod, string? route, string? name, int order)
         {
             var normalized = Versioning.OperationPlacement.NormalizeMethod(httpMethod);
-            if (seen.Add((normalized.ToUpperInvariant(), route)))
+            var key = (normalized.ToUpperInvariant(), route);
+            if (!seen.TryGetValue(key, out var index))
+            {
+                seen[key] = found.Count;
                 found.Add((normalized, route, name, order));
+                return;
+            }
+
+            var kept = found[index];
+            if (string.IsNullOrEmpty(name) || string.Equals(kept.Name, name, StringComparison.Ordinal))
+                return;
+
+            if (string.IsNullOrEmpty(kept.Name))
+            {
+                found[index] = kept with { Name = name };
+                return;
+            }
+
+            DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+            {
+                Code     = ExtractionDiagnosticCodes.DiscoveryConflictingOperationNames,
+                Message  = $"{ActionDisplayName(controller, method)} declares {normalized} {route ?? "(no route)"} twice with " +
+                           $"different names '{kept.Name}' and '{name}' — '{kept.Name}' is used.",
+                Subjects = [kept.Name!, name],
+            });
         }
 
         var attributes = method.GetCustomAttributesData();

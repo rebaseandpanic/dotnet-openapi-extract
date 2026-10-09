@@ -51,6 +51,21 @@ public class HttpMethodsController : ControllerBase
     [HttpGet("overloads")]
     public IActionResult Overloaded([FromQuery] string value) => Ok();
 
+    /// <summary>The same method and route twice; only the second attribute has a Name, which is kept.</summary>
+    [AcceptVerbs("GET", Route = "names/merged")]
+    [HttpGet("names/merged", Name = "MergedName")]
+    public IActionResult MergedName() => Ok();
+
+    /// <summary>The same method and route twice with two different names: the first wins, with a warning.</summary>
+    [HttpGet("names/clash", Name = "FirstName")]
+    [AcceptVerbs("GET", Route = "names/clash", Name = "SecondName")]
+    public IActionResult ClashingNames() => Ok();
+
+    /// <summary>The same method and route twice with the same name: merged silently.</summary>
+    [HttpGet("names/same", Name = "SameName")]
+    [AcceptVerbs("GET", Route = "names/same", Name = "SameName")]
+    public IActionResult SameName() => Ok();
+
     /// <summary>No method at all: not emitted, with a warning.</summary>
     [AcceptVerbs(Route = "empty")]
     public IActionResult Empty() => Ok();

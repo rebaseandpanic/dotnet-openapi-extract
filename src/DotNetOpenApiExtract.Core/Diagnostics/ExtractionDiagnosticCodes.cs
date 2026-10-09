@@ -55,6 +55,13 @@ public static class ExtractionDiagnosticCodes
     public const string DiscoveryEmptyAcceptVerbs = "discovery.empty-accept-verbs";
 
     /// <summary>
+    /// One action declares the same HTTP method and route twice (for example <c>[HttpGet]</c> and
+    /// <c>[AcceptVerbs]</c>) with two different <c>Name</c> values; the first one is used.
+    /// Subjects: the kept name, then the ignored one.
+    /// </summary>
+    public const string DiscoveryConflictingOperationNames = "discovery.conflicting-operation-names";
+
+    /// <summary>
     /// An attribute derived from <c>HttpMethodAttribute</c> whose methods are not statically visible; the
     /// action is not emitted (the method is never guessed from the attribute's name). Subjects: the attribute type.
     /// </summary>
