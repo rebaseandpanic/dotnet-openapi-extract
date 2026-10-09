@@ -255,6 +255,27 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SecurityRolesWithoutRequirement = "security.roles-without-requirement";
 
+    /// <summary>For a 3.0 target, <c>info.summary</c> (OpenAPI 3.1) is omitted. Location: <c>#/info/summary</c>.</summary>
+    public const string DocumentSummaryOmitted = "document.summary-omitted";
+
+    /// <summary>For a 3.0 target, <c>jsonSchemaDialect</c> (OpenAPI 3.1) is omitted. Location: <c>#/jsonSchemaDialect</c>.</summary>
+    public const string DocumentJsonSchemaDialectOmitted = "document.json-schema-dialect-omitted";
+
+    /// <summary>
+    /// For a 3.0 target, <c>license.identifier</c> (OpenAPI 3.1) is written as <c>x-oai-license-identifier</c>.
+    /// Location: <c>#/info/license/x-oai-license-identifier</c>.
+    /// </summary>
+    public const string DocumentLicenseIdentifierMovedToExtension = "document.license-identifier-moved-to-extension";
+
+    /// <summary>
+    /// Before 3.2, <c>servers[].name</c> is written as <c>x-oai-name</c>; one per server. Location: the
+    /// server's <c>x-oai-name</c>. Subjects: the name.
+    /// </summary>
+    public const string DocumentServerNameMovedToExtension = "document.server-name-moved-to-extension";
+
+    /// <summary>Before 3.2, <c>$self</c> is written as <c>x-oai-$self</c>. Location: <c>#/x-oai-$self</c>.</summary>
+    public const string DocumentSelfMovedToExtension = "document.self-moved-to-extension";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

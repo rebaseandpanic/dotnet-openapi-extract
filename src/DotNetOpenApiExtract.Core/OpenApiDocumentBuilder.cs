@@ -174,6 +174,48 @@ public sealed class OpenApiDocumentOptions
     public PathBaseEmission PathBaseEmission { get; init; } = PathBaseEmission.PathPrefix;
 
     /// <summary>
+    /// Optional short summary of the API (<c>info.summary</c>, OpenAPI 3.1+). For a 3.0 target, which
+    /// has no such field, it is omitted with a warning.
+    /// </summary>
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// Optional SPDX license identifier (<c>info.license.identifier</c>, OpenAPI 3.1+). Mutually
+    /// exclusive with <see cref="LicenseUrl"/>; requires <see cref="LicenseName"/>. A 3.0 target gets it
+    /// as <c>x-oai-license-identifier</c>, with a warning.
+    /// </summary>
+    /// <exception cref="OpenApiConfigurationException">
+    /// From <see cref="OpenApiDocumentBuilder.Build"/> when it is set together with
+    /// <see cref="LicenseUrl"/>, or without a license name.
+    /// </exception>
+    public string? LicenseIdentifier { get; init; }
+
+    /// <summary>
+    /// Optional names of the <see cref="Servers"/>, by position: none, or exactly one non-empty, unique
+    /// name per server (<c>servers[].name</c>, OpenAPI 3.2; <c>x-oai-name</c> with a warning before).
+    /// The server a <see cref="PathBaseEmission.ServersEntry"/> path base adds gets no name.
+    /// </summary>
+    /// <exception cref="OpenApiConfigurationException">
+    /// From <see cref="OpenApiDocumentBuilder.Build"/> on another count, an empty or a repeated name.
+    /// </exception>
+    public IReadOnlyList<string>? ServerNames { get; init; }
+
+    /// <summary>
+    /// Optional URI reference of the document itself (<c>$self</c>, OpenAPI 3.2; <c>x-oai-$self</c> with
+    /// a warning before). A fragment or a value that is not a URI reference is a configuration error.
+    /// </summary>
+    public string? SelfUrl { get; init; }
+
+    /// <summary>
+    /// Optional JSON Schema dialect of the document's schemas (<c>jsonSchemaDialect</c>, OpenAPI 3.1+):
+    /// the OAS base dialect of the target version (<c>https://spec.openapis.org/oas/3.1/dialect/base</c>
+    /// for 3.1, <c>https://spec.openapis.org/oas/3.2/dialect/2025-09-17</c> for 3.2). For a 3.0 target
+    /// either is accepted and the field is omitted with a warning. Any other value is a configuration
+    /// error. When <see langword="null"/>, no dialect is written (the specification's default applies).
+    /// </summary>
+    public string? JsonSchemaDialect { get; init; }
+
+    /// <summary>
     /// When <see langword="true"/> (default), enum schemas automatically get a markdown-formatted
     /// <c>description</c> that combines the type-level XML summary with a bullet list of
     /// per-value descriptions. When <see langword="false"/>, the description is left as-is
@@ -290,6 +332,7 @@ public sealed class OpenApiDocumentBuilder
         ArgumentNullException.ThrowIfNull(validationContext);
 
         TargetVersion.EnsureSupported(options.OpenApiVersion, nameof(OpenApiDocumentOptions.OpenApiVersion));
+        DocumentMetadata.Validate(options);
         var validationVersion = TargetVersion.ResolveValidationVersion(
             options.OpenApiVersion, validationContext.OpenApiSpecVersion);
 
@@ -331,6 +374,7 @@ public sealed class OpenApiDocumentBuilder
     {
         ArgumentNullException.ThrowIfNull(options);
         TargetVersion.EnsureSupported(options.OpenApiVersion, nameof(OpenApiDocumentOptions.OpenApiVersion));
+        DocumentMetadata.Validate(options);
 
         using var loader = new AssemblyLoader(options.AssemblyPath);
         return BuildCore(options, loader).Document;
@@ -544,7 +588,8 @@ public sealed class OpenApiDocumentBuilder
             };
         }
 
-        // License
+        // License: an identifier or URL without a name is a configuration error, never dropped.
+        DocumentMetadata.ValidateLicense(options.LicenseName, options.LicenseUrl, options.LicenseIdentifier);
         if (options.LicenseName != null)
         {
             Uri? licenseUri = null;
@@ -558,11 +603,21 @@ public sealed class OpenApiDocumentBuilder
 
             info.License = new OpenApiLicense
             {
-                Name = options.LicenseName,
-                Url  = licenseUri,
+                Name       = options.LicenseName,
+                Url        = licenseUri,
+                Identifier = string.IsNullOrWhiteSpace(options.LicenseIdentifier) ? null : options.LicenseIdentifier,
             };
         }
-        // LicenseUrl without LicenseName: ignore the license block entirely (OpenAPI requires Name).
+
+        // info.summary exists from 3.1: a 3.0 document omits it (the form of the version), with a warning.
+        if (!string.IsNullOrWhiteSpace(options.Summary))
+        {
+            if (ledger.TargetVersion == OpenApiSpecVersion.OpenApi3_0)
+                ledger.Add(OmittedMetadata("info.summary", "#/info/summary", ExtractionDiagnosticCodes.DocumentSummaryOmitted,
+                    "info.summary is omitted (requires 3.1).", OpenApiSpecVersion.OpenApi3_1));
+            else
+                info.Summary = options.Summary;
+        }
 
         // Terms of Service
         if (options.TermsOfService != null)
@@ -579,17 +634,35 @@ public sealed class OpenApiDocumentBuilder
             Paths = new OpenApiPaths(),
         };
 
-        // Servers
-        var validServers = options.Servers?
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
+        if (options.SelfUrl != null)
+            document.Self = new Uri(options.SelfUrl, UriKind.RelativeOrAbsolute);
 
-        if (validServers is { Count: > 0 })
+        // jsonSchemaDialect exists from 3.1: a 3.0 document omits an accepted dialect, with a warning.
+        if (options.JsonSchemaDialect != null)
         {
-            document.Servers = validServers
-                .Select(url => new OpenApiServer { Url = url })
-                .ToList<OpenApiServer>();
+            var dialect = DocumentMetadata.DialectFor(ledger.TargetVersion, options.JsonSchemaDialect);
+            if (ledger.TargetVersion == OpenApiSpecVersion.OpenApi3_0)
+                ledger.Add(OmittedMetadata("jsonSchemaDialect", "#/jsonSchemaDialect", ExtractionDiagnosticCodes.DocumentJsonSchemaDialectOmitted,
+                    "jsonSchemaDialect is omitted (requires 3.1); OpenAPI 3.0 schemas follow its own Schema Object.", OpenApiSpecVersion.OpenApi3_1));
+            else
+                document.JsonSchemaDialect = dialect;
         }
+
+        // Servers, with their names by position (a blank server is dropped with its name).
+        var servers = new List<OpenApiServer>();
+        for (var i = 0; options.Servers != null && i < options.Servers.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(options.Servers[i]))
+                continue;
+            servers.Add(new OpenApiServer
+            {
+                Url  = options.Servers[i],
+                Name = options.ServerNames is { Count: > 0 } names ? names[i] : null,
+            });
+        }
+
+        if (servers.Count > 0)
+            document.Servers = servers;
 
         // ── Step 3: Build paths and operations ──────────────────────────────
         // Also collect (action, actionAttrs, controllerAttrs, operation) tuples for post-processing.
@@ -1801,6 +1874,22 @@ public sealed class OpenApiDocumentBuilder
 
         return removed;
     }
+
+    /// <summary>
+    /// A degradation warning for document metadata a 3.0 target omits: owned by the document, located
+    /// where the field would have been.
+    /// </summary>
+    private static PendingLoss OmittedMetadata(string feature, string location, string code, string message, OpenApiSpecVersion requiredVersion) => new()
+    {
+        Class           = LossClass.Degradation,
+        Code            = code,
+        Anchor          = LossAnchor.Document.Instance,
+        Location        = location,
+        Message         = message,
+        Feature         = feature,
+        Action          = DiagnosticAction.Omitted,
+        RequiredVersion = requiredVersion,
+    };
 
     /// <summary>
     /// One warning (class «source») per security scheme omitted because its declaration needs a value

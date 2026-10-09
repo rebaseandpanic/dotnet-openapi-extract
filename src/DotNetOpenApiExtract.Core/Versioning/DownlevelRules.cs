@@ -15,6 +15,9 @@ internal static class DownlevelRules
         foreach (var loss in SecuritySchemeLosses(document, targetVersion))
             yield return loss;
 
+        foreach (var loss in DocumentMetadataLosses(document, targetVersion))
+            yield return loss;
+
         foreach (var (_, pathItemInterface) in document.Paths)
         {
             if (pathItemInterface is not OpenApiPathItem { Operations: not null } pathItem)
@@ -78,6 +81,49 @@ internal static class DownlevelRules
                     $"deprecated of '{name}' emitted as {DeprecatedExtensionName} (requires 3.2)", targetVersion);
         }
     }
+
+    /// <summary>
+    /// Document metadata of a later version that the serializer writes as an extension:
+    /// <c>license.identifier</c> for 3.0, <c>servers[].name</c> and <c>$self</c> before 3.2.
+    /// </summary>
+    private static IEnumerable<PendingLoss> DocumentMetadataLosses(OpenApiDocument document, OpenApiSpecVersion targetVersion)
+    {
+        if (targetVersion == OpenApiSpecVersion.OpenApi3_2)
+            yield break;
+
+        if (targetVersion == OpenApiSpecVersion.OpenApi3_0 && document.Info?.License?.Identifier is { } identifier)
+            yield return MetadataLoss(["info", "license", "x-oai-license-identifier"], "license.identifier",
+                ExtractionDiagnosticCodes.DocumentLicenseIdentifierMovedToExtension, "x-oai-license-identifier",
+                OpenApiSpecVersion.OpenApi3_1, $"license.identifier emitted as x-oai-license-identifier (requires 3.1)", [identifier], targetVersion);
+
+        for (var i = 0; document.Servers != null && i < document.Servers.Count; i++)
+        {
+            if (document.Servers[i].Name is { } name)
+                yield return MetadataLoss(["servers", i.ToString(System.Globalization.CultureInfo.InvariantCulture), "x-oai-name"], "server.name",
+                    ExtractionDiagnosticCodes.DocumentServerNameMovedToExtension, "x-oai-name",
+                    OpenApiSpecVersion.OpenApi3_2, $"server name '{name}' emitted as x-oai-name (requires 3.2)", [name], targetVersion);
+        }
+
+        if (document.Self != null)
+            yield return MetadataLoss(["x-oai-$self"], "$self",
+                ExtractionDiagnosticCodes.DocumentSelfMovedToExtension, "x-oai-$self",
+                OpenApiSpecVersion.OpenApi3_2, "$self emitted as x-oai-$self (requires 3.2)", [], targetVersion);
+    }
+
+    private static PendingLoss MetadataLoss(
+        string[] path, string feature, string code, string extension, OpenApiSpecVersion requiredVersion, string message,
+        IReadOnlyList<string> subjects, OpenApiSpecVersion targetVersion) => new()
+    {
+        Class           = LossClass.Degradation,
+        Code            = code,
+        Anchor          = new LossAnchor.Node(LossAnchor.Document.Instance, path),
+        Message         = $"{message}; OpenAPI {TargetVersion.Describe(targetVersion)} tools do not see it.",
+        Feature         = feature,
+        Action          = DiagnosticAction.MovedToExtension,
+        ExtensionName   = extension,
+        RequiredVersion = requiredVersion,
+        Subjects        = subjects,
+    };
 
     private static PendingLoss SchemeLoss(
         string scheme, string[] path, string feature, string code, string extension, string message, OpenApiSpecVersion targetVersion) => new()

@@ -125,16 +125,16 @@ public class InfoAndServersTests
     }
 
     [Fact]
-    public void Info_License_OnlyUrl_LicenseNotEmitted()
+    public void Info_License_OnlyUrl_IsAConfigurationError()
     {
-        // OpenAPI requires license.name; without it the whole license block must be skipped.
-        var doc = Build(new OpenApiDocumentOptions
+        // OpenAPI requires license.name; a license URL without it is never dropped silently.
+        var build = () => Build(new OpenApiDocumentOptions
         {
             AssemblyPath = TestPaths.SampleApiDll,
             LicenseUrl   = "https://opensource.org/licenses/MIT",
         });
 
-        doc.Info.License.Should().BeNull();
+        build.Should().Throw<OpenApiConfigurationException>();
     }
 
     // =========================================================================
