@@ -140,6 +140,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SchemaRangeNotExpressible = "schema.range-not-expressible";
 
+    /// <summary>
+    /// For a 3.1/3.2 target, dictionary keys may be written by a converter not in the registry: one on
+    /// the key type, or a global one for a key type that would get a <c>propertyNames</c> constraint
+    /// (<c>Guid</c>, integers). No constraint is written. Subjects: the key type and the converter.
+    /// </summary>
+    public const string SchemaUnknownKeyConverter = "schema.unknown-key-converter";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

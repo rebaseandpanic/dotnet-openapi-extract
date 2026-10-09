@@ -44,4 +44,8 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Numeric ranges.</summary>
     [HttpGet("range")]
     public ActionResult<RangeModel> Range() => new RangeModel();
+
+    /// <summary>Dictionary keys.</summary>
+    [HttpGet("dictionaries")]
+    public ActionResult<DictionaryModel> Dictionaries() => new DictionaryModel();
 }

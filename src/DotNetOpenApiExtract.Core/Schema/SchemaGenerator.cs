@@ -303,16 +303,16 @@ public sealed class SchemaGenerator
             var genericDef = type.GetGenericTypeDefinition();
             var genericDefFullName = genericDef.FullName ?? string.Empty;
 
-            // Dictionary
-            if (DictionaryGenericDefinitions.Contains(genericDefFullName)
-                || ImplementsDictionaryInterface(type))
+            // Dictionary: key and value from the actual IDictionary<TKey, TValue> implementation,
+            // not from the position of the type's own generic arguments.
+            if ((DictionaryGenericDefinitions.Contains(genericDefFullName) || ImplementsDictionaryInterface(type))
+                && DictionaryKeyValue(type) is var (keyType, valueType))
             {
-                var args = type.GetGenericArguments();
-                var valueType = args.Length >= 2 ? args[1] : typeof(object);
                 return new OpenApiSchema
                 {
                     Type = JsonSchemaType.Object,
                     AdditionalProperties = GenerateSchema(valueType),
+                    PropertyNames = KeySchema(keyType),
                 };
             }
 
@@ -1257,7 +1257,7 @@ public sealed class SchemaGenerator
             if (minLen > 0) schema.MinLength = minLen;
         }
 
-        // [MaxLength(n)] → maxLength (strings) or maxItems (arrays)
+        // [MaxLength(n)] → maxLength (strings), maxItems (arrays) or maxProperties (dictionaries)
         var maxLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.MaxLength);
         if (maxLength != null)
         {
@@ -1266,6 +1266,8 @@ public sealed class SchemaGenerator
             {
                 if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
                     schema.MaxItems = n;
+                else if (IsDictionarySchema(schema))
+                    schema.MaxProperties = n;
                 else
                     schema.MaxLength = n;
             }
@@ -1280,6 +1282,8 @@ public sealed class SchemaGenerator
             {
                 if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
                     schema.MinItems = n;
+                else if (IsDictionarySchema(schema))
+                    schema.MinProperties = n;
                 else
                     schema.MinLength = n;
             }
@@ -1823,6 +1827,106 @@ public sealed class SchemaGenerator
         }
         return false;
     }
+
+    private static readonly HashSet<string> DictionaryInterfaces = new(StringComparer.Ordinal)
+    {
+        "System.Collections.Generic.IDictionary`2",
+        "System.Collections.Generic.IReadOnlyDictionary`2",
+    };
+
+    /// <summary>
+    /// The key and value types of the <c>IDictionary&lt;TKey, TValue&gt;</c> (or
+    /// <c>IReadOnlyDictionary&lt;TKey, TValue&gt;</c>) that <paramref name="type"/> is or implements.
+    /// </summary>
+    private static (Type Key, Type Value)? DictionaryKeyValue(Type type)
+    {
+        var candidates = type.IsInterface ? type.GetInterfaces().Prepend(type) : type.GetInterfaces();
+        foreach (var candidate in candidates)
+        {
+            if (candidate.IsGenericType && DictionaryInterfaces.Contains(candidate.GetGenericTypeDefinition().FullName ?? string.Empty))
+            {
+                var args = candidate.GetGenericArguments();
+                return (args[0], args[1]);
+            }
+        }
+
+        return null;
+    }
+
+    private const string SignedIntegerKeyPattern = "^[+-]?[0-9]+$";
+    private const string UnsignedIntegerKeyPattern = "^\\+?[0-9]+$";
+
+    private static readonly HashSet<string> SignedIntegerKeys = new(StringComparer.Ordinal)
+    {
+        "System.SByte", "System.Int16", "System.Int32", "System.Int64",
+    };
+
+    private static readonly HashSet<string> UnsignedIntegerKeys = new(StringComparer.Ordinal)
+    {
+        "System.Byte", "System.UInt16", "System.UInt32", "System.UInt64",
+    };
+
+    /// <summary>
+    /// <c>propertyNames</c> for dictionary keys of <paramref name="keyType"/>, never narrower than what
+    /// System.Text.Json 10 writes and accepts (measured): <c>Guid</c> → <c>format: uuid</c> (only the D
+    /// format); integers → an optional sign and digits (leading zeros and <c>+</c> are accepted; the
+    /// type's range is not clamped); anything else (string, enum, …) → none. Not in 3.0, where the
+    /// keyword does not exist (form chosen by version). A key type with a converter of its own or an
+    /// unknown global converter may write other names: none, with a warning when the converter is unknown.
+    /// </summary>
+    private OpenApiSchema? KeySchema(Type keyType)
+    {
+        if (_options.OpenApiVersion == OpenApiSpecVersion.OpenApi3_0)
+            return null;
+
+        var name = keyType.FullName ?? keyType.Name;
+
+        // A converter on the key type decides how its keys are written.
+        var attribute = AttributeHelper.GetAttribute(keyType, AttributeHelper.Names.JsonConverter);
+        if (attribute is { ConstructorArguments: [{ Value: Type converterType }] })
+        {
+            var converter = converterType.FullName ?? converterType.Name;
+            if (JsonConverterRegistry.TryGet(converter) == null)
+                RecordUnknownKeyConverter(name, converter);
+            return null;
+        }
+
+        var constrained = name == "System.Guid" || SignedIntegerKeys.Contains(name) || UnsignedIntegerKeys.Contains(name);
+        if (!constrained)
+            return null;
+
+        // An unknown global converter may handle this key type: no constraint narrower than the wire.
+        if (_options.GlobalConverterTypeNames.FirstOrDefault(c => JsonConverterRegistry.TryGet(c) == null) is { } global)
+        {
+            RecordUnknownKeyConverter(name, global);
+            return null;
+        }
+
+        if (name == "System.Guid")
+            return new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" };
+
+        return new OpenApiSchema
+        {
+            Type    = JsonSchemaType.String,
+            Pattern = SignedIntegerKeys.Contains(name) ? SignedIntegerKeyPattern : UnsignedIntegerKeyPattern,
+        };
+    }
+
+    private void RecordUnknownKeyConverter(string keyType, string converter) => RecordLoss(new PendingLoss
+    {
+        Class    = LossClass.Source,
+        Code     = ExtractionDiagnosticCodes.SchemaUnknownKeyConverter,
+        Anchor   = LossAnchor.Document.Instance,
+        Message  = $"dictionary keys of type {keyType} may be written by the unknown converter {converter}: " +
+                   "no propertyNames constraint is written for them.",
+        Feature  = "schema.propertyNames",
+        Action   = DiagnosticAction.Omitted,
+        Subjects = [keyType, converter],
+    });
+
+    /// <summary>Whether <paramref name="schema"/> is the schema of a dictionary (an object of additional values).</summary>
+    private static bool IsDictionarySchema(OpenApiSchema schema) =>
+        schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Object) && schema.AdditionalProperties != null;
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="type"/> is a non-generic

@@ -140,3 +140,64 @@ public class RangeModel
     [Range(typeof(double), "NaN", "5")]
     public double NotANumberMin { get; set; }
 }
+
+/// <summary>A dictionary whose generic arguments are declared value first.</summary>
+public class SwappedMap<TValue, TKey> : Dictionary<TKey, TValue>
+    where TKey : notnull;
+
+/// <summary>A key type written by a converter of its own.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(RegionCodeConverter))]
+public readonly record struct RegionCode(string Value);
+
+/// <summary>Converter for <see cref="RegionCode"/>, unknown to the extractor.</summary>
+public sealed class RegionCodeConverter : System.Text.Json.Serialization.JsonConverter<RegionCode>
+{
+    /// <inheritdoc />
+    public override RegionCode Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
+        new(reader.GetString()!);
+
+    /// <inheritdoc />
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, RegionCode value, System.Text.Json.JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.Value);
+
+    /// <inheritdoc />
+    public override RegionCode ReadAsPropertyName(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
+        new(reader.GetString()!);
+
+    /// <inheritdoc />
+    public override void WriteAsPropertyName(System.Text.Json.Utf8JsonWriter writer, RegionCode value, System.Text.Json.JsonSerializerOptions options) =>
+        writer.WritePropertyName(value.Value);
+}
+
+/// <summary>Dictionaries keyed by every kind of key.</summary>
+public class DictionaryModel
+{
+    /// <summary>Keyed by GUID.</summary>
+    public Dictionary<Guid, int> ByGuid { get; set; } = [];
+
+    /// <summary>Keyed by signed integer.</summary>
+    public IDictionary<int, string> ByInt { get; set; } = new Dictionary<int, string>();
+
+    /// <summary>Keyed by long.</summary>
+    public IReadOnlyDictionary<long, string> ByLong { get; set; } = new Dictionary<long, string>();
+
+    /// <summary>Keyed by unsigned integer.</summary>
+    public Dictionary<uint, int> ByUint { get; set; } = [];
+
+    /// <summary>Keyed by string.</summary>
+    public Dictionary<string, int> ByName { get; set; } = [];
+
+    /// <summary>Keyed by enum.</summary>
+    public Dictionary<DayOfWeek, int> ByDay { get; set; } = [];
+
+    /// <summary>Keyed by integer, declared value first.</summary>
+    public SwappedMap<string, int> Swapped { get; set; } = [];
+
+    /// <summary>Keyed by a type with its own converter.</summary>
+    public Dictionary<RegionCode, int> ByRegion { get; set; } = [];
+
+    /// <summary>A dictionary with a size range.</summary>
+    [MinLength(1)]
+    [MaxLength(5)]
+    public Dictionary<string, int> Limited { get; set; } = [];
+}
