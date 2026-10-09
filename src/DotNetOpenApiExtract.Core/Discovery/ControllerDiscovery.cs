@@ -20,6 +20,9 @@ public sealed class ControllerInfo
     /// <summary>The tag description from the [SwaggerTag] attribute, if present.</summary>
     public string? TagDescription { get; init; }
 
+    /// <summary>The tag's external documentation URL from the [SwaggerTag] attribute (its second argument), if present.</summary>
+    public string? TagExternalDocsUrl { get; init; }
+
     /// <summary>The API explorer group name from [ApiExplorerSettings(GroupName = "...")], if present.</summary>
     public string? GroupName { get; init; }
 }
@@ -150,10 +153,15 @@ public static class ControllerDiscovery
             routeTemplate = AttributeHelper.GetConstructorArgument<string>(routeAttr, 0);
 
         // TagDescription: first constructor argument of [SwaggerTag]
+        // TagExternalDocsUrl: second constructor argument of [SwaggerTag(description, externalDocsUrl)]
         string? tagDescription = null;
+        string? tagExternalDocsUrl = null;
         var swaggerTagAttr = AttributeHelper.GetAttribute(typeAttrs, AttributeHelper.Names.SwaggerTag);
         if (swaggerTagAttr != null)
+        {
             tagDescription = AttributeHelper.GetConstructorArgument<string>(swaggerTagAttr, 0);
+            tagExternalDocsUrl = AttributeHelper.GetConstructorArgument<string>(swaggerTagAttr, 1);
+        }
 
         // GroupName: named argument "GroupName" of [ApiExplorerSettings] (already fetched in IsController)
         string? groupName = null;
@@ -167,6 +175,7 @@ public static class ControllerDiscovery
             Name = name,
             RouteTemplate = routeTemplate,
             TagDescription = tagDescription,
+            TagExternalDocsUrl = tagExternalDocsUrl,
             GroupName = groupName,
         };
     }

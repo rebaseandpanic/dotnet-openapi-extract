@@ -892,10 +892,14 @@ public sealed class SchemaGenerator
             if (propSchema is OpenApiSchema inlinePropSchema)
             {
                 ApplyValidationAttributes(inlinePropSchema, propAttrData, propInfo, componentId);
-                ApplyRange(inlinePropSchema, propAttrData, propInfo, serializedName, componentId);
+                ApplyRange(inlinePropSchema, propAttrData, propInfo.DeclaringType?.FullName ?? componentId, propInfo.Name,
+                    new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]));
             }
 
-            propSchema = ApplyAllowedAndDeniedValues(propSchema, propAttrData, propInfo, serializedName, componentId);
+            propSchema = ApplyAllowedAndDeniedValues(propSchema, propAttrData, new ValueSite(
+                propType, propInfo.DeclaringType?.FullName ?? componentId, propInfo.Name,
+                new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]),
+                PropertyEnumNaming(propType, propAttrData) ?? EnumWireNaming.MemberName));
 
             if (propSchema is OpenApiSchema withDefault)
                 ApplyDefaultValue(withDefault, propAttrData, propInfo, serializedName, componentId);
@@ -1385,6 +1389,29 @@ public sealed class SchemaGenerator
     private static void ApplyValidationAttributes(
         OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string componentId)
     {
+        ApplyConstraintAttributes(schema, attrData);
+
+        // [Obsolete] → deprecated: true
+        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
+            schema.Deprecated = true;
+
+        // [SwaggerSchema(Description)] → [Description] → [Display(Description)]: always wins over a
+        // default set by a converter hint or the BCL registry, because a property-level annotation is
+        // a direct user statement. The XML <summary> is applied later, only where none of them is set.
+        var description = DocumentationResolver.AttributeDescription(attrData);
+        if (description != null)
+            schema.Description = description;
+
+        ApplyAccessAndTitle(schema, attrData, property, componentId);
+    }
+
+    /// <summary>
+    /// The value constraints of a property or a parameter: lengths (<c>[StringLength]</c>,
+    /// <c>[MinLength]</c>, <c>[MaxLength]</c>, <c>[Length]</c>), <c>[RegularExpression]</c> and the
+    /// format by its priority. <c>[Range]</c> is applied by <see cref="ApplyRange"/>.
+    /// </summary>
+    private static void ApplyConstraintAttributes(OpenApiSchema schema, IList<CustomAttributeData> attrData)
+    {
         // [StringLength(maxLength, MinimumLength = minLength)]
         var stringLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.StringLength);
         if (stringLength != null)
@@ -1439,19 +1466,38 @@ public sealed class SchemaGenerator
         var format = DeclaredFormat(attrData);
         if (format != null)
             (NumberUnionBranches(schema)?.Number ?? schema).Format = format;
+    }
 
-        // [Obsolete] → deprecated: true
-        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
-            schema.Deprecated = true;
+    /// <summary>
+    /// The validation attributes of an action parameter, as on a DTO property: lengths,
+    /// <c>[RegularExpression]</c>, the format, <c>[Range]</c>, <c>[AllowedValues]</c> and
+    /// <c>[DeniedValues]</c> (same keywords and version forms). A
+    /// reference is wrapped in <c>allOf</c> first. A <c>[Range]</c> <c>RangeAttribute</c> rejects is an
+    /// extraction error naming <paramref name="typeName"/> and <paramref name="memberName"/>; a bound
+    /// that cannot be written gives a warning at <paramref name="anchor"/>.
+    /// </summary>
+    internal IOpenApiSchema ApplyParameterValidation(
+        IOpenApiSchema schema, IList<CustomAttributeData> attrData, Type parameterType, string typeName, string memberName, LossAnchor anchor)
+    {
+        var constrains = AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.StringLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MinLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.MaxLength)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Length)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.RegularExpression)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Range)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.AllowedValues)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.DeniedValues)
+            || DeclaredFormat(attrData) != null;
+        if (!constrains)
+            return schema;
 
-        // [SwaggerSchema(Description)] → [Description] → [Display(Description)]: always wins over a
-        // default set by a converter hint or the BCL registry, because a property-level annotation is
-        // a direct user statement. The XML <summary> is applied later, only where none of them is set.
-        var description = DocumentationResolver.AttributeDescription(attrData);
-        if (description != null)
-            schema.Description = description;
+        var mutable = EnsureMutableSchema(schema);
+        ApplyConstraintAttributes(mutable, attrData);
+        ApplyRange(mutable, attrData, typeName, memberName, anchor);
 
-        ApplyAccessAndTitle(schema, attrData, property, componentId);
+        // A parameter is bound by member name (model binding), so its enum values are member names.
+        return ApplyAllowedAndDeniedValues(mutable, attrData,
+            new ValueSite(parameterType, typeName, memberName, anchor, EnumWireNaming.MemberName));
     }
 
     /// <summary><c>maxLength</c> (strings), <c>maxItems</c> (arrays) or <c>maxProperties</c> (dictionaries).</summary>
@@ -1577,8 +1623,14 @@ public sealed class SchemaGenerator
     /// <c>enum</c> is kept, no intersection is computed. Denied values: <c>not: {enum}</c> as a sibling.
     /// Values not convertible to the schema's JSON type give a warning and no constraint.
     /// </summary>
+    /// <summary>
+    /// The member a value constraint is declared on: its CLR type, the names a warning gives
+    /// (<c>Type.Member</c>), where the warning is located, and how its enum members are named.
+    /// </summary>
+    private sealed record ValueSite(Type MemberType, string TypeName, string MemberName, LossAnchor Anchor, EnumWireNaming EnumNaming);
+
     private IOpenApiSchema ApplyAllowedAndDeniedValues(
-        IOpenApiSchema propSchema, IList<CustomAttributeData> attrData, PropertyInfo property, string serializedName, string componentId)
+        IOpenApiSchema propSchema, IList<CustomAttributeData> attrData, ValueSite site)
     {
         var allowed = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.AllowedValues);
         var denied = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DeniedValues);
@@ -1587,13 +1639,13 @@ public sealed class SchemaGenerator
 
         if (NumberUnionBranches(schema) is { } numberUnion)
         {
-            ApplyValuesToNumberUnion(schema, numberUnion, allowed, denied, property, serializedName, componentId);
+            ApplyValuesToNumberUnion(schema, numberUnion, allowed, denied, site);
             return schema;
         }
 
         var isWrapper = schema.AllOf is { Count: > 0 } && schema.AllOf[0] is OpenApiSchemaReference;
         var jsonType = isWrapper ? null : schema.Type;
-        var propertyType = property.PropertyType;
+        var propertyType = site.MemberType;
         var enumType = propertyType.IsEnum
             ? propertyType
             : IsNullableValueType(propertyType) && propertyType.GetGenericArguments()[0].IsEnum
@@ -1601,9 +1653,7 @@ public sealed class SchemaGenerator
                 : null;
 
         IOpenApiSchema result = schema;
-        var enumNaming = PropertyEnumNaming(propertyType, attrData) ?? EnumWireNaming.MemberName;
-
-        if (allowed != null && ConvertValues(allowed, jsonType, enumType, enumNaming, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        if (allowed != null && ConvertValues(allowed, jsonType, enumType, site, "AllowedValues") is { } allowedValues)
         {
             var constraint = allowedValues.Count == 1 ? SingleValueConstraint(allowedValues[0]) : new OpenApiSchema { Enum = allowedValues };
             if (isWrapper)
@@ -1626,7 +1676,7 @@ public sealed class SchemaGenerator
             }
         }
 
-        if (denied != null && ConvertValues(denied, jsonType, enumType, enumNaming, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+        if (denied != null && ConvertValues(denied, jsonType, enumType, site, "DeniedValues") is { } deniedValues)
             ((OpenApiSchema)result).Not = new OpenApiSchema { Enum = deniedValues };
 
         return result;
@@ -1662,15 +1712,14 @@ public sealed class SchemaGenerator
     /// against the numeric branch's type.
     /// </summary>
     private void ApplyValuesToNumberUnion(
-        OpenApiSchema schema, NumberUnion union, CustomAttributeData? allowed, CustomAttributeData? denied,
-        PropertyInfo property, string serializedName, string componentId)
+        OpenApiSchema schema, NumberUnion union, CustomAttributeData? allowed, CustomAttributeData? denied, ValueSite site)
     {
         var numberType = union.Number.Type!.Value & ~JsonSchemaType.Null;
 
         static List<JsonNode?> AsStrings(List<JsonNode?> values) =>
             values.Select(v => (JsonNode?)JsonValue.Create(v!.ToJsonString())).ToList();
 
-        if (allowed != null && ConvertValues(allowed, numberType, null, EnumWireNaming.MemberName, property, serializedName, componentId, "AllowedValues") is { } allowedValues)
+        if (allowed != null && ConvertValues(allowed, numberType, null, site, "AllowedValues") is { } allowedValues)
         {
             // Only the numeric branch: the numeric-string branch keeps its grammar, since STJ reads
             // other spellings of an allowed number ("+1", "01") and the schema is never narrower.
@@ -1679,7 +1728,7 @@ public sealed class SchemaGenerator
                 schema.AnyOf!.Remove(union.Named);
         }
 
-        if (denied != null && ConvertValues(denied, numberType, null, EnumWireNaming.MemberName, property, serializedName, componentId, "DeniedValues") is { } deniedValues)
+        if (denied != null && ConvertValues(denied, numberType, null, site, "DeniedValues") is { } deniedValues)
         {
             union.Number.Not = new OpenApiSchema { Enum = deniedValues };
             if (union.NumericString != null)
@@ -1701,8 +1750,7 @@ public sealed class SchemaGenerator
     /// one does not convert: numbers stay numbers, enum members become the schema's names or integers.
     /// </summary>
     private List<JsonNode?>? ConvertValues(
-        CustomAttributeData attribute, JsonSchemaType? jsonType, Type? enumType, EnumWireNaming enumNaming, PropertyInfo property,
-        string serializedName, string componentId, string attributeName)
+        CustomAttributeData attribute, JsonSchemaType? jsonType, Type? enumType, ValueSite site, string attributeName)
     {
         var arguments = attribute.ConstructorArguments.Count == 1
                         && attribute.ConstructorArguments[0].Value is IReadOnlyCollection<CustomAttributeTypedArgument> values
@@ -1712,19 +1760,18 @@ public sealed class SchemaGenerator
         var result = new List<JsonNode?>();
         foreach (var argument in arguments)
         {
-            if (!TryConvertValue(argument, jsonType, enumType, enumNaming, out var node))
+            if (!TryConvertValue(argument, jsonType, enumType, site.EnumNaming, out var node))
             {
-                var typeName = property.DeclaringType?.FullName ?? componentId;
                 RecordLoss(new PendingLoss
                 {
                     Class    = LossClass.Source,
                     Code     = ExtractionDiagnosticCodes.SchemaValueNotConvertible,
-                    Anchor   = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]),
-                    Message  = $"[{attributeName}] on {typeName}.{property.Name} has the value {argument.Value ?? "null"}, " +
-                               "which is not a value of the property's JSON type: the constraint is not written.",
+                    Anchor   = site.Anchor,
+                    Message  = $"[{attributeName}] on {site.TypeName}.{site.MemberName} has the value {argument.Value ?? "null"}, " +
+                               "which is not a value of its JSON type: the constraint is not written.",
                     Feature  = "schema.enum",
                     Action   = DiagnosticAction.Omitted,
-                    Subjects = [$"{typeName}.{property.Name}"],
+                    Subjects = [$"{site.TypeName}.{site.MemberName}"],
                 });
                 return null;
             }
@@ -2015,21 +2062,19 @@ public sealed class SchemaGenerator
     /// the property and no such constraint.
     /// </summary>
     private void ApplyRange(
-        OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string serializedName, string componentId)
+        OpenApiSchema schema, IList<CustomAttributeData> attrData, string typeName, string memberName, LossAnchor anchor)
     {
         var attribute = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Range);
         if (attribute == null || RangeDeclaration.Read(attribute) is not { } range)
             return;
 
-        var typeName = property.DeclaringType?.FullName ?? componentId;
-        var anchor = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]);
 
         switch (range.Kind)
         {
             case RangeDeclaration.Outcome.Invalid:
                 throw new OpenApiExtractionException(
-                    $"[Range] on {typeName}.{property.Name} is rejected by RangeAttribute: {range.Detail}.",
-                    typeName, property.Name);
+                    $"[Range] on {typeName}.{memberName} is rejected by RangeAttribute: {range.Detail}.",
+                    typeName, memberName);
 
             case RangeDeclaration.Outcome.NonNumericOperand:
                 RecordLoss(new PendingLoss
@@ -2037,11 +2082,11 @@ public sealed class SchemaGenerator
                     Class    = LossClass.Source,
                     Code     = ExtractionDiagnosticCodes.SchemaRangeNotExpressible,
                     Anchor   = anchor,
-                    Message  = $"[Range] on {typeName}.{property.Name} compares {range.Detail} values, which are not JSON numbers: " +
+                    Message  = $"[Range] on {typeName}.{memberName} compares {range.Detail} values, which are not JSON numbers: " +
                                "no minimum or maximum is written.",
                     Feature  = "schema.minimum",
                     Action   = DiagnosticAction.Omitted,
-                    Subjects = [$"{typeName}.{property.Name}"],
+                    Subjects = [$"{typeName}.{memberName}"],
                 });
                 return;
         }
@@ -2054,10 +2099,10 @@ public sealed class SchemaGenerator
                 Class    = LossClass.Source,
                 Code     = ExtractionDiagnosticCodes.SchemaRangeNotExpressible,
                 Anchor   = anchor,
-                Message  = $"[Range] on {typeName}.{property.Name} has the bound {bounds}, which JSON cannot hold: that bound is not written.",
+                Message  = $"[Range] on {typeName}.{memberName} has the bound {bounds}, which JSON cannot hold: that bound is not written.",
                 Feature  = "schema.minimum",
                 Action   = DiagnosticAction.Omitted,
-                Subjects = [$"{typeName}.{property.Name}"],
+                Subjects = [$"{typeName}.{memberName}"],
             });
         }
 

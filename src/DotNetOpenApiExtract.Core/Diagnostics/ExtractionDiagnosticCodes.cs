@@ -185,6 +185,12 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string ParameterExampleNotParsable = "parameter.example-not-parsable";
 
+    /// <summary>
+    /// A path parameter is declared <c>[SwaggerParameter(Required = false)]</c>: OpenAPI requires every
+    /// path parameter, so it is written <c>required: true</c>. Location: the parameter. Subjects: its name.
+    /// </summary>
+    public const string ParameterPathRequiredKept = "parameter.path-required-kept";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

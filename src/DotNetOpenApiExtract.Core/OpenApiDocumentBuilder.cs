@@ -756,6 +756,10 @@ public sealed class OpenApiDocumentBuilder
             {
                 Name = controller.Name,
                 Description = tagDesc,
+                // [SwaggerTag(description, externalDocsUrl)]; an AddTag(...) in Program.cs fills only what is left.
+                ExternalDocs = Uri.TryCreate(controller.TagExternalDocsUrl, UriKind.Absolute, out var tagDocsUrl)
+                    ? new OpenApiExternalDocs { Url = tagDocsUrl }
+                    : null,
             });
         }
 
@@ -970,6 +974,31 @@ public sealed class OpenApiDocumentBuilder
             // Bound by model binding (type converters), not by the JSON serializer.
             var paramSchema = schemaGenerator.GenerateBoundValueSchema(param.Type);
 
+            // Validation attributes of the parameter, as on a DTO property; the parameter is the
+            // next entry of the operation's list.
+            var parameterAnchor = new LossAnchor.Node(new LossAnchor.Operation(operation),
+                ["parameters", (operation.Parameters?.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            var reflectionParameter = param.ReflectionParameter;
+            paramSchema = schemaGenerator.ApplyParameterValidation(
+                paramSchema, reflectionParameter.GetCustomAttributesData(), param.Type,
+                reflectionParameter.Member.DeclaringType?.FullName ?? string.Empty,
+                $"{reflectionParameter.Member.Name}({reflectionParameter.Name})", parameterAnchor);
+
+            if (param.PathDeclaredOptional)
+            {
+                ledger.Add(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.ParameterPathRequiredKept,
+                    Anchor   = parameterAnchor,
+                    Message  = $"Path parameter {param.Name} is declared [SwaggerParameter(Required = false)]; " +
+                               "OpenAPI requires every path parameter, so it stays required.",
+                    Feature  = "parameter.required",
+                    Action   = DiagnosticAction.Omitted,
+                    Subjects = [param.Name],
+                });
+            }
+
             var openApiIn = param.Location switch
             {
                 OurParameterLocation.Path   => OpenApiParameterLocation.Path,
@@ -1028,9 +1057,7 @@ public sealed class OpenApiDocumentBuilder
                 if (schemaGenerator.TryParseExample(paramSchema, paramExample, out var exampleValue))
                     openApiParam.Example = exampleValue;
                 else
-                    RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation),
-                        ["parameters", operation.Parameters.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)]),
-                        $"parameter {param.Name}", [param.Name, paramExample]);
+                    RecordUnparsableParameterExample(ledger, parameterAnchor, $"parameter {param.Name}", [param.Name, paramExample]);
             }
 
             operation.Parameters.Add(openApiParam);

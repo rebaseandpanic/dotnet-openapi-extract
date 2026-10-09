@@ -80,6 +80,10 @@ All notable changes to this project.
 - [BUGFIX] The XML `<param>` description of a parameter renamed with `[FromHeader(Name = …)]`, `[FromQuery(Name = …)]` or `[FromRoute(Name = …)]` was lost, because it was looked up by the new name; it is found by the C# name.
 - [BUGFIX] `[FromForm(Name = …)]` renames the form field in the request body schema; the C# name was written. OpenAPI 3.0 output changes only for actions using these renamings or parameter examples.
 
+- [BUGFIX] Validation attributes on action parameters were ignored (only `[DefaultValue]` was read). `[StringLength]`, `[MinLength]`, `[MaxLength]`, `[Length]`, `[RegularExpression]`, `[Range]`, `[AllowedValues]`, `[DeniedValues]` and the format attributes now give the parameter schema the keywords and version forms they give a DTO property; a `[Range]` that `RangeAttribute` rejects is an extraction error (exit 2) naming the controller and `Method(parameter)`.
+- [FEATURE] `[SwaggerParameter(Required = …)]` sets `required` of a path, query or header parameter, over the inferred value. A path parameter declared `Required = false` stays `required: true`, as OpenAPI requires, with a warning (code `parameter.path-required-kept`).
+- [FEATURE] `[SwaggerTag(description, externalDocsUrl)]` gives the controller's tag `externalDocs.url` (an absolute URI); an `AddTag(...)` in `Program.cs` fills only tags without one. OpenAPI 3.0 output changes only for parameters with these attributes and controllers with an external docs URL.
+
 ## [0.16.1] - 2026-10-07
 
 - [DOCS] README "Why" section corrected. It claimed that `swagger tofile` and `Microsoft.AspNetCore.OpenApi` need the application to fully start with real infrastructure. In fact both run the app's startup code (Microsoft's build-time generator invokes the entry point with a mock server; the Swashbuckle CLI builds the app's host), so they fail only when that startup code itself needs a database, broker, external API or a required environment variable, and both offer documented guards (`GetDocument.Insider`, `SwaggerHostFactory`). No code changes.

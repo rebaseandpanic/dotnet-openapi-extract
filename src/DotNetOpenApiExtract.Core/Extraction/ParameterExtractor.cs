@@ -31,8 +31,17 @@ public sealed class ActionParameterInfo
     /// <summary>The CLR type of the parameter.</summary>
     public required Type Type { get; init; }
 
-    /// <summary>Whether the parameter is required.</summary>
+    /// <summary>
+    /// Whether the parameter is required: an explicit <c>[SwaggerParameter(Required = …)]</c> wins over
+    /// the inferred value, except on a path parameter, which is always required.
+    /// </summary>
     public required bool IsRequired { get; init; }
+
+    /// <summary>
+    /// <see langword="true"/> for a path parameter declared <c>[SwaggerParameter(Required = false)]</c>:
+    /// OpenAPI requires every path parameter, so the declaration is not followed.
+    /// </summary>
+    internal bool PathDeclaredOptional { get; init; }
 
     /// <summary>
     /// Default value, if the parameter has one: the <c>[DefaultValue]</c> literal, the value of
@@ -135,7 +144,10 @@ public static class ParameterExtractor
             var name = ResolveName(param, location);
 
             // --- 4. Determine whether the parameter is required ---
-            bool isRequired = DetermineIsRequired(param, location);
+            var swaggerParameter = AttributeHelper.GetAttribute(param, AttributeHelper.Names.SwaggerParameter);
+            bool? declaredRequired = swaggerParameter != null
+                && AttributeHelper.TryGetNamedArgument(swaggerParameter, "Required", out bool required) ? required : null;
+            bool isRequired = location == ParameterLocation.Path || (declaredRequired ?? DetermineIsRequired(param, location));
 
             // --- 5. Default value ---
             // [DefaultValue(x)] attribute takes precedence over the compiler-inferred inline default.
@@ -156,6 +168,7 @@ public static class ParameterExtractor
                 Location = location,
                 Type = param.ParameterType,
                 IsRequired = isRequired,
+                PathDeclaredOptional = location == ParameterLocation.Path && declaredRequired == false,
                 DefaultValue = defaultValue,
                 DefaultValueAttribute = defaultValueAttr,
                 Description = description,
