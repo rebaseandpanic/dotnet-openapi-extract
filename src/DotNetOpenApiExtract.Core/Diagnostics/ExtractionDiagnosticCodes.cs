@@ -74,6 +74,19 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string OperationMovedToAdditionalOperations = "operation.moved-to-additional-operations";
 
+    /// <summary>
+    /// A polymorphic base has derived types declared without a discriminator value: its union is
+    /// <c>anyOf</c> without a discriminator object, and those alternatives are distinguishable only by
+    /// structure. Location: the union component. Subjects: the derived types without a value.
+    /// </summary>
+    public const string PolymorphismAnyOfWithoutDiscriminator = "polymorphism.anyof-without-discriminator";
+
+    /// <summary>
+    /// The Swashbuckle polymorphism attributes of a base disagree with its System.Text.Json ones; the STJ
+    /// attributes are used. Location: the union component. Subjects: the base type.
+    /// </summary>
+    public const string PolymorphismSourceDisagreement = "polymorphism.source-disagreement";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

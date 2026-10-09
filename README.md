@@ -121,7 +121,7 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 
 - Controllers (`[ApiController]`, `ControllerBase` inheritance)
 - Routes (`[Route]`, `[HttpGet]`, `[HttpPost]`, etc., and `[AcceptVerbs]` with one or several methods and a named `Route`) with full template resolution; an action whose HTTP methods are not statically visible (an empty `[AcceptVerbs()]`, a custom `HttpMethodAttribute` subclass) is skipped with a warning
-- Polymorphism (`[JsonPolymorphic]` / `[JsonDerivedType]`, or Swashbuckle `[SwaggerDiscriminator]` / `[SwaggerSubType]`) for an abstract base or interface whose derived types all have a discriminator value: a `oneOf` union with a `discriminator` and per-type variants
+- Polymorphism (`[JsonPolymorphic]` / `[JsonDerivedType]`, or Swashbuckle `[SwaggerDiscriminator]` / `[SwaggerSubType]`) as unions: `oneOf` of per-type variants (with a `discriminator` for an abstract base or interface; plus a base branch for a concrete base), or `anyOf` when some derived types have no discriminator value
 - Parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, `[FromForm]`) with `[ApiController]` inference
 - Responses (`[ProducesResponseType]`, `[SwaggerResponse]`) with return type inference
 - Schemas from DTO classes — primitives, nullable, collections, dictionaries, enums, generics, inheritance, self-referencing types

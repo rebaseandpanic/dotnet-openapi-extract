@@ -22,22 +22,68 @@ internal static class DownlevelPass
         if (entries.Count == 0)
             return;
 
-        var operations = IndexOperations(document, ledger.TargetVersion);
+        var componentOrder = (document.Components?.Schemas?.Keys ?? Enumerable.Empty<string>())
+            .Select((id, index) => (id, index))
+            .ToDictionary(c => c.id, c => c.index, StringComparer.Ordinal);
+        var reachable = SchemaReachability.FromDocument(document);
 
+        Deliver(
+            entries,
+            ledger.TargetVersion,
+            IndexOperations(document, ledger.TargetVersion),
+            reachable.Where(componentOrder.ContainsKey).ToDictionary(id => id, id => componentOrder[id], StringComparer.Ordinal),
+            diagnostics);
+    }
+
+    /// <summary>
+    /// The same rule for direct schema generation: records anchored on components, kept only when
+    /// the component is reachable from <paramref name="roots"/> (the schemas the caller asked for).
+    /// </summary>
+    public static void RunForSchemas(
+        IEnumerable<PendingLoss> entries,
+        OpenApiSpecVersion targetVersion,
+        IReadOnlyDictionary<string, IOpenApiSchema> schemas,
+        IEnumerable<IOpenApiSchema> roots,
+        DiagnosticBag diagnostics)
+    {
+        var list = entries.ToList();
+        if (list.Count == 0)
+            return;
+
+        var order = schemas.Keys.Select((id, index) => (id, index)).ToDictionary(c => c.id, c => c.index, StringComparer.Ordinal);
+        var reachable = SchemaReachability.FromSchemas(roots, schemas)
+            .Where(order.ContainsKey)
+            .ToDictionary(id => id, id => order[id], StringComparer.Ordinal);
+
+        Deliver(list, targetVersion, new Dictionary<OpenApiOperation, (int, string)>(), reachable, diagnostics);
+    }
+
+    /// <summary>
+    /// Steps 3 and 6–8: drop records whose anchor is unreachable, locate the rest in the output,
+    /// order them (document, then operations, then components, each in document order; ties by
+    /// location and code) and deliver; the bag deduplicates.
+    /// </summary>
+    private static void Deliver(
+        IReadOnlyList<PendingLoss> entries,
+        OpenApiSpecVersion targetVersion,
+        Dictionary<OpenApiOperation, (int Order, string Location)> operations,
+        Dictionary<string, int> components,
+        DiagnosticBag diagnostics)
+    {
         var located = new List<(int Rank, int Order, ExtractionDiagnostic Diagnostic)>();
         foreach (var entry in entries)
         {
-            // Reachability: a record whose anchor is not in the finished document is dropped.
-            if (!TryLocate(entry.Anchor, operations, out var rank, out var order, out var location))
+            // Reachability: a record whose anchor is not in the finished output is dropped.
+            if (!TryLocate(entry.Anchor, operations, components, out var rank, out var order, out var location))
                 continue;
 
             located.Add((rank, order, new ExtractionDiagnostic
             {
                 Code            = entry.Code,
                 Message         = location is null
-                    ? $"OpenAPI {TargetVersion.Describe(ledger.TargetVersion)} target: {entry.Message}"
-                    : $"OpenAPI {TargetVersion.Describe(ledger.TargetVersion)} target: {location}: {entry.Message}",
-                TargetVersion   = ledger.TargetVersion,
+                    ? $"OpenAPI {TargetVersion.Describe(targetVersion)} target: {entry.Message}"
+                    : $"OpenAPI {TargetVersion.Describe(targetVersion)} target: {location}: {entry.Message}",
+                TargetVersion   = targetVersion,
                 Feature         = entry.Feature,
                 Location        = location,
                 Action          = entry.Action,
@@ -47,8 +93,6 @@ internal static class DownlevelPass
             }));
         }
 
-        // Document order: document-level records first, then operations in the order the paths
-        // and methods are written; ties by location and code. The bag deduplicates.
         foreach (var (_, _, diagnostic) in located
                      .OrderBy(l => l.Rank)
                      .ThenBy(l => l.Order)
@@ -89,6 +133,7 @@ internal static class DownlevelPass
     private static bool TryLocate(
         LossAnchor anchor,
         Dictionary<OpenApiOperation, (int Order, string Location)> operations,
+        Dictionary<string, int> components,
         out int rank,
         out int order,
         out string? location)
@@ -101,6 +146,10 @@ internal static class DownlevelPass
 
             case LossAnchor.Operation { Target: var operation } when operations.TryGetValue(operation, out var found):
                 (rank, order, location) = (1, found.Order, found.Location);
+                return true;
+
+            case LossAnchor.Component { Id: var id } when components.TryGetValue(id, out var componentOrder):
+                (rank, order, location) = (2, componentOrder, Validation.JsonPointerHelper.ForSchema(id));
                 return true;
 
             default:

@@ -18,6 +18,9 @@ internal enum SchemaRole
 
     /// <summary>A derived type in the polymorphic use of one base: its properties plus the discriminator.</summary>
     Variant,
+
+    /// <summary>The base branch of a concrete polymorphic base: the base object itself within its union.</summary>
+    BaseDefault,
 }
 
 /// <summary>
@@ -33,6 +36,9 @@ internal readonly record struct SchemaKey(string TypeIdentity, SchemaContext Con
 
     public static SchemaKey Union(Type baseType) =>
         new(Identity(baseType), SchemaContext.Mvc, SchemaRole.Union);
+
+    public static SchemaKey BaseDefault(Type baseType) =>
+        new(Identity(baseType), SchemaContext.Mvc, SchemaRole.BaseDefault);
 
     public static SchemaKey Variant(Type derivedType, Type baseType) =>
         new(Identity(derivedType), SchemaContext.Mvc, SchemaRole.Variant, Identity(baseType));

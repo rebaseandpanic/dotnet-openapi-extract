@@ -382,6 +382,8 @@ public sealed class OpenApiDocumentBuilder
             OpenApiVersion           = options.OpenApiVersion,
             OnDiagnostic             = diagnostics.Report,
         }, docResolver);
+        // Schema warnings (polymorphism) wait in the build's ledger for the finished document.
+        schemaGenerator.AttachLedger(ledger);
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
         var controllers = ControllerDiscovery.DiscoverControllers(loader.Assembly);

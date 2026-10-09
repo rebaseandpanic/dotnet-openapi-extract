@@ -5,6 +5,7 @@ using DotNetOpenApiExtract.Core.Documentation;
 using DotNetOpenApiExtract.Core.Loading;
 using DotNetOpenApiExtract.Core.Versioning;
 using DotNetOpenApiExtract.Core.Diagnostics;
+using System.Globalization;
 using Microsoft.OpenApi;
 
 namespace DotNetOpenApiExtract.Core.Schema;
@@ -29,6 +30,9 @@ public sealed class SchemaGenerator
     private readonly DocumentationResolver? _docResolver;
     private readonly DiagnosticBag _diagnostics; // per-instance deduplication of warnings
     private readonly Dictionary<string, PolymorphismInfo?> _polymorphism = new(StringComparer.Ordinal); // base type → union, cached
+    private readonly List<PendingLoss> _pendingLosses = []; // direct generation: delivered at the end of the public call
+    private LossLedger? _ledger; // document build: the build's ledger
+    private int _generationDepth; // public GenerateSchema nesting, to find the end of the outermost call
 
     // Cache for NullableContextAttribute per declaring type — avoids repeated
     // GetCustomAttributesData() scans on the same type when processing its properties.
@@ -155,6 +159,32 @@ public sealed class SchemaGenerator
     /// or an <see cref="OpenApiSchemaReference"/>.
     /// </returns>
     public IOpenApiSchema GenerateSchema(Type type)
+    {
+        _generationDepth++;
+        try
+        {
+            var schema = GenerateSchemaCore(type);
+            if (_generationDepth == 1 && _pendingLosses.Count > 0)
+            {
+                // Direct generation (no document build): deliver this call's warnings for what
+                // the requested schema reaches, deduplicated per generator instance.
+                var losses = _pendingLosses.ToList();
+                _pendingLosses.Clear();
+                DownlevelPass.RunForSchemas(
+                    losses, _options.OpenApiVersion,
+                    _schemas.ToDictionary(s => s.Key, s => (IOpenApiSchema)s.Value, StringComparer.Ordinal),
+                    [schema], _diagnostics);
+            }
+
+            return schema;
+        }
+        finally
+        {
+            _generationDepth--;
+        }
+    }
+
+    private IOpenApiSchema GenerateSchemaCore(Type type)
     {
         // --- 1. byte[] → base64 binary string (before the array check below) ---
         if (type.IsArray && type.GetElementType()?.FullName == "System.Byte")
@@ -692,31 +722,35 @@ public sealed class SchemaGenerator
     // =========================================================================
 
     /// <summary>
-    /// The polymorphism of <paramref name="type"/> when the generator writes it as a union, or
-    /// <see langword="null"/>. Written today: an abstract base or an interface whose every declared
-    /// derived type has a discriminator value. Other declarations keep the flattened schema.
+    /// The polymorphism declared on <paramref name="type"/> (written as a union), or
+    /// <see langword="null"/> for a type without it.
     /// </summary>
     private PolymorphismInfo? UnionOf(Type type)
     {
         var key = type.FullName ?? type.Name;
-        if (_polymorphism.TryGetValue(key, out var cached))
-            return cached;
+        if (!_polymorphism.TryGetValue(key, out var info))
+        {
+            info = PolymorphismReader.Read(type);
+            _polymorphism[key] = info;
+        }
 
-        var info = PolymorphismReader.Read(type);
-        if (info != null
-            && !((type.IsAbstract || type.IsInterface) && info.DerivedTypes.All(d => d.DiscriminatorValue != null)))
-            info = null;
-
-        _polymorphism[key] = info;
         return info;
     }
 
     /// <summary>
-    /// The component of a polymorphic base: <c>oneOf</c> of its variants plus a
-    /// <c>discriminator</c> whose <c>mapping</c> keys are the values as strings. Each variant
-    /// <c>{D}As{B}</c> is the derived type's direct-use properties plus the discriminator property,
-    /// required, accepting only its value. The derived type's own component (direct use) never
-    /// carries the discriminator.
+    /// The component of a polymorphic base B, under B's own id so references at its uses stay
+    /// unchanged. Alternatives:
+    /// <list type="bullet">
+    ///   <item>each derived type with a discriminator value → variant <c>{D}As{B}</c> (properties of D
+    ///   plus the required discriminator property limited to the value);</item>
+    ///   <item>each derived type without a value → its direct-use component (no discriminator);</item>
+    ///   <item>a concrete B → the base branch <c>{B}Default</c>: B's own properties, plus — when every
+    ///   alternative has a value — the constraint that keeps <c>oneOf</c> exclusive (no discriminator
+    ///   property at all, or with <c>IgnoreUnrecognizedTypeDiscriminators</c> none of the mapped values).</item>
+    /// </list>
+    /// With a derived type without a value the alternatives are not mutually exclusive: <c>anyOf</c>,
+    /// and a warning that they are distinguishable only by structure. Otherwise <c>oneOf</c>; an
+    /// abstract base or interface also gets the <c>discriminator</c> object.
     /// </summary>
     private IOpenApiSchema GenerateUnionSchema(PolymorphismInfo polymorphism)
     {
@@ -734,9 +768,18 @@ public sealed class SchemaGenerator
 
             var alternatives = new List<IOpenApiSchema>();
             var mapping = new Dictionary<string, OpenApiSchemaReference>(StringComparer.Ordinal);
+            var mappedValues = new List<object>();
+            var withoutValue = new List<Type>();
 
             foreach (var derived in polymorphism.DerivedTypes)
             {
+                if (derived.DiscriminatorValue is null)
+                {
+                    withoutValue.Add(derived.Type);
+                    alternatives.Add(GenerateComplexSchema(derived.Type));
+                    continue;
+                }
+
                 var variantId = ReserveVariantId(derived.Type, baseType, unionId);
                 if (!_schemas.ContainsKey(variantId) && _generating.Add(variantId))
                 {
@@ -754,16 +797,57 @@ public sealed class SchemaGenerator
                 }
 
                 alternatives.Add(new OpenApiSchemaReference(variantId, null));
-                mapping[Convert.ToString(derived.DiscriminatorValue, System.Globalization.CultureInfo.InvariantCulture)!] =
+                mappedValues.Add(derived.DiscriminatorValue);
+                mapping[Convert.ToString(derived.DiscriminatorValue, CultureInfo.InvariantCulture)!] =
                     new OpenApiSchemaReference(variantId, null);
             }
 
-            union.OneOf = alternatives;
-            union.Discriminator = new OpenApiDiscriminator
+            var exclusive = withoutValue.Count == 0;
+            var isConcrete = !baseType.IsAbstract && !baseType.IsInterface;
+            if (isConcrete)
+                alternatives.Add(GenerateBaseBranch(polymorphism, unionId, exclusive ? mappedValues : null));
+
+            if (exclusive)
             {
-                PropertyName = polymorphism.PropertyName,
-                Mapping      = mapping,
-            };
+                union.OneOf = alternatives;
+                if (!isConcrete)
+                {
+                    union.Discriminator = new OpenApiDiscriminator
+                    {
+                        PropertyName = polymorphism.PropertyName,
+                        Mapping      = mapping,
+                    };
+                }
+            }
+            else
+            {
+                union.AnyOf = alternatives;
+                RecordLoss(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.PolymorphismAnyOfWithoutDiscriminator,
+                    Anchor   = new LossAnchor.Component(unionId),
+                    Message  = $"derived types without a discriminator value ({string.Join(", ", withoutValue.Select(t => t.FullName))}) " +
+                               "are distinguishable only by structure: written as anyOf without a discriminator object.",
+                    Feature  = "schema.anyOf",
+                    Subjects = withoutValue.Select(t => t.FullName ?? t.Name).ToList(),
+                });
+            }
+
+            if (polymorphism.SwashbuckleDisagrees)
+            {
+                RecordLoss(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.PolymorphismSourceDisagreement,
+                    Anchor   = new LossAnchor.Component(unionId),
+                    Message  = $"{baseType.FullName}: [SwaggerDiscriminator]/[SwaggerSubType] disagree with " +
+                               "[JsonPolymorphic]/[JsonDerivedType]; the System.Text.Json attributes define the wire and are used.",
+                    Feature  = "schema.discriminator",
+                    Subjects = [baseType.FullName ?? baseType.Name],
+                });
+            }
+
             return new OpenApiSchemaReference(unionId, null);
         }
         finally
@@ -771,6 +855,80 @@ public sealed class SchemaGenerator
             _generating.Remove(unionId);
         }
     }
+
+    /// <summary>
+    /// The base branch <c>{B}Default</c> of a concrete base: B's own properties. With
+    /// <paramref name="mappedValues"/> (every alternative has a value) it also excludes every
+    /// object a variant takes: without <c>IgnoreUnrecognizedTypeDiscriminators</c>
+    /// <c>not: {required: [property]}</c> (no discriminator at all — STJ rejects unknown values);
+    /// with it, the discriminator, if present, must be none of the mapped values.
+    /// </summary>
+    private IOpenApiSchema GenerateBaseBranch(PolymorphismInfo polymorphism, string unionId, IReadOnlyList<object>? mappedValues)
+    {
+        var baseType = polymorphism.BaseType;
+        var fullName = (baseType.FullName ?? baseType.Name).Replace('.', '_').Replace('+', '_');
+        var branchId = _schemaIds.Reserve(SchemaKey.BaseDefault(baseType), $"{unionId}Default", $"{fullName}Default");
+
+        if (_schemas.ContainsKey(branchId) || !_generating.Add(branchId))
+            return new OpenApiSchemaReference(branchId, null);
+
+        try
+        {
+            var branch = new OpenApiSchema { Type = JsonSchemaType.Object };
+            _schemas[branchId] = branch;
+            _schemaIdToType[branchId] = baseType;
+            PopulateObjectSchema(baseType, branch);
+
+            if (mappedValues != null)
+            {
+                if (polymorphism.IgnoreUnrecognizedTypeDiscriminators)
+                {
+                    var properties = new Dictionary<string, IOpenApiSchema>(branch.Properties ?? new Dictionary<string, IOpenApiSchema>(), StringComparer.Ordinal)
+                    {
+                        [polymorphism.PropertyName] = new OpenApiSchema
+                        {
+                            Not = new OpenApiSchema { Enum = mappedValues.Select(DiscriminatorValueNode).ToList() },
+                        },
+                    };
+                    branch.Properties = properties;
+                }
+                else
+                {
+                    branch.Not = new OpenApiSchema { Required = new HashSet<string>(StringComparer.Ordinal) { polymorphism.PropertyName } };
+                }
+            }
+
+            return new OpenApiSchemaReference(branchId, null);
+        }
+        finally
+        {
+            _generating.Remove(branchId);
+        }
+    }
+
+    private static JsonNode DiscriminatorValueNode(object value) => value switch
+    {
+        int number => JsonValue.Create(number),
+        _          => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture))!,
+    };
+
+    /// <summary>
+    /// Keeps a warning anchored on a component: in a document build it joins the build's ledger;
+    /// in direct generation it is delivered at the end of the public call, if reachable.
+    /// </summary>
+    private void RecordLoss(PendingLoss loss)
+    {
+        if (_ledger != null)
+            _ledger.Add(loss);
+        else
+            _pendingLosses.Add(loss);
+    }
+
+    /// <summary>
+    /// Attaches the ledger of a document build: warnings are then delivered by the build after the
+    /// document is final, filtered by the document's reachability.
+    /// </summary>
+    internal void AttachLedger(LossLedger ledger) => _ledger = ledger;
 
     /// <summary>
     /// The derived type's properties with the discriminator property first, required and limited

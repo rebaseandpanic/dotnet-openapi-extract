@@ -21,7 +21,8 @@ internal sealed record PolymorphismInfo(
     string PropertyName,
     bool IgnoreUnrecognizedTypeDiscriminators,
     IReadOnlyList<DerivedTypeInfo> DerivedTypes,
-    PolymorphismSource Source);
+    PolymorphismSource Source,
+    bool SwashbuckleDisagrees = false);
 
 /// <summary>
 /// Reads the polymorphism a base type declares. System.Text.Json attributes define the wire, so
@@ -65,14 +66,29 @@ internal static class PolymorphismReader
             var ignoreUnrecognized = polymorphic != null
                 && AttributeHelper.GetNamedArgument<bool>(polymorphic, "IgnoreUnrecognizedTypeDiscriminators");
 
+            var stjProperty = string.IsNullOrEmpty(propertyName) ? DefaultPropertyName : propertyName;
+            var swashbuckle = ReadSwashbuckle(baseType, attributes);
+            var disagrees = swashbuckle != null
+                && (swashbuckle.PropertyName != stjProperty
+                    || !swashbuckle.DerivedTypes.Select(Describe).ToHashSet().SetEquals(stjDerived.Select(Describe)));
+
             return new PolymorphismInfo(
                 baseType,
-                string.IsNullOrEmpty(propertyName) ? DefaultPropertyName : propertyName,
+                stjProperty,
                 ignoreUnrecognized,
                 stjDerived,
-                PolymorphismSource.SystemTextJson);
+                PolymorphismSource.SystemTextJson,
+                disagrees);
         }
 
+        return ReadSwashbuckle(baseType, attributes);
+    }
+
+    private static string Describe(DerivedTypeInfo derived) =>
+        $"{derived.Type.FullName}={Convert.ToString(derived.DiscriminatorValue, System.Globalization.CultureInfo.InvariantCulture)}";
+
+    private static PolymorphismInfo? ReadSwashbuckle(Type baseType, IList<System.Reflection.CustomAttributeData> attributes)
+    {
         var swaggerDerived = AttributeHelper.GetAttributes(attributes, AttributeHelper.Names.SwaggerSubType)
             .Select(ReadSwaggerSubType)
             .Where(d => d != null)

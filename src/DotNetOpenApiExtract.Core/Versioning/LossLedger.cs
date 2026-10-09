@@ -40,6 +40,12 @@ internal abstract record LossAnchor
     /// object; its location is <c>METHOD /path</c> as written to the output.
     /// </summary>
     public sealed record Operation(OpenApiOperation Target) : LossAnchor;
+
+    /// <summary>
+    /// A component schema by id. It is reachable while some kept operation reaches it through
+    /// references; its location is <c>#/components/schemas/{id}</c>.
+    /// </summary>
+    public sealed record Component(string Id) : LossAnchor;
 }
 
 /// <summary>
