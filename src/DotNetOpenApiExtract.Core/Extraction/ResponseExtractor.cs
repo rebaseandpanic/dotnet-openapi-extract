@@ -43,6 +43,12 @@ public sealed class ResponseInfo
     /// </summary>
     public bool BodyFromHttpResult { get; init; }
 
+    /// <summary>
+    /// The body is the action's <c>IAsyncEnumerable&lt;T?&gt;</c> return type and its reference-type
+    /// element is annotated nullable: the items may be JSON <c>null</c>.
+    /// </summary>
+    internal bool SequenceElementNullable { get; init; }
+
 }
 
 /// <summary>
@@ -101,12 +107,31 @@ public static class ResponseExtractor
     {
         var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(action.Method, action.Controller.Type);
         var unknown = new List<Type>();
+        var signatureType = UnwrapReturnType(action.Method.ReturnType);
+        var elementNullable = ReturnNullability.AsyncSequenceElementIsNullable(action.Method);
         var responses = ExtractResponsesCore(action, defaultContentTypes, contentTypesExplicit, unknown)
             .Select(r => WithFileMediaType(r, defaultContentTypes, contentTypesExplicit))
+            .Select(r => elementNullable && r.BodyType != null && signatureType != null && SameType(r.BodyType, signatureType)
+                ? WithNullableElement(r)
+                : r)
             .ToList();
         unknownResults = unknown;
         return responses;
     }
+
+    private static bool SameType(Type left, Type right) =>
+        ReferenceEquals(left, right) || string.Equals(left.FullName, right.FullName, StringComparison.Ordinal);
+
+    private static ResponseInfo WithNullableElement(ResponseInfo response) => new()
+    {
+        StatusCode              = response.StatusCode,
+        BodyType                = response.BodyType,
+        Description             = response.Description,
+        ContentTypes            = response.ContentTypes,
+        ContentTypesExplicit    = response.ContentTypesExplicit,
+        BodyFromHttpResult      = response.BodyFromHttpResult,
+        SequenceElementNullable = true,
+    };
 
     /// <summary>
     /// A file body is raw bytes: unless its response declares media types of its own or

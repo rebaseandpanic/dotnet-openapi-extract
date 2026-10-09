@@ -198,4 +198,74 @@ public class AsyncEnumerableResponseTests(AsyncEnumerableResponseFixture fixture
 
         result.IsValid.Should().BeFalse(because: "MVC writes the sequence as an array, never as one object");
     }
+
+    // ── Nullable reference elements (IAsyncEnumerable<T?>) ─────────────────
+
+    public static TheoryData<string> NullableStringPaths => ["/streaming/nullable-strings", "/streaming/nullable-strings-value-task"];
+
+    [Theory]
+    [MemberData(nameof(NullableStringPaths))]
+    public void NullableStringElements_AreNullableItems_InEveryVersion(string path)
+    {
+        var items30 = Schema(OpenApiSpecVersion.OpenApi3_0, path)["items"]!;
+        items30["type"]!.GetValue<string>().Should().Be("string");
+        items30["nullable"]!.GetValue<bool>().Should().BeTrue();
+
+        foreach (var version in new[] { OpenApiSpecVersion.OpenApi3_1, OpenApiSpecVersion.OpenApi3_2 })
+        {
+            Schema(version, path)["items"]!["type"]!.AsArray().Select(t => t!.GetValue<string>())
+                .Should().BeEquivalentTo(["string", "null"], because: $"{path} {version}");
+        }
+    }
+
+    [Fact]
+    public void NullableObjectElements_In30_AreTheNullableReferenceForm()
+    {
+        var anyOf = Schema(OpenApiSpecVersion.OpenApi3_0, "/streaming/nullable-items")["items"]!["anyOf"]!.AsArray();
+
+        anyOf[0]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+        anyOf[1]!["nullable"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(SchemaVersions))]
+    public async Task WrittenSequenceWithNullObjects_PassesTheNullableSchema_AndFailsTheNonNullable(OpenApiSpecVersion version)
+    {
+        var wire = await WriteAsync(Sequence<StreamItem?>(Items[0], null));
+        wire!.AsArray().Should().Contain(n => n == null);
+
+        var nullable = fixture.Conformance[version].ValidateSchema(Schema(version, "/streaming/nullable-items"), wire);
+        nullable.IsValid.Should().BeTrue(because: string.Join("; ", nullable.Errors));
+
+        fixture.Conformance[version].ValidateSchema(Schema(version, "/streaming/plain"), wire).IsValid
+            .Should().BeFalse(because: "elements not annotated nullable reject a null item");
+        fixture.Conformance[version].ValidateSchema(Schema(version, "/streaming/oblivious-items"), wire).IsValid
+            .Should().BeFalse(because: "oblivious elements are written without the null form");
+    }
+
+    [Theory]
+    [MemberData(nameof(SchemaVersions))]
+    public async Task WrittenSequenceWithNullStrings_PassesTheNullableSchema(OpenApiSpecVersion version)
+    {
+        var wire = await WriteAsync(Sequence<string?>("a", null));
+
+        var result = fixture.Conformance[version].ValidateSchema(Schema(version, "/streaming/nullable-strings"), wire);
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void NullableElements_OnASequentialMediaType_GiveANullableItemSchema(OpenApiSpecVersion version)
+    {
+        var media = fixture.Documents[version]["paths"]!["/sequential/ndjson-nullable"]!["get"]!["responses"]!["200"]!
+            ["content"]!["application/x-ndjson"]!;
+        var itemSchema = media[version == OpenApiSpecVersion.OpenApi3_2 ? "itemSchema" : "x-oai-itemSchema"]!;
+
+        var anyOf = itemSchema["anyOf"]!.AsArray();
+        anyOf[0]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            anyOf[1]!["nullable"]!.GetValue<bool>().Should().BeTrue();
+        else
+            anyOf[1]!["type"]!.GetValue<string>().Should().Be("null");
+    }
 }

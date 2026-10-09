@@ -1078,7 +1078,7 @@ public sealed class OpenApiDocumentBuilder
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
                 apiResponse.Content = BuildResponseContent(
                     resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots,
-                    httpContext: resp.BodyFromHttpResult);
+                    httpContext: resp.BodyFromHttpResult, elementNullable: resp.SequenceElementNullable);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -1195,7 +1195,8 @@ public sealed class OpenApiDocumentBuilder
         LossLedger ledger,
         OpenApiOperation operation,
         List<Action<SchemaGenerator>>? httpSlots,
-        bool httpContext = false)
+        bool httpContext = false,
+        bool elementNullable = false)
     {
         var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
 
@@ -1231,7 +1232,7 @@ public sealed class OpenApiDocumentBuilder
             {
                 var sequential = new OpenApiMediaType();
                 content[contentType] = sequential;
-                WithGenerator(generator => sequential.ItemSchema = generator.GenerateSchema(elementType!));
+                WithGenerator(generator => sequential.ItemSchema = ElementSchema(generator, elementType!, elementNullable));
             }
             else if (isSequence && string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
             {
@@ -1258,11 +1259,22 @@ public sealed class OpenApiDocumentBuilder
                 var plain = new OpenApiMediaType();
                 content[contentType] = plain;
                 if (bodyType != null)
-                    WithGenerator(generator => plain.Schema = bodySchema ??= generator.GenerateSchema(bodyType));
+                {
+                    WithGenerator(generator => plain.Schema = bodySchema ??= isSequence && elementNullable
+                        ? new OpenApiSchema { Type = JsonSchemaType.Array, Items = ElementSchema(generator, elementType!, nullable: true) }
+                        : generator.GenerateSchema(bodyType));
+                }
             }
         }
 
         return content;
+    }
+
+    /// <summary>The schema of a sequence element; nullable by the version's rules when annotated <c>T?</c>.</summary>
+    private static IOpenApiSchema ElementSchema(SchemaGenerator generator, Type elementType, bool nullable)
+    {
+        var schema = generator.GenerateSchema(elementType);
+        return nullable ? SchemaGenerator.MakeNullable(schema) : schema;
     }
 
     // =========================================================================
@@ -1899,7 +1911,7 @@ public sealed class OpenApiDocumentBuilder
                         .ToHashSet(StringComparer.Ordinal);
                     var bodyTypes = extracted
                         .Where(e => e.Value.BodyType != null && !ownContentType.Contains(e.Key))
-                        .ToDictionary(e => e.Key, e => e.Value.BodyType!, StringComparer.Ordinal);
+                        .ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal);
 
                     foreach (var (statusKey, responseInterface) in operation.Responses)
                     {
@@ -1916,11 +1928,11 @@ public sealed class OpenApiDocumentBuilder
                         if (ownContentType.Contains(statusKey))
                             continue;
 
-                        if (bodyTypes.TryGetValue(statusKey, out var bodyType))
+                        if (bodyTypes.TryGetValue(statusKey, out var bodyResponse))
                         {
-
                             response.Content = BuildResponseContent(
-                                globalMediaTypes.ProducesContentTypes, bodyType, schemaGenerator, ledger, operation, httpSlots: null);
+                                globalMediaTypes.ProducesContentTypes, bodyResponse.BodyType, schemaGenerator, ledger, operation,
+                                httpSlots: null, elementNullable: bodyResponse.SequenceElementNullable);
                             continue;
                         }
 

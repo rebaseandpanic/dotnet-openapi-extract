@@ -34,6 +34,11 @@ public class SequentialStreamingController : ControllerBase
     [Produces("application/json", "application/x-ndjson")]
     public IAsyncEnumerable<StreamItem> Mixed() => Items();
 
+    /// <summary>Newline-delimited JSON of nullable objects.</summary>
+    [HttpGet("ndjson-nullable")]
+    [Produces("application/x-ndjson")]
+    public IAsyncEnumerable<StreamItem?> NdjsonNullable() => Items();
+
     /// <summary>A sequence declared as server-sent events, which standard MVC cannot write.</summary>
     [HttpGet("event-stream")]
     [Produces("text/event-stream")]

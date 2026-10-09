@@ -42,6 +42,30 @@ public class StreamingController : ControllerBase
     [HttpGet("sse-items")]
     public IAsyncEnumerable<SseItem<StreamItem>> SseItems() => Events();
 
+    /// <summary>Sequence of nullable strings inside an action result.</summary>
+    [HttpGet("nullable-strings")]
+    public ActionResult<IAsyncEnumerable<string?>> NullableStrings() => new(Strings());
+
+    /// <summary>Sequence of nullable objects inside a task.</summary>
+    [HttpGet("nullable-items")]
+    public Task<IAsyncEnumerable<StreamItem?>> NullableItems() => Task.FromResult<IAsyncEnumerable<StreamItem?>>(Items());
+
+    /// <summary>Sequence of nullable strings inside a value task (a value type takes no nullable byte).</summary>
+    [HttpGet("nullable-strings-value-task")]
+    public ValueTask<IAsyncEnumerable<string?>> NullableStringsInValueTask() => ValueTask.FromResult(Strings());
+
+#nullable disable
+    /// <summary>Sequence of objects without nullable annotations (oblivious).</summary>
+    [HttpGet("oblivious-items")]
+    public IAsyncEnumerable<StreamItem> ObliviousItems() => Items();
+#nullable restore
+
+    private static async IAsyncEnumerable<string?> Strings()
+    {
+        await Task.Yield();
+        yield return null;
+    }
+
     private static async IAsyncEnumerable<StreamItem> Items()
     {
         await Task.Yield();

@@ -1709,7 +1709,7 @@ public sealed class SchemaGenerator
     /// (OpenAPI 3.1 style). When the schema is an <see cref="OpenApiSchemaReference"/>
     /// it is wrapped in an allOf+null composite.
     /// </summary>
-    private static IOpenApiSchema MakeNullable(IOpenApiSchema schema)
+    internal static IOpenApiSchema MakeNullable(IOpenApiSchema schema)
     {
         if (schema is OpenApiSchema concrete)
         {
