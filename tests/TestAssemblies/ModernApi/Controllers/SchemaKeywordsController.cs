@@ -40,4 +40,8 @@ public class SchemaKeywordsController : ControllerBase
     [HttpGet("extension/generic")]
     public ActionResult<ExtensionEnvelope<Base64Payload>> ExtensionGeneric() =>
         new ExtensionEnvelope<Base64Payload> { Payload = new Base64Payload { Data = [1], Token = "AQ==", Plain = "x" } };
+
+    /// <summary>Numeric ranges.</summary>
+    [HttpGet("range")]
+    public ActionResult<RangeModel> Range() => new RangeModel();
 }

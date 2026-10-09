@@ -129,7 +129,7 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 - Schemas from DTO classes — primitives, nullable, collections, dictionaries, enums, generics, inheritance, self-referencing types
 - Enum extensions: `x-enum-varnames` (always, matches `enum[]` length), `x-enum-descriptions` (when any value is documented), markdown auto-glue `description` combining type summary + per-value bullet list
 - Enum value description sources: XML `<summary>` (primary) with `[Description]` attribute fallback
-- Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, etc.)
+- Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, etc.). `[Range]`: every overload, exclusive sides (`exclusiveMinimum: n` for 3.1/3.2, `minimum: n` + `exclusiveMinimum: true` for 3.0), string bounds of `Range(Type, string, string)` parsed in the invariant culture without losing decimal digits; only on numeric schemas
 - JSON attributes (`[JsonPropertyName]`, `[JsonIgnore]`, `[JsonRequired]`)
 - Swagger annotations (`[SwaggerOperation]`, `[SwaggerParameter]`, `[SwaggerTag]`, `[SwaggerSchema]`)
 - XML documentation (`<summary>`, `<remarks>`, `<param>`, `<response>` on the action and on the controller)

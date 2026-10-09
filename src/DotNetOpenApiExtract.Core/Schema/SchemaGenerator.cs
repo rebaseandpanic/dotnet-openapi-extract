@@ -686,7 +686,7 @@ public sealed class SchemaGenerator
             _schemas[schemaId] = schema;
             _schemaIdToType[schemaId] = type;
 
-            PopulateObjectSchema(type, schema);
+            PopulateObjectSchema(type, schema, schemaId);
             return new OpenApiSchemaReference(schemaId, null);
         }
         finally
@@ -699,7 +699,7 @@ public sealed class SchemaGenerator
     /// Fills <paramref name="schema"/> with the properties of <paramref name="type"/> as System.Text.Json
     /// writes them when the type is used directly (base properties flattened in).
     /// </summary>
-    private void PopulateObjectSchema(Type type, OpenApiSchema schema)
+    private void PopulateObjectSchema(Type type, OpenApiSchema schema, string componentId)
     {
         // Collect all properties including inherited ones.
         var allProperties = CollectProperties(type);
@@ -762,7 +762,10 @@ public sealed class SchemaGenerator
                 propSchema = EnsureMutableSchema(propSchema);
 
             if (propSchema is OpenApiSchema inlinePropSchema)
+            {
                 ApplyValidationAttributes(inlinePropSchema, propAttrData);
+                ApplyRange(inlinePropSchema, propAttrData, propInfo, serializedName, componentId);
+            }
 
             properties[serializedName] = propSchema;
 
@@ -954,7 +957,7 @@ public sealed class SchemaGenerator
                         var variant = new OpenApiSchema { Type = JsonSchemaType.Object };
                         _schemas[variantId] = variant;
                         _schemaIdToType[variantId] = derived.Type;
-                        PopulateVariantSchema(variant, derived, polymorphism.PropertyName);
+                        PopulateVariantSchema(variant, derived, polymorphism.PropertyName, variantId);
                     }
                     finally
                     {
@@ -1042,7 +1045,7 @@ public sealed class SchemaGenerator
             var schema = new OpenApiSchema { Type = JsonSchemaType.Object };
             _schemas[directId] = schema;
             _schemaIdToType[directId] = type;
-            PopulateObjectSchema(type, schema);
+            PopulateObjectSchema(type, schema, directId);
             return new OpenApiSchemaReference(directId, null);
         }
         finally
@@ -1120,7 +1123,7 @@ public sealed class SchemaGenerator
             var branch = new OpenApiSchema { Type = JsonSchemaType.Object };
             _schemas[branchId] = branch;
             _schemaIdToType[branchId] = baseType;
-            PopulateObjectSchema(baseType, branch);
+            PopulateObjectSchema(baseType, branch, branchId);
 
             if (mappedValues != null)
             {
@@ -1200,9 +1203,9 @@ public sealed class SchemaGenerator
     /// to the variant's value. A derived property serialized under the discriminator's name is a
     /// contract System.Text.Json rejects, so it is an extraction error.
     /// </summary>
-    private void PopulateVariantSchema(OpenApiSchema variant, DerivedTypeInfo derived, string propertyName)
+    private void PopulateVariantSchema(OpenApiSchema variant, DerivedTypeInfo derived, string propertyName, string variantId)
     {
-        PopulateObjectSchema(derived.Type, variant);
+        PopulateObjectSchema(derived.Type, variant, variantId);
 
         if (variant.Properties != null && variant.Properties.ContainsKey(propertyName))
         {
@@ -1282,16 +1285,6 @@ public sealed class SchemaGenerator
             }
         }
 
-        // [Range(min, max)] — constructor overloads: (int,int), (double,double), (Type,string,string)
-        var range = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Range);
-        if (range != null && range.ConstructorArguments.Count >= 2)
-        {
-            var minVal = ConvertToString(range.ConstructorArguments[0].Value);
-            var maxVal = ConvertToString(range.ConstructorArguments[1].Value);
-            if (minVal != null) schema.Minimum = minVal;
-            if (maxVal != null) schema.Maximum = maxVal;
-        }
-
         // [RegularExpression(@"pattern")]
         var regex = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.RegularExpression);
         if (regex != null)
@@ -1356,6 +1349,77 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
+    /// <c>[Range]</c> on a numeric property: <c>minimum</c> / <c>maximum</c>, or for an exclusive side
+    /// <c>exclusiveMinimum</c> / <c>exclusiveMaximum</c> as a number (the serializer writes the 3.0 form,
+    /// bound + boolean flag, without loss). A declaration <c>RangeAttribute</c> rejects is an extraction
+    /// error; a non-numeric operand type or a bound JSON cannot hold (infinity, NaN) gives a warning on
+    /// the property and no such constraint.
+    /// </summary>
+    private void ApplyRange(
+        OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string serializedName, string componentId)
+    {
+        var attribute = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Range);
+        if (attribute == null || RangeDeclaration.Read(attribute) is not { } range)
+            return;
+
+        var typeName = property.DeclaringType?.FullName ?? componentId;
+        var anchor = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]);
+
+        switch (range.Kind)
+        {
+            case RangeDeclaration.Outcome.Invalid:
+                throw new OpenApiExtractionException(
+                    $"[Range] on {typeName}.{property.Name} is rejected by RangeAttribute: {range.Detail}.",
+                    typeName, property.Name);
+
+            case RangeDeclaration.Outcome.NonNumericOperand:
+                RecordLoss(new PendingLoss
+                {
+                    Class    = LossClass.Source,
+                    Code     = ExtractionDiagnosticCodes.SchemaRangeNotExpressible,
+                    Anchor   = anchor,
+                    Message  = $"[Range] on {typeName}.{property.Name} compares {range.Detail} values, which are not JSON numbers: " +
+                               "no minimum or maximum is written.",
+                    Feature  = "schema.minimum",
+                    Action   = DiagnosticAction.Omitted,
+                    Subjects = [$"{typeName}.{property.Name}"],
+                });
+                return;
+        }
+
+        if (range.NonFiniteMinimum != null || range.NonFiniteMaximum != null)
+        {
+            var bounds = string.Join(" and ", new[] { range.NonFiniteMinimum, range.NonFiniteMaximum }.Where(b => b != null));
+            RecordLoss(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SchemaRangeNotExpressible,
+                Anchor   = anchor,
+                Message  = $"[Range] on {typeName}.{property.Name} has the bound {bounds}, which JSON cannot hold: that bound is not written.",
+                Feature  = "schema.minimum",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = [$"{typeName}.{property.Name}"],
+            });
+        }
+
+        if (!schema.Type.HasValue
+            || (schema.Type.Value & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)
+            return; // a range constrains only the numeric branch
+
+        if (range.Minimum != null)
+        {
+            if (range.MinimumIsExclusive) schema.ExclusiveMinimum = range.Minimum;
+            else schema.Minimum = range.Minimum;
+        }
+
+        if (range.Maximum != null)
+        {
+            if (range.MaximumIsExclusive) schema.ExclusiveMaximum = range.Maximum;
+            else schema.Maximum = range.Maximum;
+        }
+    }
+
+    /// <summary>
     /// Applies type-level attributes (e.g. <c>[JsonUnmappedMemberHandling]</c>,
     /// <c>[Obsolete]</c>) to the object schema generated for <paramref name="type"/>.
     /// </summary>
@@ -1375,32 +1439,6 @@ public sealed class SchemaGenerator
         // [Obsolete] on the DTO class → deprecated: true on the object schema
         if (AttributeHelper.HasAttribute(type, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
-    }
-
-    /// <summary>
-    /// Converts a Range constructor argument value to its string representation for use
-    /// in OpenAPI <c>minimum</c> / <c>maximum</c> keywords (which are strings in v3.5.0).
-    /// Returns <see langword="null"/> when the value cannot be converted to a numeric string.
-    /// </summary>
-    private static string? ConvertToString(object? value)
-    {
-        return value switch
-        {
-            int i       => i.ToString(),
-            uint u      => u.ToString(),
-            long l      => l.ToString(),
-            ulong ul    => ul.ToString(),
-            short s     => s.ToString(),
-            ushort us   => us.ToString(),
-            byte b      => b.ToString(),
-            sbyte sb    => sb.ToString(),
-            double d    => d.ToString("G"),
-            float f     => f.ToString("G"),
-            decimal dec => dec.ToString("G"),
-            string str  => str,   // Type-based Range("0", "150") passes strings
-            null        => null,
-            _           => null,
-        };
     }
 
     // =========================================================================

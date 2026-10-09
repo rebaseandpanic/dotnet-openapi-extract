@@ -133,6 +133,13 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string ResponseResultStatusUnknown = "response.result-status-unknown";
 
+    /// <summary>
+    /// A <c>[Range]</c> bound cannot be written: the operand type is not numeric (for example
+    /// <c>DateTime</c>; no bound is written) or a bound is infinite or NaN (that bound is not written).
+    /// Location: the property. Subjects: <c>Type.Property</c>.
+    /// </summary>
+    public const string SchemaRangeNotExpressible = "schema.range-not-expressible";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }
