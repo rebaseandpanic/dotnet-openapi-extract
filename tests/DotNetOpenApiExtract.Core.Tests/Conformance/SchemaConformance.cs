@@ -19,7 +19,8 @@ internal sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Err
 /// <remarks>
 /// <para>
 /// The document's component schemas are moved under <c>$defs</c> of a generated 2020-12 schema and
-/// their references rewritten accordingly; OpenAPI-only keywords (<c>discriminator</c>,
+/// the references in schema positions rewritten accordingly (literal values such as <c>const</c> or
+/// <c>examples</c> are data and stay untouched); OpenAPI-only keywords (<c>discriminator</c>,
 /// <c>example</c>, …) are unknown keywords there and do not affect validation.
 /// </para>
 /// <para>
@@ -59,7 +60,8 @@ internal sealed class SchemaConformance
                 nameof(document));
 
         var schemas = document["components"]?["schemas"]?.DeepClone() as JsonObject ?? [];
-        RewriteReferences(schemas);
+        foreach (var (_, schema) in schemas)
+            RewriteReferences(schema);
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(schemas.ToJsonString())))[..16];
         return new SchemaConformance(schemas, hash);
@@ -109,13 +111,13 @@ internal sealed class SchemaConformance
 
     private ConformanceResult Validate(JsonNode rootSchema, JsonNode? instance)
     {
+        // The root goes under allOf, so a boolean schema (true / false) is as valid a root as an object.
         var schemaDocument = new JsonObject
         {
             ["$schema"] = "https://json-schema.org/draft/2020-12/schema",
+            ["allOf"]   = new JsonArray(rootSchema.DeepClone()),
+            ["$defs"]   = _defs.DeepClone(),
         };
-        foreach (var (key, value) in rootSchema.AsObject())
-            schemaDocument[key] = value?.DeepClone();
-        schemaDocument["$defs"] = _defs.DeepClone();
 
         var text = schemaDocument.ToJsonString();
         var schemaHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..16];
@@ -138,26 +140,56 @@ internal sealed class SchemaConformance
             throw new ArgumentException($"The document has no component schema '{componentId}'.", nameof(componentId));
     }
 
-    private static void RewriteReferences(JsonNode? node)
+    /// <summary>Keywords whose value is one schema.</summary>
+    private static readonly HashSet<string> SchemaKeywords = new(StringComparer.Ordinal)
     {
-        switch (node)
-        {
-            case JsonObject obj:
-                foreach (var key in obj.Select(p => p.Key).ToList())
-                {
-                    if (key == "$ref" && obj[key] is JsonValue value
-                        && value.TryGetValue<string>(out var reference)
-                        && reference.StartsWith(ComponentsPrefix, StringComparison.Ordinal))
-                        obj[key] = DefsPrefix + reference[ComponentsPrefix.Length..];
-                    else
-                        RewriteReferences(obj[key]);
-                }
-                break;
+        "items", "additionalItems", "additionalProperties", "not", "if", "then", "else", "contains",
+        "propertyNames", "unevaluatedItems", "unevaluatedProperties", "contentSchema", "itemSchema",
+    };
 
-            case JsonArray array:
+    /// <summary>Keywords whose value is an array of schemas.</summary>
+    private static readonly HashSet<string> SchemaArrayKeywords = new(StringComparer.Ordinal)
+    {
+        "allOf", "anyOf", "oneOf", "prefixItems",
+    };
+
+    /// <summary>Keywords whose value is an object of schemas.</summary>
+    private static readonly HashSet<string> SchemaMapKeywords = new(StringComparer.Ordinal)
+    {
+        "properties", "patternProperties", "dependentSchemas", "$defs", "definitions",
+    };
+
+    /// <summary>
+    /// Rewrites component references of <paramref name="schema"/> and of its subschemas. Only schema
+    /// positions are visited: values of <c>const</c>, <c>enum</c>, <c>default</c>, <c>example</c>,
+    /// <c>examples</c> and other annotations are data and keep any <c>$ref</c> they contain as is.
+    /// </summary>
+    private static void RewriteReferences(JsonNode? schema)
+    {
+        if (schema is not JsonObject obj)
+            return; // boolean schema or not a schema
+
+        if (obj["$ref"] is JsonValue value
+            && value.TryGetValue<string>(out var reference)
+            && reference.StartsWith(ComponentsPrefix, StringComparison.Ordinal))
+            obj["$ref"] = DefsPrefix + reference[ComponentsPrefix.Length..];
+
+        foreach (var (key, child) in obj.ToList())
+        {
+            if (SchemaKeywords.Contains(key))
+            {
+                RewriteReferences(child);
+            }
+            else if (SchemaArrayKeywords.Contains(key) && child is JsonArray array)
+            {
                 foreach (var item in array)
                     RewriteReferences(item);
-                break;
+            }
+            else if (SchemaMapKeywords.Contains(key) && child is JsonObject map)
+            {
+                foreach (var (_, item) in map)
+                    RewriteReferences(item);
+            }
         }
     }
 
