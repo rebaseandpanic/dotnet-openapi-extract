@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Corvus.Json.Validator compiles schemas with Roslyn at runtime and needs the reference assemblies. -->
+    <PreserveCompilationContext>true</PreserveCompilationContext>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +16,8 @@
     <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="Microsoft.OpenApi.YamlReader" Version="3.10.2" />
+    <!-- JSON Schema 2020-12 evaluator: checks that real System.Text.Json output satisfies the generated schemas. -->
+    <PackageReference Include="Corvus.Json.Validator" Version="5.7.6" />
   </ItemGroup>
 
   <ItemGroup>
