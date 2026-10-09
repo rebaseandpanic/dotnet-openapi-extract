@@ -45,6 +45,12 @@ public static class ExtractionDiagnosticCodes
     /// <summary>A global response header is set with a non-literal name and is skipped. Subjects: the call form.</summary>
     public const string ResponseHeaderNonLiteralName = "response-headers.non-literal-name";
 
+    /// <summary>
+    /// The target is OpenAPI 3.0 and a GET, HEAD or DELETE operation has a request body, which
+    /// 3.0 consumers must ignore. The output is unchanged. Location: <c>METHOD /path</c>.
+    /// </summary>
+    public const string RequestBodyOnGetHeadDelete = "request-body.get-head-delete";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

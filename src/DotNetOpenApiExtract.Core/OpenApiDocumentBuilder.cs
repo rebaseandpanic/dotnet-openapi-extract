@@ -349,6 +349,10 @@ public sealed class OpenApiDocumentBuilder
         // subscriber or to stderr.
         var diagnostics = new DiagnosticBag(options.OnDiagnostic);
 
+        // Warnings that depend on the target version or on the finished document wait here
+        // until the document is final (see DownlevelPass at the end).
+        var ledger = new LossLedger(options.OpenApiVersion);
+
         // ── Source analysis (best-effort, never throws) ──────────────────────
         var sourceContext = TryBuildSourceAnalysisContext(options, loader);
 
@@ -550,6 +554,7 @@ public sealed class OpenApiDocumentBuilder
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
                 pathItem.Operations[httpMethod] = operation;
                 builtOperations.Add((action, actionAttrs, controllerAttrs, operation));
+                RecordRequestBodyOnGetHeadDelete(ledger, httpMethod, operation);
             }
             catch (Exception ex) when (ex is FileNotFoundException
                                         or FileLoadException
@@ -669,7 +674,36 @@ public sealed class OpenApiDocumentBuilder
         var docTagsResult = DocumentTagsExtractor.Extract(sourceContext);
         ApplyDocumentTagsMetadata(document, docTagsResult);
 
+        // ── Step 12: Deliver pending warnings against the finished document ──
+        DownlevelPass.Run(document, ledger, diagnostics);
+
         return new BuildCoreResult(document, controllers, actions, schemaGenerator, sourceContext);
+    }
+
+    /// <summary>
+    /// OpenAPI 3.0 says GET, HEAD and DELETE request bodies have no defined semantics, so 3.0
+    /// consumers ignore them. The body stays in the output; the warning names the operation.
+    /// </summary>
+    private static void RecordRequestBodyOnGetHeadDelete(
+        LossLedger ledger, HttpMethod method, OpenApiOperation operation)
+    {
+        if (ledger.TargetVersion != OpenApiSpecVersion.OpenApi3_0 || operation.RequestBody == null)
+            return;
+
+        if (method != HttpMethod.Get && method != HttpMethod.Head && method != HttpMethod.Delete)
+            return;
+
+        ledger.Add(new PendingLoss
+        {
+            Class           = LossClass.Source,
+            Code            = ExtractionDiagnosticCodes.RequestBodyOnGetHeadDelete,
+            Anchor          = new LossAnchor.Operation(operation),
+            Message         = $"requestBody on {method.Method.ToUpperInvariant()} is not supported by OpenAPI 3.0 " +
+                              "(only methods whose HTTP semantics define a body); 3.0 consumers must ignore it. The body is kept.",
+            Feature         = "requestBody",
+            Action          = DiagnosticAction.SemanticsChanged,
+            RequiredVersion = OpenApiSpecVersion.OpenApi3_1,
+        });
     }
 
     /// <summary>Reports a document-metadata option whose value is not an absolute URI and is ignored.</summary>

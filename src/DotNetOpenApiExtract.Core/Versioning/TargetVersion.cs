@@ -61,7 +61,8 @@ internal static class TargetVersion
         return buildVersion;
     }
 
-    private static string Describe(OpenApiSpecVersion version) => version switch
+    /// <summary>The short spelling of <paramref name="version"/> (<c>3.0</c>, <c>3.1</c>, …) used in messages.</summary>
+    public static string Describe(OpenApiSpecVersion version) => version switch
     {
         OpenApiSpecVersion.OpenApi2_0 => "2.0",
         OpenApiSpecVersion.OpenApi3_0 => "3.0",
