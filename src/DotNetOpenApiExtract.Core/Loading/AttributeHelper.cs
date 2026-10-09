@@ -221,6 +221,8 @@ public static class AttributeHelper
 
         // System.Text.Json.Serialization — advanced
         public const string JsonUnmappedMemberHandling = "System.Text.Json.Serialization.JsonUnmappedMemberHandlingAttribute";
+        public const string JsonExtensionData = "System.Text.Json.Serialization.JsonExtensionDataAttribute";
+        public const string JsonConstructor = "System.Text.Json.Serialization.JsonConstructorAttribute";
         public const string JsonConverter = "System.Text.Json.Serialization.JsonConverterAttribute";
         public const string JsonPolymorphic = "System.Text.Json.Serialization.JsonPolymorphicAttribute";
         public const string JsonDerivedType = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";

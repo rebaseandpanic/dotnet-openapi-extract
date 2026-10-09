@@ -704,6 +704,10 @@ public sealed class SchemaGenerator
         // Collect all properties including inherited ones.
         var allProperties = CollectProperties(type);
 
+        // [JsonExtensionData]: the dictionary receives every member not declared on the type, so it
+        // is not a property of its own but makes the object open to any additional value.
+        var extensionData = ExtensionDataProperty(type, allProperties);
+
         var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
         var required = new HashSet<string>(StringComparer.Ordinal);
 
@@ -716,6 +720,9 @@ public sealed class SchemaGenerator
 
             // Skip [JsonIgnore(Condition = Always)]
             if (ShouldIgnoreProperty(propAttrData))
+                continue;
+
+            if (extensionData != null && ReferenceEquals(propInfo, extensionData))
                 continue;
 
             // Determine the serialized property name.
@@ -769,6 +776,106 @@ public sealed class SchemaGenerator
 
         // [JsonUnmappedMemberHandling(Disallow)] on the type → additionalProperties: false
         ApplyTypeAttributes(schema, type);
+
+        if (extensionData != null)
+            schema.AdditionalProperties = new OpenApiSchema(); // any JSON value
+    }
+
+    private const string ObjectFullName = "System.Object";
+    private const string JsonElementFullName = "System.Text.Json.JsonElement";
+    private const string JsonObjectFullName = "System.Text.Json.Nodes.JsonObject";
+
+    /// <summary>
+    /// The <c>[JsonExtensionData]</c> property of <paramref name="type"/> (own or inherited, not
+    /// <c>[JsonIgnore]</c>d), or <see langword="null"/>. Shapes System.Text.Json 10 rejects are
+    /// extraction errors: a value type other than <c>object</c> / <c>JsonElement</c> or a key other than
+    /// <c>string</c> (the property must be <c>JsonObject</c> or implement
+    /// <c>IDictionary&lt;string, object&gt;</c> / <c>IDictionary&lt;string, JsonElement&gt;</c>), more than
+    /// one such property, a property bound to a constructor parameter, and
+    /// <c>[JsonUnmappedMemberHandling(Disallow)]</c> on the same type.
+    /// </summary>
+    private static PropertyInfo? ExtensionDataProperty(
+        Type type, List<(string Name, Type PropertyType, PropertyInfo Info)> properties)
+    {
+        var candidates = properties
+            .Where(p =>
+            {
+                var attributes = AttributeHelper.GetMergedPropertyAttributes(p.Info);
+                return AttributeHelper.HasAttribute(attributes, AttributeHelper.Names.JsonExtensionData)
+                    && !ShouldIgnoreProperty(attributes);
+            })
+            .ToList();
+        if (candidates.Count == 0)
+            return null;
+
+        var typeName = type.FullName ?? type.Name;
+        if (candidates.Count > 1)
+        {
+            throw new OpenApiExtractionException(
+                $"{typeName} has more than one [JsonExtensionData] property ({string.Join(", ", candidates.Select(c => c.Name))}); " +
+                "System.Text.Json allows one.",
+                typeName, candidates[1].Name);
+        }
+
+        var (name, propertyType, info) = candidates[0];
+        if (!IsValidExtensionDataType(propertyType))
+        {
+            throw new OpenApiExtractionException(
+                $"{typeName}.{name} has [JsonExtensionData] but its type {propertyType.FullName} is not JsonObject or " +
+                "a dictionary with string keys and object or JsonElement values; System.Text.Json rejects it.",
+                typeName, name);
+        }
+
+        if (IsBoundToConstructorParameter(type, name))
+        {
+            throw new OpenApiExtractionException(
+                $"{typeName}.{name} has [JsonExtensionData] and is bound to a constructor parameter; System.Text.Json rejects it.",
+                typeName, name);
+        }
+
+        var unmapped = AttributeHelper.GetAttribute(type, AttributeHelper.Names.JsonUnmappedMemberHandling);
+        if (unmapped != null && AttributeHelper.GetConstructorArgument<int>(unmapped, 0) == 1)
+        {
+            throw new OpenApiExtractionException(
+                $"{typeName} is marked [JsonUnmappedMemberHandling(Disallow)] and has the [JsonExtensionData] property {name}; " +
+                "System.Text.Json rejects the combination.",
+                typeName, name);
+        }
+
+        return info;
+    }
+
+    private static bool IsValidExtensionDataType(Type type)
+    {
+        if (type.FullName == JsonObjectFullName)
+            return true;
+
+        return (type.IsInterface ? type.GetInterfaces().Append(type) : type.GetInterfaces())
+            .Any(i => i.IsGenericType
+                      && i.GetGenericTypeDefinition().FullName == "System.Collections.Generic.IDictionary`2"
+                      && i.GetGenericArguments()[0].FullName == "System.String"
+                      && i.GetGenericArguments()[1].FullName is ObjectFullName or JsonElementFullName);
+    }
+
+    /// <summary>
+    /// Whether the constructor System.Text.Json deserializes <paramref name="type"/> with has a
+    /// parameter matching <paramref name="propertyName"/> (case-insensitively): the
+    /// <c>[JsonConstructor]</c> one, else none when a public parameterless constructor exists, else
+    /// the only public constructor.
+    /// </summary>
+    private static bool IsBoundToConstructorParameter(Type type, string propertyName)
+    {
+        var constructors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var chosen = constructors.FirstOrDefault(c => AttributeHelper.HasAttribute(c, AttributeHelper.Names.JsonConstructor));
+        if (chosen == null)
+        {
+            var publicConstructors = constructors.Where(c => c.IsPublic).ToList();
+            if (publicConstructors.Any(c => c.GetParameters().Length == 0) || publicConstructors.Count != 1)
+                return false;
+            chosen = publicConstructors[0];
+        }
+
+        return chosen.GetParameters().Any(p => string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase));
     }
 
     // =========================================================================
