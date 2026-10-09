@@ -1417,9 +1417,9 @@ public sealed class SchemaGenerator
         if (stringLength != null)
         {
             var maxLen = AttributeHelper.GetConstructorArgument<int>(stringLength, 0);
-            if (maxLen > 0) schema.MaxLength = maxLen;
+            if (maxLen > 0) schema.MaxLength = Lower(schema.MaxLength, maxLen);
             var minLen = AttributeHelper.GetNamedArgument<int>(stringLength, "MinimumLength");
-            if (minLen > 0) schema.MinLength = minLen;
+            if (minLen > 0) schema.MinLength = Higher(schema.MinLength, minLen);
         }
 
         // [MaxLength(n)] → maxLength (strings), maxItems (arrays) or maxProperties (dictionaries)
@@ -1500,26 +1500,35 @@ public sealed class SchemaGenerator
             new ValueSite(parameterType, typeName, memberName, anchor, EnumWireNaming.MemberName));
     }
 
-    /// <summary><c>maxLength</c> (strings), <c>maxItems</c> (arrays) or <c>maxProperties</c> (dictionaries).</summary>
+    /// <summary><c>maxLength</c> (strings), <c>maxItems</c> (arrays) or <c>maxProperties</c> (dictionaries); the tighter bound wins.</summary>
+    /// <remarks>
+    /// Several length attributes on one member constrain together: the bound kept is the tighter one
+    /// (the highest minimum, the lowest maximum). Bounds that contradict each other are written as
+    /// they result, never repaired.
+    /// </remarks>
     private static void SetMaximumLength(OpenApiSchema schema, int n)
     {
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
-            schema.MaxItems = n;
+            schema.MaxItems = Lower(schema.MaxItems, n);
         else if (IsDictionarySchema(schema))
-            schema.MaxProperties = n;
+            schema.MaxProperties = Lower(schema.MaxProperties, n);
         else
-            schema.MaxLength = n;
+            schema.MaxLength = Lower(schema.MaxLength, n);
     }
 
-    /// <summary><c>minLength</c> (strings), <c>minItems</c> (arrays) or <c>minProperties</c> (dictionaries).</summary>
+    private static int Lower(int? current, int n) => current is { } c && c < n ? c : n;
+
+    private static int Higher(int? current, int n) => current is { } c && c > n ? c : n;
+
+    /// <summary><c>minLength</c> (strings), <c>minItems</c> (arrays) or <c>minProperties</c> (dictionaries); the tighter bound wins.</summary>
     private static void SetMinimumLength(OpenApiSchema schema, int n)
     {
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
-            schema.MinItems = n;
+            schema.MinItems = Higher(schema.MinItems, n);
         else if (IsDictionarySchema(schema))
-            schema.MinProperties = n;
+            schema.MinProperties = Higher(schema.MinProperties, n);
         else
-            schema.MinLength = n;
+            schema.MinLength = Higher(schema.MinLength, n);
     }
 
     /// <summary>

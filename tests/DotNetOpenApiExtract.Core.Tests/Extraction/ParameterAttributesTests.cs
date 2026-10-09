@@ -73,6 +73,8 @@ public class ParameterAttributesTests(ParameterAttributesFixture fixture) : ICla
             data.Add(version, "mail", ["format=email"]);
             data.Add(version, "color", ["enum=[\"red\",\"green\"]"]);
             data.Add(version, "count", ["format=int32", "not={\"enum\":[0]}"]);
+            data.Add(version, "clipped", ["minLength=1", "maxLength=4"]);
+            data.Add(version, "pick", ["minItems=5", "maxItems=9"]);
         }
         return data;
     }

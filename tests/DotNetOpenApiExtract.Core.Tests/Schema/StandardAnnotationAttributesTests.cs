@@ -62,6 +62,33 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
             because: "a zero maximum admits only the empty string; a zero minimum constrains nothing");
     }
 
+    public static TheoryData<OpenApiSpecVersion, string, string[]> LengthIntersections()
+    {
+        var data = new TheoryData<OpenApiSpecVersion, string, string[]>();
+        foreach (var version in VersionedDocumentHarness.Versions)
+        {
+            data.Add(version, "looserThanMax", ["minLength=2", "maxLength=10"]);
+            data.Add(version, "stricterThanBoth", ["minLength=5", "maxLength=8"]);
+            data.Add(version, "mixed", ["minLength=3", "maxLength=6"]);
+            data.Add(version, "listLooser", ["minItems=1", "maxItems=4"]);
+            data.Add(version, "listStricter", ["minItems=3", "maxItems=5"]);
+            data.Add(version, "map", ["minProperties=4", "maxProperties=6"]);
+            data.Add(version, "contradictory", ["minLength=5", "maxLength=3"]);
+        }
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(LengthIntersections))]
+    public void Length_WithOtherLengthAttributes_KeepsTheTighterBoundOfEachSide(OpenApiSpecVersion version, string property, string[] expected)
+    {
+        var bounds = Property(version, "LengthIntersectionModel", property)
+            .Where(p => p.Key.StartsWith("min", StringComparison.Ordinal) || p.Key.StartsWith("max", StringComparison.Ordinal))
+            .Select(p => $"{p.Key}={p.Value!.GetValue<int>()}");
+
+        bounds.Should().BeEquivalentTo(expected);
+    }
+
     // ── [DataType] → format ──────────────────────────────────────────────────
 
     /// <summary>The members of the table that give a format; every other member gives none.</summary>

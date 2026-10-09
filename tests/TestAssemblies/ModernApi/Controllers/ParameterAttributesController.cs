@@ -22,7 +22,9 @@ public class ParameterAttributesController : ControllerBase
         [FromQuery, Length(1, 4)] int[]? ids,
         [FromQuery, EmailAddress] string? mail,
         [FromQuery, AllowedValues("red", "green")] string? color,
-        [FromQuery, DeniedValues(0)] int? count) => Ok();
+        [FromQuery, DeniedValues(0)] int? count,
+        [FromQuery, Length(1, 10), MaxLength(4)] string? clipped,
+        [FromQuery, Length(3, 9), MinLength(5)] int[]? pick) => Ok();
 
     /// <summary>Declared requiredness.</summary>
     [HttpGet("required/{id}")]

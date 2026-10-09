@@ -129,4 +129,8 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>Constraints and examples on numbers read from strings.</summary>
     [HttpGet("number-placement")]
     public ActionResult<NumberPlacementModel> NumberPlacement() => new NumberPlacementModel();
+
+    /// <summary>[Length] next to the other length attributes.</summary>
+    [HttpGet("length-intersection")]
+    public ActionResult<LengthIntersectionModel> LengthIntersection() => new LengthIntersectionModel();
 }

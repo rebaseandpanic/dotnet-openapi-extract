@@ -29,6 +29,38 @@ public class LengthModel
     public string Empty { get; set; } = string.Empty;
 }
 
+/// <summary>[Length] next to the other length attributes: the tighter bound of each side.</summary>
+public class LengthIntersectionModel
+{
+    /// <summary>[Length] weaker than [MaxLength].</summary>
+    [Length(2, 20), MaxLength(10)]
+    public string LooserThanMax { get; set; } = "ab";
+
+    /// <summary>[Length] stricter than [MinLength] and [StringLength].</summary>
+    [Length(5, 8), MinLength(2), StringLength(30)]
+    public string StricterThanBoth { get; set; } = "abcde";
+
+    /// <summary>[StringLength] minimum above [Length], [Length] maximum below.</summary>
+    [StringLength(10, MinimumLength = 3), Length(1, 6)]
+    public string Mixed { get; set; } = "abc";
+
+    /// <summary>A list: [Length] weaker than [MaxLength].</summary>
+    [Length(1, 10), MaxLength(4)]
+    public List<string> ListLooser { get; set; } = ["a"];
+
+    /// <summary>A list: [Length] stricter than [MinLength].</summary>
+    [Length(3, 5), MinLength(1)]
+    public List<string> ListStricter { get; set; } = ["a", "b", "c"];
+
+    /// <summary>A dictionary between [MinLength] and [MaxLength].</summary>
+    [Length(2, 9), MinLength(4), MaxLength(6)]
+    public Dictionary<string, int> Map { get; set; } = [];
+
+    /// <summary>Bounds that contradict each other stay as they result.</summary>
+    [Length(5, 8), MaxLength(3)]
+    public string Contradictory { get; set; } = string.Empty;
+}
+
 /// <summary>[DataType] with every member, on a property whose type has a format of its own (uuid).</summary>
 public class DataTypeModel
 {
