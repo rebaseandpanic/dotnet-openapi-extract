@@ -249,6 +249,18 @@ public sealed class SchemaGenerator
         if (type.IsEnum)
             return GenerateEnumSchema(type);
 
+        // --- 5b. IAsyncEnumerable<T> (or a type implementing it) → array of T ---
+        // System.Text.Json writes an asynchronous sequence as a JSON array; there is no object
+        // of the sequence type on the wire, so no component is created for it.
+        if (StreamingTypes.TryGetAsyncEnumerableElementType(type, out var asyncElementType))
+        {
+            return new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Items = GenerateSchema(asyncElementType),
+            };
+        }
+
         // --- 6. Generic collections and dictionaries ---
         if (type.IsGenericType)
         {
