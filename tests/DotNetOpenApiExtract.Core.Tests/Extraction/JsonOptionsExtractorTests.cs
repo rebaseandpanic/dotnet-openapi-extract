@@ -399,6 +399,78 @@ public class JsonOptionsExtractorTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Serialization contexts: AddJsonOptions (MVC) and ConfigureHttpJsonOptions (HTTP)
+    // are independent option sets in ASP.NET Core.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private const string BothContextsSource = """
+        var builder = WebApplication.CreateBuilder(args);
+        builder.Services.AddControllers().AddJsonOptions(o =>
+        {
+            o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+            o.JsonSerializerOptions.NumberHandling = JsonNumberHandling.WriteAsString;
+            o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        });
+        builder.Services.ConfigureHttpJsonOptions(o =>
+        {
+            o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+            o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+            o.SerializerOptions.Converters.Add(new UnixDateTimeConverter());
+        });
+        """;
+
+    [Fact]
+    public void Extract_BothContexts_EachContextGetsOnlyItsOwnOptions()
+    {
+        var result = JsonOptionsExtractor.Extract(BuildContext(BothContextsSource));
+
+        result.Mvc.PropertyNamingPolicy.Should().Be(JsonNamingPolicy.SnakeCaseLower);
+        result.Mvc.NumberHandling.Should().Be(JsonNumberHandling.WriteAsString);
+        result.Mvc.DefaultIgnoreCondition.Should().BeNull(
+            because: "the ignore condition is set only for the HTTP context");
+        result.Mvc.GlobalConverterTypeNames.Should().Equal("JsonStringEnumConverter");
+        result.Mvc.IsConfigured.Should().BeTrue();
+
+        result.Http.PropertyNamingPolicy.Should().Be(JsonNamingPolicy.CamelCase);
+        result.Http.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.WhenWritingNull);
+        result.Http.NumberHandling.Should().BeNull(
+            because: "number handling is set only for the MVC context");
+        result.Http.GlobalConverterTypeNames.Should().Equal("UnixDateTimeConverter");
+        result.Http.IsConfigured.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Extract_BothContexts_ObsoleteFlatViewKeepsTheMergedValues()
+    {
+        var result = JsonOptionsExtractor.Extract(BuildContext(BothContextsSource));
+
+#pragma warning disable CS0618 // the flat properties are the compatibility view under test
+        result.PropertyNamingPolicy.Should().Be(JsonNamingPolicy.SnakeCaseLower,
+            because: "AddJsonOptions was applied after ConfigureHttpJsonOptions in the merged view");
+        result.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.WhenWritingNull);
+        result.NumberHandling.Should().Be(JsonNumberHandling.WriteAsString);
+        result.GlobalConverterTypeNames.Should().Equal("UnixDateTimeConverter", "JsonStringEnumConverter");
+#pragma warning restore CS0618
+    }
+
+    [Fact]
+    public void Extract_OnlyHttpContext_MvcContextIsNotConfigured()
+    {
+        var source = """
+            builder.Services.ConfigureHttpJsonOptions(o =>
+            {
+                o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+            });
+            """;
+
+        var result = JsonOptionsExtractor.Extract(BuildContext(source));
+
+        result.Http.PropertyNamingPolicy.Should().Be(JsonNamingPolicy.SnakeCaseLower);
+        result.Mvc.PropertyNamingPolicy.Should().BeNull();
+        result.Mvc.IsConfigured.Should().BeFalse();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 

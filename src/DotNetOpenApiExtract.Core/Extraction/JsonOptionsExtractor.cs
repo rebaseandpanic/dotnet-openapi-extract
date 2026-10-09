@@ -8,37 +8,100 @@ using static DotNetOpenApiExtract.Core.SourceAnalysis.TypeSyntaxHelper;
 namespace DotNetOpenApiExtract.Core.Extraction;
 
 /// <summary>
-/// Result of scanning Roslyn source for JSON serializer option registrations.
+/// JSON serializer options detected for one serialization context of ASP.NET Core.
 /// </summary>
-public sealed class JsonOptionsExtractionResult
+/// <remarks>
+/// Every property is <see langword="null"/> (or empty) when the source does not set it; the
+/// caller then applies the ASP.NET Core default (<c>JsonSerializerDefaults.Web</c>:
+/// camelCase names, nothing ignored, strict numbers, no extra converters).
+/// </remarks>
+public sealed class JsonContextOptions
 {
-    /// <summary>
-    /// The effective property naming policy, if detected.
-    /// <see langword="null"/> means not detected — caller should fall back to CLI/defaults.
-    /// </summary>
+    /// <summary>The property naming policy, if detected.</summary>
     public JsonNamingPolicy? PropertyNamingPolicy { get; init; }
 
-    /// <summary>
-    /// The effective dictionary key policy, if detected.
-    /// <see langword="null"/> means not detected.
-    /// </summary>
+    /// <summary>The dictionary key policy, if detected.</summary>
     public JsonNamingPolicy? DictionaryKeyPolicy { get; init; }
 
-    /// <summary>
-    /// The global default ignore condition, if detected.
-    /// </summary>
+    /// <summary>The default ignore condition, if detected.</summary>
     public JsonIgnoreCondition? DefaultIgnoreCondition { get; init; }
 
-    /// <summary>
-    /// The global number handling flags, if detected.
-    /// </summary>
+    /// <summary>The number handling flags, if detected.</summary>
     public JsonNumberHandling? NumberHandling { get; init; }
 
     /// <summary>
-    /// Globally registered converter type names (short or FQN) collected from
-    /// <c>options.Converters.Add(new XxxConverter())</c> calls.
-    /// Consumed by T6 registry lookup.
+    /// Converter type names (short or fully qualified) collected from
+    /// <c>Converters.Add(new XxxConverter())</c> calls, in source order.
     /// </summary>
+    public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
+
+    /// <summary>
+    /// <see langword="true"/> when at least one of the options above was detected for this context.
+    /// </summary>
+    public bool IsConfigured =>
+        PropertyNamingPolicy != null
+        || DictionaryKeyPolicy != null
+        || DefaultIgnoreCondition != null
+        || NumberHandling != null
+        || GlobalConverterTypeNames.Count > 0;
+
+}
+
+/// <summary>
+/// Result of scanning Roslyn source for JSON serializer option registrations.
+/// </summary>
+/// <remarks>
+/// ASP.NET Core keeps two independent option sets: MVC controllers serialize with
+/// <c>AddControllers().AddJsonOptions(...)</c> (<see cref="Mvc"/>), while typed <c>IResult</c>
+/// bodies and server-sent events serialize with <c>ConfigureHttpJsonOptions(...)</c>
+/// (<see cref="Http"/>). One never affects the other.
+/// </remarks>
+public sealed class JsonOptionsExtractionResult
+{
+    /// <summary>
+    /// Options of the MVC context, from <c>AddJsonOptions</c> calls. Never <see langword="null"/>.
+    /// </summary>
+    public JsonContextOptions Mvc { get; init; } = new();
+
+    /// <summary>
+    /// Options of the HTTP context (minimal APIs, <c>IResult</c>, server-sent events), from
+    /// <c>ConfigureHttpJsonOptions</c> calls. Never <see langword="null"/>.
+    /// </summary>
+    public JsonContextOptions Http { get; init; } = new();
+
+    /// <summary>
+    /// Both contexts merged into one, as earlier versions reported them: the
+    /// <c>AddJsonOptions</c> value wins over the <c>ConfigureHttpJsonOptions</c> value.
+    /// </summary>
+    [Obsolete("The two contexts are serialized independently; use Mvc or Http.")]
+    public JsonNamingPolicy? PropertyNamingPolicy { get; init; }
+
+    /// <summary>
+    /// Both contexts merged into one, as earlier versions reported them: the
+    /// <c>AddJsonOptions</c> value wins over the <c>ConfigureHttpJsonOptions</c> value.
+    /// </summary>
+    [Obsolete("The two contexts are serialized independently; use Mvc or Http.")]
+    public JsonNamingPolicy? DictionaryKeyPolicy { get; init; }
+
+    /// <summary>
+    /// Both contexts merged into one, as earlier versions reported them: the
+    /// <c>AddJsonOptions</c> value wins over the <c>ConfigureHttpJsonOptions</c> value.
+    /// </summary>
+    [Obsolete("The two contexts are serialized independently; use Mvc or Http.")]
+    public JsonIgnoreCondition? DefaultIgnoreCondition { get; init; }
+
+    /// <summary>
+    /// Both contexts merged into one, as earlier versions reported them: the
+    /// <c>AddJsonOptions</c> value wins over the <c>ConfigureHttpJsonOptions</c> value.
+    /// </summary>
+    [Obsolete("The two contexts are serialized independently; use Mvc or Http.")]
+    public JsonNumberHandling? NumberHandling { get; init; }
+
+    /// <summary>
+    /// Converter type names of both contexts in one list, as earlier versions reported them:
+    /// <c>ConfigureHttpJsonOptions</c> converters first, then <c>AddJsonOptions</c> converters.
+    /// </summary>
+    [Obsolete("The two contexts are serialized independently; use Mvc or Http.")]
     public IReadOnlyList<string> GlobalConverterTypeNames { get; init; } = [];
 }
 
@@ -82,20 +145,47 @@ public static class JsonOptionsExtractor
         if (!context.IsAvailable || context.EntryPointNode == null)
             return new JsonOptionsExtractionResult();
 
+        // ConfigureHttpJsonOptions: o => o.SerializerOptions.X = ...
+        var http = ExtractContext(context, "ConfigureHttpJsonOptions", "SerializerOptions", onDiagnostic);
+        // AddControllers().AddJsonOptions: o => o.JsonSerializerOptions.X = ...
+        var mvc = ExtractContext(context, "AddJsonOptions", "JsonSerializerOptions", onDiagnostic);
+
+#pragma warning disable CS0618 // the merged view is kept for compatibility
+        return new JsonOptionsExtractionResult
+        {
+            Mvc  = mvc,
+            Http = http,
+            PropertyNamingPolicy     = mvc.PropertyNamingPolicy ?? http.PropertyNamingPolicy,
+            DictionaryKeyPolicy      = mvc.DictionaryKeyPolicy ?? http.DictionaryKeyPolicy,
+            DefaultIgnoreCondition   = mvc.DefaultIgnoreCondition ?? http.DefaultIgnoreCondition,
+            NumberHandling           = mvc.NumberHandling ?? http.NumberHandling,
+            GlobalConverterTypeNames = [.. http.GlobalConverterTypeNames, .. mvc.GlobalConverterTypeNames],
+        };
+#pragma warning restore CS0618
+    }
+
+    /// <summary>
+    /// Reads every registration of one context (<paramref name="methodName"/>) in source order;
+    /// a later assignment of the same option wins.
+    /// </summary>
+    private static JsonContextOptions ExtractContext(
+        SourceAnalysisContext context,
+        string methodName,
+        string serializerOptionsPropertyName,
+        Action<ExtractionDiagnostic>? onDiagnostic)
+    {
         JsonNamingPolicy? propertyNamingPolicy = null;
         JsonNamingPolicy? dictionaryKeyPolicy = null;
         JsonIgnoreCondition? defaultIgnoreCondition = null;
         JsonNumberHandling? numberHandling = null;
         var converterTypeNames = new List<string>();
 
-        // ── 1. ConfigureHttpJsonOptions ────────────────────────────────────────
-        // Pattern: builder.Services.ConfigureHttpJsonOptions(o => { o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; })
-        foreach (var invocation in InvocationMatcher.FindInvocations(context, "ConfigureHttpJsonOptions"))
+        foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
         {
             var lambda = ExtractLambdaBody(invocation);
             if (lambda == null) continue;
 
-            ParseOptionsBody(lambda, "SerializerOptions",
+            ParseOptionsBody(lambda, serializerOptionsPropertyName,
                 ref propertyNamingPolicy,
                 ref dictionaryKeyPolicy,
                 ref defaultIgnoreCondition,
@@ -105,29 +195,12 @@ public static class JsonOptionsExtractor
                 onDiagnostic);
         }
 
-        // ── 2. AddJsonOptions ──────────────────────────────────────────────────
-        // Pattern: .AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.PropertyNamingPolicy = ...; })
-        foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddJsonOptions"))
+        return new JsonContextOptions
         {
-            var lambda = ExtractLambdaBody(invocation);
-            if (lambda == null) continue;
-
-            ParseOptionsBody(lambda, "JsonSerializerOptions",
-                ref propertyNamingPolicy,
-                ref dictionaryKeyPolicy,
-                ref defaultIgnoreCondition,
-                ref numberHandling,
-                converterTypeNames,
-                context,
-                onDiagnostic);
-        }
-
-        return new JsonOptionsExtractionResult
-        {
-            PropertyNamingPolicy    = propertyNamingPolicy,
-            DictionaryKeyPolicy     = dictionaryKeyPolicy,
-            DefaultIgnoreCondition  = defaultIgnoreCondition,
-            NumberHandling          = numberHandling,
+            PropertyNamingPolicy     = propertyNamingPolicy,
+            DictionaryKeyPolicy      = dictionaryKeyPolicy,
+            DefaultIgnoreCondition   = defaultIgnoreCondition,
+            NumberHandling           = numberHandling,
             GlobalConverterTypeNames = converterTypeNames,
         };
     }

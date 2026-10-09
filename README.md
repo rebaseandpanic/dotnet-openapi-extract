@@ -41,7 +41,7 @@ This means you can generate OpenAPI specs:
 | `--xml <path>` | no | auto-detect | Path to XML documentation file. Repeatable — each `--xml` adds one more source. Sources are merged with first-added winning on key collision. Framework/SDK ref-pack XMLs are also discovered automatically and added last (lowest priority). |
 | `--source <path>` | no | — | Entry-point source file (usually auto-detected) |
 | `--source-root <dir>` | no | auto-detect | Project root for Roslyn analysis of `Program.cs` |
-| `--naming-policy <policy>` | no | `camelCase` | `camelCase`, `snake_case_lower`, `snake_case_upper`, `kebab-case-lower`, `kebab-case-upper`, `preserve` |
+| `--naming-policy <policy>` | no | `camelCase` | `camelCase`, `snake_case_lower`, `snake_case_upper`, `kebab-case-lower`, `kebab-case-upper`, `preserve`. Used only when `Program.cs` sets no JSON options (`AddJsonOptions` / `ConfigureHttpJsonOptions`) at all; otherwise each serialization context uses its own setting or the ASP.NET Core default (camelCase) |
 | `--enum-as-string` | no | `false` | Serialize enums as strings |
 | `--no-enum-auto-description` | no | off | Disable the auto-glue markdown description (type summary + per-value bullet list) on enum schemas. With this flag, `schema.description` on enums is not populated (unless set by a `JsonConverter` hint). `x-enum-descriptions` and `x-enum-varnames` still emit. |
 | `--no-enum-varnames` | no | off | Disable the `x-enum-varnames` extension on enum schemas |
@@ -145,7 +145,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - Security schemes (`AddSecurityDefinition`, `AddJwtBearer`, `AddSecurityRequirement`) — including lambda-factory form
 - `UsePathBase("/prefix")` — prepended to paths or emitted as `servers[].url`
 - `AddProblemDetails()` — auto-injects default 400 / 422 / 500 responses with RFC 7807 `ProblemDetails` schema
-- JSON serializer options (`ConfigureHttpJsonOptions` / `AddJsonOptions`): `PropertyNamingPolicy`, `DictionaryKeyPolicy`, `DefaultIgnoreCondition`, `NumberHandling`, global `Converters.Add(...)`
+- JSON serializer options: `PropertyNamingPolicy`, `DictionaryKeyPolicy`, `DefaultIgnoreCondition`, `NumberHandling`, global `Converters.Add(...)`. Read separately per serialization context, as ASP.NET Core applies them: controller bodies follow `AddControllers().AddJsonOptions(...)` only; `ConfigureHttpJsonOptions(...)` configures minimal APIs and `IResult` and never reaches controllers
 - Global response headers from middleware (`app.Use(...)`, `UseMiddleware<T>`) — `Response.Headers.Append/Add/TryAdd` and indexer assignments
 - Global `[Consumes]` / `[Produces]` from MVC filter registrations
 - Document-level tags with descriptions + `externalDocs` from `c.AddTag(...)`

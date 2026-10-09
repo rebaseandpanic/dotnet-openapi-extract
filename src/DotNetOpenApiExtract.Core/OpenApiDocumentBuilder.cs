@@ -77,8 +77,9 @@ public sealed class OpenApiDocumentOptions
     /// <summary>
     /// JSON property naming policy. Defaults to <see langword="null"/> which resolves to
     /// <see cref="JsonNamingPolicy.CamelCase"/> (the ASP.NET Core default).
-    /// Overridden by Roslyn analysis if <c>ConfigureHttpJsonOptions</c> or
-    /// <c>AddJsonOptions</c> is detected in the entry assembly's source.
+    /// Applies only when Roslyn analysis finds no JSON options at all in the entry assembly's
+    /// source: once <c>AddJsonOptions</c> or <c>ConfigureHttpJsonOptions</c> sets anything, each
+    /// context uses its own setting or the ASP.NET Core default.
     /// </summary>
     public JsonNamingPolicy? NamingPolicy { get; init; }
 
@@ -336,6 +337,28 @@ public sealed class OpenApiDocumentBuilder
     }
 
     // =========================================================================
+    // Serialization contexts
+    // =========================================================================
+
+    /// <summary>Naming of one serialization context after defaults are applied.</summary>
+    private readonly record struct ContextJson(JsonNamingPolicy NamingPolicy, JsonNamingPolicy DictionaryKeyPolicy);
+
+    /// <summary>
+    /// Effective naming of <paramref name="context"/>: its own Program.cs setting; otherwise the
+    /// <paramref name="fallbackNamingPolicy"/> option, but only when Program.cs configures no JSON
+    /// options in either context; otherwise the ASP.NET Core default (camelCase).
+    /// </summary>
+    private static ContextJson ResolveContextJson(
+        JsonContextOptions context, JsonOptionsExtractionResult all, JsonNamingPolicy? fallbackNamingPolicy)
+    {
+        var anyConfigured = all.Mvc.IsConfigured || all.Http.IsConfigured;
+        var naming = context.PropertyNamingPolicy
+            ?? (anyConfigured ? null : fallbackNamingPolicy)
+            ?? JsonNamingPolicy.CamelCase;
+        return new ContextJson(naming, context.DictionaryKeyPolicy ?? naming);
+    }
+
+    // =========================================================================
     // Core build pipeline
     // =========================================================================
 
@@ -359,10 +382,10 @@ public sealed class OpenApiDocumentBuilder
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
 
         // ── Resolve effective naming policy ───────────────────────────────────
-        // Precedence: Roslyn > explicit NamingPolicy option > default CamelCase
-        var effectiveNamingPolicy = jsonOptions.PropertyNamingPolicy
-            ?? options.NamingPolicy
-            ?? JsonNamingPolicy.CamelCase;
+        // Controller bodies serialize with the MVC options (AddJsonOptions) only; the HTTP
+        // options (ConfigureHttpJsonOptions) never reach them.
+        var mvcJson = ResolveContextJson(jsonOptions.Mvc, jsonOptions, options.NamingPolicy);
+        var effectiveNamingPolicy = mvcJson.NamingPolicy;
 
         // ── Resolve XML documentation paths (priority: XmlPaths > XmlPath > auto-detect > framework) ──
         var xmlPaths = BuildXmlPathList(options, loader, diagnostics);
@@ -373,10 +396,10 @@ public sealed class OpenApiDocumentBuilder
         {
             NamingPolicy             = effectiveNamingPolicy,
             EnumAsString             = options.EnumAsString,
-            DictionaryKeyPolicy      = jsonOptions.DictionaryKeyPolicy ?? effectiveNamingPolicy,
-            DefaultIgnoreCondition   = jsonOptions.DefaultIgnoreCondition,
-            NumberHandling           = jsonOptions.NumberHandling,
-            GlobalConverterTypeNames = jsonOptions.GlobalConverterTypeNames,
+            DictionaryKeyPolicy      = mvcJson.DictionaryKeyPolicy,
+            DefaultIgnoreCondition   = jsonOptions.Mvc.DefaultIgnoreCondition,
+            NumberHandling           = jsonOptions.Mvc.NumberHandling,
+            GlobalConverterTypeNames = jsonOptions.Mvc.GlobalConverterTypeNames,
             EnumAutoDescription      = options.EnumAutoDescription,
             EnumVarnames             = options.EnumVarnames,
             OpenApiVersion           = options.OpenApiVersion,
