@@ -210,7 +210,8 @@ public sealed class DocumentationResolver
     /// <remarks>
     /// Fallback chain:
     /// <list type="bullet">
-    ///   <item>Description: [SwaggerSchema(Description = "...")] → [Description("...")] → XML &lt;summary&gt;</item>
+    ///   <item>Description: [SwaggerSchema(Description = "...")] → [Description("...")] →
+    ///   [Display(Description = "...")] → XML &lt;summary&gt;</item>
     ///   <item>Example: XML &lt;example&gt; on the property</item>
     /// </list>
     /// </remarks>
@@ -222,24 +223,12 @@ public sealed class DocumentationResolver
         ArgumentNullException.ThrowIfNull(declaringType);
         ArgumentNullException.ThrowIfNull(property);
 
-        string? description = null;
-
         // Merged so that [SwaggerSchema] / [Description] applied to a positional-record
         // parameter (default target) are seen, in addition to attributes on the property itself.
         var propertyAttrs = AttributeHelper.GetMergedPropertyAttributes(property);
 
-        // Priority 1: [SwaggerSchema(Description = "...")]
-        var swaggerSchema = AttributeHelper.GetAttribute(propertyAttrs, AttributeHelper.Names.SwaggerSchema);
-        if (swaggerSchema != null)
-            description = AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Description");
-
-        // Priority 2: [Description("...")]  (System.ComponentModel)
-        if (string.IsNullOrEmpty(description))
-        {
-            var descAttr = AttributeHelper.GetAttribute(propertyAttrs, AttributeHelper.Names.Description);
-            if (descAttr != null)
-                description = AttributeHelper.GetConstructorArgument<string>(descAttr, 0);
-        }
+        // Priorities 1–3: [SwaggerSchema(Description)] → [Description] → [Display(Description)]
+        var description = AttributeDescription(propertyAttrs);
 
         // XML doc keys live under the type that DECLARES the property.
         // For inherited properties this is the base; for overridden properties it's
@@ -249,7 +238,7 @@ public sealed class DocumentationResolver
         var xmlDocOwner = property.DeclaringType ?? declaringType;
         var xmlPropDoc = _xmlParser.GetPropertyDoc(xmlDocOwner, property.Name);
 
-        // Priority 3: XML <summary>
+        // Priority 4: XML <summary>
         if (string.IsNullOrEmpty(description))
             description = xmlPropDoc?.Summary;
 
@@ -267,6 +256,38 @@ public sealed class DocumentationResolver
             Description = description,
             Example = example,
         };
+    }
+
+    /// <summary>
+    /// The description the attributes of a property give, by priority: <c>[SwaggerSchema]</c>
+    /// (its <c>Description</c> argument, named or positional), then <c>[Description]</c>, then
+    /// <c>[Display(Description)]</c>; <see langword="null"/> when none gives a non-empty text. A
+    /// <c>[Display]</c> with a <c>ResourceType</c> names a resource key, not the text, and is skipped.
+    /// </summary>
+    /// <param name="attributes">The attributes of the property, positional-record parameter merged.</param>
+    internal static string? AttributeDescription(IList<CustomAttributeData> attributes)
+    {
+        var swaggerSchema = AttributeHelper.GetAttribute(attributes, AttributeHelper.Names.SwaggerSchema);
+        if (swaggerSchema != null)
+        {
+            var text = AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Description")
+                ?? AttributeHelper.GetConstructorArgument<string>(swaggerSchema, 0);
+            if (!string.IsNullOrEmpty(text))
+                return text;
+        }
+
+        var descAttr = AttributeHelper.GetAttribute(attributes, AttributeHelper.Names.Description);
+        if (descAttr != null
+            && AttributeHelper.GetConstructorArgument<string>(descAttr, 0) is { Length: > 0 } description)
+            return description;
+
+        var display = AttributeHelper.GetAttribute(attributes, AttributeHelper.Names.Display);
+        if (display != null
+            && !AttributeHelper.TryGetNamedArgument<Type>(display, "ResourceType", out _)
+            && AttributeHelper.GetNamedArgument<string>(display, "Description") is { Length: > 0 } displayText)
+            return displayText;
+
+        return null;
     }
 
     /// <summary>

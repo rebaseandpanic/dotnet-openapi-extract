@@ -141,6 +141,25 @@ public static class AttributeHelper
     }
 
     /// <summary>
+    /// The value of the named argument <paramref name="name"/> when the attribute usage sets it,
+    /// telling an explicit value (<c>ReadOnly = false</c>) from an argument that is not set.
+    /// </summary>
+    internal static bool TryGetNamedArgument<T>(CustomAttributeData attribute, string name, out T value)
+    {
+        foreach (var arg in attribute.NamedArguments)
+        {
+            if (arg.MemberName == name && arg.TypedValue.Value is T typed)
+            {
+                value = typed;
+                return true;
+            }
+        }
+
+        value = default!;
+        return false;
+    }
+
+    /// <summary>
     /// Full type names of attributes used for OpenAPI extraction.
     /// Values correspond to the attribute types as shipped in their respective NuGet packages.
     /// </summary>
@@ -195,6 +214,10 @@ public static class AttributeHelper
         public const string MinLength = "System.ComponentModel.DataAnnotations.MinLengthAttribute";
         public const string Range = "System.ComponentModel.DataAnnotations.RangeAttribute";
         public const string RegularExpression = "System.ComponentModel.DataAnnotations.RegularExpressionAttribute";
+        public const string Length = "System.ComponentModel.DataAnnotations.LengthAttribute";
+        public const string DataType = "System.ComponentModel.DataAnnotations.DataTypeAttribute";
+        public const string DataTypeEnum = "System.ComponentModel.DataAnnotations.DataType";
+        public const string Display = "System.ComponentModel.DataAnnotations.DisplayAttribute";
 
         // JSON
         public const string JsonPropertyName = "System.Text.Json.Serialization.JsonPropertyNameAttribute";
@@ -211,6 +234,7 @@ public static class AttributeHelper
         // System.ComponentModel
         public const string Description = "System.ComponentModel.DescriptionAttribute";
         public const string DefaultValue = "System.ComponentModel.DefaultValueAttribute";
+        public const string ReadOnly = "System.ComponentModel.ReadOnlyAttribute";
 
         // ASP.NET Core HTTP — .NET 9+ endpoint metadata attributes
         public const string EndpointSummary = "Microsoft.AspNetCore.Http.EndpointSummaryAttribute";

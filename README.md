@@ -132,12 +132,14 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 - Schemas from DTO classes — primitives, nullable, collections, dictionaries, enums, generics, inheritance, self-referencing types
 - Enum extensions: `x-enum-varnames` (always, matches `enum[]` length), `x-enum-descriptions` (when any value is documented), markdown auto-glue `description` combining type summary + per-value bullet list
 - Enum value description sources: XML `<summary>` (primary) with `[Description]` attribute fallback
-- Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, etc.). `[Range]`: every overload, exclusive sides (`exclusiveMinimum: n` for 3.1/3.2, `minimum: n` + `exclusiveMinimum: true` for 3.0), string bounds of `Range(Type, string, string)` parsed in the invariant culture without losing decimal digits; only on numeric schemas
+- Validation attributes (`[Required]`, `[StringLength]`, `[Range]`, `[RegularExpression]`, `[Length]`, etc.). `[Length(min, max)]` gives `minLength` / `maxLength` on strings, `minItems` / `maxItems` on collections and `minProperties` / `maxProperties` on dictionaries. `[Range]`: every overload, exclusive sides (`exclusiveMinimum: n` for 3.1/3.2, `minimum: n` + `exclusiveMinimum: true` for 3.0), string bounds of `Range(Type, string, string)` parsed in the invariant culture without losing decimal digits; only on numeric schemas
 - JSON attributes (`[JsonPropertyName]`, `[JsonIgnore]`, `[JsonRequired]`)
 - Swagger annotations (`[SwaggerOperation]`, `[SwaggerParameter]`, `[SwaggerTag]`, `[SwaggerSchema]`)
+- `format` of a property, one winner: `[SwaggerSchema(Format)]`, then `[EmailAddress]` / `[Url]` / `[Phone]`, then `[DataType]` (`DateTime` → `date-time`, `Date` → `date`, `Time` → `time`, `Duration` → `duration`, `EmailAddress` → `email`, `Password` → `password`, `Url` / `ImageUrl` → `uri`, `PhoneNumber` → `phone`, `Upload` → `binary`; other members give none), then the format of the type, which a source without a format leaves in place
+- `readOnly` from `[SwaggerSchema(ReadOnly)]`, else `[ReadOnly]` (an explicit `ReadOnly = false` wins over `[ReadOnly(true)]`), `writeOnly` from `[SwaggerSchema(WriteOnly)]`, `title` from `[SwaggerSchema(Title)]`; a property both read-only and write-only is an extraction error (exit 2)
 - XML documentation (`<summary>`, `<remarks>`, `<param>`, `<response>` on the action and on the controller)
 - Nullable reference types via NRT attribute analysis
-- Description fallback chains: Swagger attrs > `[Description]` > XML docs
+- Description fallback chains: Swagger attrs > `[Description]` > XML docs; for properties `[SwaggerSchema(Description)]` > `[Description]` > `[Display(Description)]` > XML `<summary>`
 - `[Obsolete]` → `deprecated: true` on operations, schemas, enums
 - API versioning (`[ApiVersion]`, `[MapToApiVersion]`, `[ApiVersionNeutral]`) as `x-api-version` extension
 - Rate limiting (`[EnableRateLimiting]`, `[DisableRateLimiting]`) as `x-rate-limit-*` extensions

@@ -87,4 +87,24 @@ public class SchemaKeywordsController : ControllerBase
     public ActionResult<EnumDefaultsModel> EnumDefaults(
         [FromQuery] DeliveryMode mode = DeliveryMode.Courier,
         [FromQuery] ShippingSpeed speed = ShippingSpeed.Overnight) => new EnumDefaultsModel();
+
+    /// <summary>[Length] on each schema shape.</summary>
+    [HttpGet("lengths")]
+    public ActionResult<LengthModel> Lengths() => new LengthModel();
+
+    /// <summary>[DataType] with every member.</summary>
+    [HttpGet("data-types")]
+    public ActionResult<DataTypeModel> DataTypes() => new DataTypeModel();
+
+    /// <summary>Competing format sources.</summary>
+    [HttpGet("format-priority")]
+    public ActionResult<FormatPriorityModel> FormatPriority() => new FormatPriorityModel();
+
+    /// <summary>Competing description sources.</summary>
+    [HttpGet("description-priority")]
+    public ActionResult<DescriptionPriorityModel> DescriptionPriority() => new DescriptionPriorityModel();
+
+    /// <summary>readOnly, writeOnly and title sources.</summary>
+    [HttpGet("access")]
+    public ActionResult<AccessModel> Access() => new AccessModel();
 }

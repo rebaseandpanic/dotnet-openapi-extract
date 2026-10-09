@@ -813,7 +813,7 @@ public sealed class SchemaGenerator
 
             if (propSchema is OpenApiSchema inlinePropSchema)
             {
-                ApplyValidationAttributes(inlinePropSchema, propAttrData);
+                ApplyValidationAttributes(inlinePropSchema, propAttrData, propInfo, componentId);
                 ApplyRange(inlinePropSchema, propAttrData, propInfo, serializedName, componentId);
             }
 
@@ -1298,9 +1298,11 @@ public sealed class SchemaGenerator
     /// Applies validation and documentation attributes from the pre-fetched <paramref name="attrData"/>
     /// to the corresponding <paramref name="schema"/> keywords.
     /// Only inline <see cref="OpenApiSchema"/> instances are accepted; $ref wrappers must be
-    /// unwrapped by the caller before calling this method.
+    /// unwrapped by the caller before calling this method. A property whose effective
+    /// <c>readOnly</c> and <c>writeOnly</c> are both true is an extraction error (OpenAPI forbids both).
     /// </summary>
-    private static void ApplyValidationAttributes(OpenApiSchema schema, IList<CustomAttributeData> attrData)
+    private static void ApplyValidationAttributes(
+        OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string componentId)
     {
         // [StringLength(maxLength, MinimumLength = minLength)]
         var stringLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.StringLength);
@@ -1317,30 +1319,28 @@ public sealed class SchemaGenerator
         if (maxLength != null)
         {
             var n = AttributeHelper.GetConstructorArgument<int>(maxLength, 0);
-            if (n > 0)
-            {
-                if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
-                    schema.MaxItems = n;
-                else if (IsDictionarySchema(schema))
-                    schema.MaxProperties = n;
-                else
-                    schema.MaxLength = n;
-            }
+            if (n > 0) SetMaximumLength(schema, n);
         }
 
-        // [MinLength(n)] → minLength (strings) or minItems (arrays)
+        // [MinLength(n)] → minLength (strings), minItems (arrays) or minProperties (dictionaries)
         var minLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.MinLength);
         if (minLength != null)
         {
             var n = AttributeHelper.GetConstructorArgument<int>(minLength, 0);
-            if (n > 0)
+            if (n > 0) SetMinimumLength(schema, n);
+        }
+
+        // [Length(min, max)] → both bounds, by the same shape rule. A declaration LengthAttribute
+        // rejects (negative minimum, maximum below minimum) constrains nothing.
+        var length = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Length);
+        if (length != null)
+        {
+            var min = AttributeHelper.GetConstructorArgument<int>(length, 0);
+            var max = AttributeHelper.GetConstructorArgument<int>(length, 1);
+            if (min >= 0 && max >= min)
             {
-                if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
-                    schema.MinItems = n;
-                else if (IsDictionarySchema(schema))
-                    schema.MinProperties = n;
-                else
-                    schema.MinLength = n;
+                if (min > 0) SetMinimumLength(schema, min);
+                SetMaximumLength(schema, max);
             }
         }
 
@@ -1352,39 +1352,139 @@ public sealed class SchemaGenerator
             if (!string.IsNullOrEmpty(pattern)) schema.Pattern = pattern;
         }
 
-        // [EmailAddress] → format: "email" (only when no format is already set)
-        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.EmailAddress))
-        {
-            if (string.IsNullOrEmpty(schema.Format))
-                schema.Format = "email";
-        }
-
-        // [Url] → format: "uri"
-        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Url))
-        {
-            if (string.IsNullOrEmpty(schema.Format))
-                schema.Format = "uri";
-        }
-
-        // [Phone] → format: "phone"
-        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Phone))
-        {
-            if (string.IsNullOrEmpty(schema.Format))
-                schema.Format = "phone";
-        }
+        // format: one winner — [SwaggerSchema(Format)], else a profile attribute, else [DataType],
+        // else the format derived from the type, which a source without a format leaves in place.
+        // With number handling the format belongs to the numeric branch, where the type's format is.
+        var format = DeclaredFormat(attrData);
+        if (format != null)
+            (NumberUnionBranches(schema)?.Number ?? schema).Format = format;
 
         // [Obsolete] → deprecated: true
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
             schema.Deprecated = true;
 
-        // [Description("text")] → description (always wins; overrides any default set by a converter
-        // hint or the BCL registry, because a property-level annotation is a direct user statement).
-        var desc = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.Description);
-        if (desc != null)
+        // [SwaggerSchema(Description)] → [Description] → [Display(Description)]: always wins over a
+        // default set by a converter hint or the BCL registry, because a property-level annotation is
+        // a direct user statement. The XML <summary> is applied later, only where none of them is set.
+        var description = DocumentationResolver.AttributeDescription(attrData);
+        if (description != null)
+            schema.Description = description;
+
+        ApplyAccessAndTitle(schema, attrData, property, componentId);
+    }
+
+    /// <summary><c>maxLength</c> (strings), <c>maxItems</c> (arrays) or <c>maxProperties</c> (dictionaries).</summary>
+    private static void SetMaximumLength(OpenApiSchema schema, int n)
+    {
+        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
+            schema.MaxItems = n;
+        else if (IsDictionarySchema(schema))
+            schema.MaxProperties = n;
+        else
+            schema.MaxLength = n;
+    }
+
+    /// <summary><c>minLength</c> (strings), <c>minItems</c> (arrays) or <c>minProperties</c> (dictionaries).</summary>
+    private static void SetMinimumLength(OpenApiSchema schema, int n)
+    {
+        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Array))
+            schema.MinItems = n;
+        else if (IsDictionarySchema(schema))
+            schema.MinProperties = n;
+        else
+            schema.MinLength = n;
+    }
+
+    /// <summary>
+    /// The format the attributes of a property declare, by priority: <c>[SwaggerSchema(Format)]</c>,
+    /// then <c>[EmailAddress]</c> / <c>[Url]</c> / <c>[Phone]</c>, then <c>[DataType]</c> by
+    /// <see cref="DataTypeFormat"/>; <see langword="null"/> when none of them sets a format, so the
+    /// format derived from the type stays.
+    /// </summary>
+    private static string? DeclaredFormat(IList<CustomAttributeData> attrData)
+    {
+        var swaggerSchema = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.SwaggerSchema);
+        if (swaggerSchema != null
+            && AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Format") is { Length: > 0 } explicitFormat)
+            return explicitFormat;
+
+        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.EmailAddress))
+            return "email";
+        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Url))
+            return "uri";
+        if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Phone))
+            return "phone";
+
+        var dataType = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DataType);
+        return dataType != null ? DataTypeFormat(dataType) : null;
+    }
+
+    /// <summary>
+    /// The format of <c>[DataType(member)]</c>: <c>DateTime</c> → <c>date-time</c>, <c>Date</c> →
+    /// <c>date</c>, <c>Time</c> → <c>time</c>, <c>Duration</c> → <c>duration</c>, <c>EmailAddress</c> →
+    /// <c>email</c>, <c>Password</c> → <c>password</c>, <c>Url</c> / <c>ImageUrl</c> → <c>uri</c>,
+    /// <c>PhoneNumber</c> → <c>phone</c>, <c>Upload</c> → <c>binary</c>. Any other member, and the
+    /// custom-name constructor, gives no format.
+    /// </summary>
+    private static string? DataTypeFormat(CustomAttributeData dataType)
+    {
+        if (dataType.ConstructorArguments is not [{ ArgumentType: var argumentType, Value: { } raw }]
+            || argumentType.FullName != AttributeHelper.Names.DataTypeEnum)
+            return null;
+
+        // The member is named by its constant: the attribute stores only the number.
+        var member = argumentType
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(f => Equals(f.GetRawConstantValue(), raw))?.Name;
+        return member switch
         {
-            var text = AttributeHelper.GetConstructorArgument<string>(desc, 0);
-            if (!string.IsNullOrEmpty(text)) schema.Description = text;
+            "DateTime"              => "date-time",
+            "Date"                  => "date",
+            "Time"                  => "time",
+            "Duration"              => "duration",
+            "EmailAddress"          => "email",
+            "Password"              => "password",
+            "Url" or "ImageUrl"     => "uri",
+            "PhoneNumber"           => "phone",
+            "Upload"                => "binary",
+            _                       => null,
+        };
+    }
+
+    /// <summary>
+    /// <c>readOnly</c>, <c>writeOnly</c> and <c>title</c>. The effective <c>readOnly</c> is
+    /// <c>[SwaggerSchema(ReadOnly = …)]</c> when it sets the value, explicit <c>false</c> included,
+    /// else <c>[ReadOnly(…)]</c>; <c>writeOnly</c> is <c>[SwaggerSchema(WriteOnly = …)]</c>. Only a true
+    /// value is written; both true is an extraction error.
+    /// </summary>
+    private static void ApplyAccessAndTitle(
+        OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string componentId)
+    {
+        var swaggerSchema = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.SwaggerSchema);
+        bool readOnly = false, writeOnly = false, explicitReadOnly = false;
+        if (swaggerSchema != null)
+        {
+            explicitReadOnly = AttributeHelper.TryGetNamedArgument(swaggerSchema, "ReadOnly", out readOnly);
+            AttributeHelper.TryGetNamedArgument(swaggerSchema, "WriteOnly", out writeOnly);
+            if (AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Title") is { Length: > 0 } title)
+                schema.Title = title;
         }
+
+        if (!explicitReadOnly
+            && AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.ReadOnly) is { } readOnlyAttribute)
+            readOnly = AttributeHelper.GetConstructorArgument<bool>(readOnlyAttribute, 0);
+
+        if (readOnly && writeOnly)
+        {
+            var typeName = property.DeclaringType?.FullName ?? componentId;
+            throw new OpenApiExtractionException(
+                $"{typeName}.{property.Name} is both read-only and write-only ([SwaggerSchema] / [ReadOnly]); " +
+                "OpenAPI forbids a schema with both readOnly and writeOnly.",
+                typeName, property.Name);
+        }
+
+        if (readOnly) schema.ReadOnly = true;
+        if (writeOnly) schema.WriteOnly = true;
     }
 
     /// <summary>
@@ -2331,7 +2431,27 @@ public sealed class SchemaGenerator
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Phone)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.DefaultValue)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete)
-            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Description);
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Description)
+            || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Length)
+            || DeclaredFormat(attrData) != null
+            || DocumentationResolver.AttributeDescription(attrData) != null
+            || WritesAccessOrTitle(attrData);
+    }
+
+    /// <summary>Whether the attributes give a <c>title</c>, or a true <c>readOnly</c> / <c>writeOnly</c>.</summary>
+    private static bool WritesAccessOrTitle(IList<CustomAttributeData> attrData)
+    {
+        if (AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.SwaggerSchema) is { } swaggerSchema)
+        {
+            if (AttributeHelper.GetNamedArgument<string>(swaggerSchema, "Title") is { Length: > 0 }
+                || AttributeHelper.GetNamedArgument<bool>(swaggerSchema, "WriteOnly"))
+                return true;
+            if (AttributeHelper.TryGetNamedArgument(swaggerSchema, "ReadOnly", out bool readOnly))
+                return readOnly;
+        }
+
+        return AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.ReadOnly) is { } attribute
+            && AttributeHelper.GetConstructorArgument<bool>(attribute, 0);
     }
 
     // =========================================================================
