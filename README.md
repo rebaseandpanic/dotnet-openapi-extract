@@ -53,8 +53,13 @@ This means you can generate OpenAPI specs:
 | `--contact-url <url>` | no | — | `info.contact.url` |
 | `--license-name <string>` | no | — | `info.license.name` |
 | `--license-url <url>` | no | — | `info.license.url` |
+| `--license-identifier <spdx>` | no | — | `info.license.identifier` (OpenAPI 3.1+; `x-oai-license-identifier` with a warning for 3.0); needs `--license-name`, excludes `--license-url` |
+| `--summary <text>` | no | — | `info.summary` (OpenAPI 3.1+; omitted with a warning for 3.0); wins over `OpenApiInfo.Summary` in Program.cs |
 | `--terms-of-service <url>` | no | — | `info.termsOfService` |
 | `--server <url>` | no | — | Server URL in `servers[]` (repeatable) |
+| `--server-name <name>` | no | — | Name of the k-th `--server` (`servers[].name`, OpenAPI 3.2; `x-oai-name` with a warning before); repeatable, none or one per `--server`, non-empty and unique |
+| `--self-url <uri>` | no | — | `$self` (OpenAPI 3.2; `x-oai-$self` with a warning before); a URI reference without a fragment |
+| `--json-schema-dialect <uri>` | no | — | `jsonSchemaDialect`: `https://spec.openapis.org/oas/3.1/dialect/base` for 3.1, `https://spec.openapis.org/oas/3.2/dialect/2025-09-17` for 3.2; for 3.0 either, omitted with a warning |
 
 ### Validation flags
 

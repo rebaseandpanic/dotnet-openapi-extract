@@ -207,6 +207,37 @@ var licenseUrlOption = new Option<string?>("--license-url")
     Description = "URL pointing to the full license text — must be an absolute URI (info.license.url)",
 };
 
+var licenseIdentifierOption = new Option<string?>("--license-identifier")
+{
+    Description = "SPDX license identifier, e.g. MIT (info.license.identifier, OpenAPI 3.1+; x-oai-license-identifier " +
+                  "with a warning for 3.0). Needs --license-name; cannot be combined with --license-url",
+};
+
+var summaryOption = new Option<string?>("--summary")
+{
+    Description = "Short summary of the API (info.summary, OpenAPI 3.1+; omitted with a warning for 3.0). " +
+                  "Wins over OpenApiInfo.Summary in Program.cs",
+};
+
+var serverNameOption = new Option<string[]>("--server-name")
+{
+    Description = "Name of a server (servers[].name, OpenAPI 3.2; x-oai-name with a warning before). Repeatable: " +
+                  "the k-th --server-name names the k-th --server; give none or exactly one per --server",
+    AllowMultipleArgumentsPerToken = false,
+};
+
+var selfUrlOption = new Option<string?>("--self-url")
+{
+    Description = "URI reference of the document itself, without a fragment ($self, OpenAPI 3.2; x-oai-$self with a warning before)",
+};
+
+var jsonSchemaDialectOption = new Option<string?>("--json-schema-dialect")
+{
+    Description = "JSON Schema dialect of the document (jsonSchemaDialect): the OAS dialect of the target version — " +
+                  "https://spec.openapis.org/oas/3.1/dialect/base for 3.1, https://spec.openapis.org/oas/3.2/dialect/2025-09-17 " +
+                  "for 3.2; for 3.0 either is accepted and omitted with a warning. Not written without the flag",
+};
+
 var termsOfServiceOption = new Option<string?>("--terms-of-service")
 {
     Description = "URL to the Terms of Service for the API — must be an absolute URI (info.termsOfService)",
@@ -269,6 +300,11 @@ rootCommand.Options.Add(contactEmailOption);
 rootCommand.Options.Add(contactUrlOption);
 rootCommand.Options.Add(licenseNameOption);
 rootCommand.Options.Add(licenseUrlOption);
+rootCommand.Options.Add(licenseIdentifierOption);
+rootCommand.Options.Add(summaryOption);
+rootCommand.Options.Add(serverNameOption);
+rootCommand.Options.Add(selfUrlOption);
+rootCommand.Options.Add(jsonSchemaDialectOption);
 rootCommand.Options.Add(termsOfServiceOption);
 rootCommand.Options.Add(serversOption);
 rootCommand.Options.Add(pathBaseEmissionOption);
@@ -307,6 +343,11 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var contactUrl   = parseResult.GetValue(contactUrlOption);
     var licenseName  = parseResult.GetValue(licenseNameOption);
     var licenseUrl   = parseResult.GetValue(licenseUrlOption);
+    var licenseId    = parseResult.GetValue(licenseIdentifierOption);
+    var summary      = parseResult.GetValue(summaryOption);
+    var serverNames  = parseResult.GetValue(serverNameOption);
+    var selfUrl      = parseResult.GetValue(selfUrlOption);
+    var dialect      = parseResult.GetValue(jsonSchemaDialectOption);
     var termsOfSvc   = parseResult.GetValue(termsOfServiceOption);
     var servers                 = parseResult.GetValue(serversOption);
     var pathBaseEmission        = parseResult.GetValue(pathBaseEmissionOption)!;
@@ -442,8 +483,13 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             ContactUrl          = contactUrl,
             LicenseName         = licenseName,
             LicenseUrl          = licenseUrl,
+            LicenseIdentifier   = licenseId,
+            Summary             = summary,
             TermsOfService      = termsOfSvc,
             Servers             = servers is { Length: > 0 } ? servers : null,
+            ServerNames         = serverNames is { Length: > 0 } ? serverNames : null,
+            SelfUrl             = selfUrl,
+            JsonSchemaDialect   = dialect,
             PathBaseEmission    = pathBaseEmissionMode,
             EnumAutoDescription = !noEnumAutoDescription,
             EnumVarnames        = !noEnumVarnames,
