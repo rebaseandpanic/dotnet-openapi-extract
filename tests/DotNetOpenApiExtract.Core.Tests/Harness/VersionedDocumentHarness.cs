@@ -7,7 +7,7 @@ using SharpYaml.Serialization;
 namespace DotNetOpenApiExtract.Core.Tests.Harness;
 
 /// <summary>Text format a document is serialized to.</summary>
-internal enum DocumentFormat
+public enum DocumentFormat
 {
     Json,
     Yaml,
