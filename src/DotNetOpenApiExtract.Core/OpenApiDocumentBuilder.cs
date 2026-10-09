@@ -959,6 +959,8 @@ public sealed class OpenApiDocumentBuilder
         }
 
         // ── Parameters (path / query / header) ───────────────────────────────
+        // Defaults that do not convert: one warning for the operation, naming every parameter.
+        var unconvertedDefaults = new List<(string Name, string Error)>();
         foreach (var param in parameters)
         {
             // Body and form parameters are handled separately as requestBody.
@@ -985,16 +987,7 @@ public sealed class OpenApiDocumentBuilder
                     if (converted.HasValue)
                         mutableParamSchema.Default = converted.Value;
                     else if (converted.Error != null)
-                        ledger.Add(new PendingLoss
-                        {
-                            Class    = LossClass.Source,
-                            Code     = ExtractionDiagnosticCodes.SchemaDefaultNotConvertible,
-                            Anchor   = new LossAnchor.Operation(operation),
-                            Message  = $"[DefaultValue] on parameter {param.Name}: {converted.Error}; no default is written.",
-                            Feature  = "parameter.schema.default",
-                            Action   = DiagnosticAction.Omitted,
-                            Subjects = [param.Name],
-                        });
+                        unconvertedDefaults.Add((param.Name, converted.Error));
                 }
                 else if (param.DefaultValue is not null)
                 {
@@ -1014,6 +1007,22 @@ public sealed class OpenApiDocumentBuilder
 
             operation.Parameters ??= new List<IOpenApiParameter>();
             operation.Parameters.Add(openApiParam);
+        }
+
+        if (unconvertedDefaults.Count > 0)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SchemaDefaultNotConvertible,
+                Anchor   = new LossAnchor.Operation(operation),
+                Message  = "[DefaultValue] on " +
+                           string.Join("; ", unconvertedDefaults.Select(d => $"parameter {d.Name}: {d.Error}")) +
+                           "; no default is written for them.",
+                Feature  = "parameter.schema.default",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = unconvertedDefaults.Select(d => d.Name).ToList(),
+            });
         }
 
         // ── Request body ─────────────────────────────────────────────────────

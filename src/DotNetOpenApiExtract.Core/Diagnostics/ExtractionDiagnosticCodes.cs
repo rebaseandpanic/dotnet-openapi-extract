@@ -156,8 +156,8 @@ public static class ExtractionDiagnosticCodes
 
     /// <summary>
     /// The string of <c>[DefaultValue(Type, string)]</c> does not convert to the type (invariant culture):
-    /// no <c>default</c> is written. Location: the property, or the operation for a parameter.
-    /// Subjects: <c>Type.Property</c> or the parameter name.
+    /// no <c>default</c> is written. Location: the property, or the operation for parameters (one per
+    /// operation). Subjects: <c>Type.Property</c>, or the names of the parameters.
     /// </summary>
     public const string SchemaDefaultNotConvertible = "schema.default-not-convertible";
 

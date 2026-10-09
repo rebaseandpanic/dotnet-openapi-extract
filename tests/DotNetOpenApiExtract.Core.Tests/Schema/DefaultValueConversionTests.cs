@@ -113,8 +113,8 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
 
         var warnings = diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible).ToList();
         warnings.Where(d => d.Location == "#/components/schemas/DefaultValuesModel/properties/broken").Should().ContainSingle();
-        warnings.Where(d => d.Location == "GET /keywords/parameter-defaults" && d.Subjects.SequenceEqual(new[] { "broken" }))
-            .Should().ContainSingle();
+        warnings.Where(d => d.Location == "GET /keywords/parameter-defaults").Should().ContainSingle()
+            .Which.Subjects.Should().Contain("broken");
     }
 
     [Theory]
@@ -144,7 +144,8 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
         diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible
                                && d.Location == "#/components/schemas/DefaultValuesModel/properties/home").Should().ContainSingle();
         diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SchemaDefaultNotConvertible
-                               && d.Location == "GET /keywords/parameter-defaults" && d.Subjects.SequenceEqual(new[] { "home" }))
-            .Should().ContainSingle();
+                               && d.Location == "GET /keywords/parameter-defaults")
+            .Should().ContainSingle(because: "one warning per place: the operation names every parameter")
+            .Which.Subjects.Should().BeEquivalentTo(["broken", "home"]);
     }
 }
