@@ -63,6 +63,7 @@
 | Generic wrappers | `ApiResponse<T>` with `Success`, `Data`, `Error` | Reflection generic type arguments |
 | Nested objects | DTO with DTO properties | Recursive traversal |
 | Inheritance | Base classes | Reflection `BaseType` |
+| Polymorphism | `[JsonPolymorphic]`, `[JsonDerivedType]`, `[SwaggerDiscriminator]`, `[SwaggerSubType]` | Attributes read from metadata (no runtime resolution) → `oneOf` / `anyOf` union with `discriminator` |
 | Validation attributes | `[Required]`, `[StringLength]`, `[Range]` | Attributes → schema constraints |
 
 ### Document Metadata
@@ -109,7 +110,6 @@
 | Middleware that modifies routes (`UsePathBase`, URL rewriting) | Runtime behavior |
 | Custom model binders | Runtime behavior |
 | Auth scheme details (`AddAuthentication().AddJwtBearer(...)`) | Configured in DI |
-| `[JsonDerivedType]` polymorphism | Requires runtime resolution |
 
 **Impact on typical projects: minimal** — auth schemes won't appear in the spec automatically, but they can be specified via configuration.
 

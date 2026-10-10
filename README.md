@@ -181,7 +181,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`)
 - In-project `const string` values via `SemanticModel.GetConstantValue`
 
-For the complete catalog of 650+ supported attributes and constructs, see [OpenAPI Attributes Catalog](docs/research/03-openapi-attributes-catalog.md).
+For every OpenAPI field the tool emits, could emit or never emits — its source in C#, its form in OpenAPI 3.0, 3.1 and 3.2, its warning and its validation rule — see the [OpenAPI Field Catalog](docs/specs/openapi-field-catalog.md).
 
 ## Limitations
 

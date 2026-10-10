@@ -11,7 +11,7 @@ This document is the single source of truth for one question: **which C# constru
 - the JSON Schema 2020-12 keywords available in the 3.1/3.2 Schema Object, and the 3.0 Schema Object subset;
 - specification extensions (`x-*`) written by the tool or by the serialization library.
 
-It replaces `docs/research/03-openapi-attributes-catalog.md`. That older file describes what an ideal extractor *could* read. This catalog describes what this extractor *does* read, checked against the code under `src/`.
+It replaces `docs/research/archive/03-openapi-attributes-catalog.md`. That older file describes what an ideal extractor *could* read. This catalog describes what this extractor *does* read, checked against the code under `src/`.
 
 ## Context
 
