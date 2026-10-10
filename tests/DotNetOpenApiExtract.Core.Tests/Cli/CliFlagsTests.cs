@@ -25,7 +25,7 @@ public class CliFlagsTests
     [
         "operation.description", "operation.has-error-response", "operation.operation-id", "operation.operation-id-unique",
         "operation.request-body-description", "operation.security", "operation.success-response", "operation.summary",
-        "parameter.description", "parameter.optional-has-default", "response.schema-when-body", "schema.property-constraints",
+        "parameter.description", "parameter.optional-has-default", "schema.property-constraints",
         "schema.property-description", "schema.property-format", "schema.required-consistency", "schema.typed-enum",
     ];
 

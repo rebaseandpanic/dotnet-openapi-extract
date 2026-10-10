@@ -38,7 +38,8 @@ public sealed class ValidationContext
 
     /// <summary>
     /// Per-rule severity overrides. When a rule ID is present in this dictionary, the specified
-    /// severity is used instead of the rule's <see cref="IValidationRule.DefaultSeverity"/>.
+    /// severity is used instead of the rule's default for the document's version
+    /// (<see cref="IValidationRule.GetDefaultSeverity"/>).
     /// Supports demoting errors to warnings (<c>--warn-rule</c>) and promoting warnings to errors
     /// (<c>--error-rule</c>, <c>--strict</c>).
     /// <para>Null or empty = use each rule's default severity.</para>

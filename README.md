@@ -120,6 +120,8 @@ dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --valida
 dotnet openapi-extract validate --spec openapi.json --validation-report report.json
 ```
 
+Rules run for the version of the document: the `--openapi-version` of the build, or the `openapi:` field of a standalone file. Some levels depend on it — `response.description` is an error for 3.0/3.1 and a warning for 3.2, where a response description is optional (`--strict` promotes it like any other warning). `response.schema-when-body` accepts `itemSchema` (3.2) and `x-oai-itemSchema` (3.0/3.1) as the schema of a streaming response, and a `text/event-stream` media type without a schema is not a violation.
+
 All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
 
 ## What It Extracts

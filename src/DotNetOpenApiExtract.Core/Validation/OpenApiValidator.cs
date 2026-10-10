@@ -159,10 +159,11 @@ public sealed class OpenApiValidator
             if (DefaultOffRuleIds.Contains(rule.Id) && !context.EnabledRuleIds.Contains(rule.Id))
                 continue;
 
-            // Determine effective severity: explicit override wins over rule default.
-            // Use TryGetValue to avoid GetValueOrDefault returning default(ValidationSeverity)=Error
-            // for rules not present in the dict, which would silently override their DefaultSeverity.
-            var effectiveSeverity = rule.DefaultSeverity;
+            // Determine effective severity: explicit override wins over the rule's default for the
+            // document's version. Use TryGetValue to avoid GetValueOrDefault returning
+            // default(ValidationSeverity)=Error for rules not present in the dict, which would
+            // silently override their default.
+            var effectiveSeverity = rule.GetDefaultSeverity(context.OpenApiSpecVersion);
             if (context.SeverityOverrides != null &&
                 context.SeverityOverrides.TryGetValue(rule.Id, out var overrideSev))
                 effectiveSeverity = overrideSev;

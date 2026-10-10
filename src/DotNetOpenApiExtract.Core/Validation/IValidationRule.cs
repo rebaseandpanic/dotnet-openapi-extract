@@ -21,6 +21,16 @@ public interface IValidationRule
     ValidationSeverity DefaultSeverity { get; }
 
     /// <summary>
+    /// The default severity of this rule for a document of <paramref name="version"/>, before
+    /// <see cref="ValidationContext.SeverityOverrides"/> are applied. Rules whose level depends on
+    /// the OpenAPI version (for example, <c>response.description</c>: an error for 3.0 and 3.1, a
+    /// warning for 3.2, where a response description is optional) override it; all others return
+    /// <see cref="DefaultSeverity"/>.
+    /// </summary>
+    /// <param name="version">The version of the validated document; <see langword="null"/> when unknown.</param>
+    ValidationSeverity GetDefaultSeverity(OpenApiSpecVersion? version) => DefaultSeverity;
+
+    /// <summary>
     /// Validates <paramref name="document"/> against this rule and yields one
     /// <see cref="ValidationViolation"/> per finding.
     /// Must never throw — errors should be swallowed and treated as no violations.

@@ -13,6 +13,9 @@ using CoreValidator = DotNetOpenApiExtract.Core.Validation.OpenApiValidator;
 var allRuleIds = string.Join(", ", CoreValidator.AllRules.Select(r =>
 {
     var sev = r.DefaultSeverity == ValidationSeverity.Error ? "error" : "warning";
+    var sev32 = r.GetDefaultSeverity(OpenApiSpecVersion.OpenApi3_2);
+    if (sev32 != r.DefaultSeverity)
+        sev += sev32 == ValidationSeverity.Error ? "; error for 3.2" : "; warning for 3.2";
     var offTag = CoreValidator.DefaultOffRuleIds.Contains(r.Id) ? ", off" : "";
     return $"{r.Id} ({sev}{offTag})";
 }));
@@ -506,7 +509,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
                 ? (IReadOnlyList<string>)excludeValPaths
                 : [];
 
-            var severityOverrides = BuildSeverityOverrides(isStrict, warnRules, errorRules);
+            var severityOverrides = BuildSeverityOverrides(isStrict, warnRules, errorRules, specVersion);
 
             var validationContext = new ValidationContext
             {
@@ -767,7 +770,7 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         ? (IReadOnlyList<string>)excludeValPaths
         : [];
 
-    var severityOverrides = BuildSeverityOverrides(isStrict, warnRules, errorRules);
+    var severityOverrides = BuildSeverityOverrides(isStrict, warnRules, errorRules, loadedSpecVersion);
 
     var validationContext = new ValidationContext
     {
@@ -827,7 +830,8 @@ return await rootCommand.Parse(args).InvokeAsync();
 static IReadOnlyDictionary<string, ValidationSeverity>? BuildSeverityOverrides(
     bool strict,
     string[]? warnRules,
-    string[]? errorRules)
+    string[]? errorRules,
+    OpenApiSpecVersion? specVersion)
 {
     // Collect explicit per-rule overrides
     var explicit_ = new Dictionary<string, ValidationSeverity>(StringComparer.Ordinal);
@@ -847,10 +851,11 @@ static IReadOnlyDictionary<string, ValidationSeverity>? BuildSeverityOverrides(
 
     if (strict)
     {
-        // Promote every warning rule to error, unless it has an explicit override
+        // Promote every rule that is a warning for this document's version to error, unless it
+        // has an explicit override
         foreach (var rule in CoreValidator.AllRules)
         {
-            if (rule.DefaultSeverity == ValidationSeverity.Warning && !explicit_.ContainsKey(rule.Id))
+            if (rule.GetDefaultSeverity(specVersion) == ValidationSeverity.Warning && !explicit_.ContainsKey(rule.Id))
                 overrides[rule.Id] = ValidationSeverity.Error;
         }
     }
