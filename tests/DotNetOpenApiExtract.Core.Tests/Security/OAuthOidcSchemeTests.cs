@@ -262,4 +262,38 @@ public class OAuthOidcSchemeTests(OAuthOidcSchemeFixture fixture) : IClassFixtur
         error.MemberName.Should().Be(member);
         error.Message.Should().Contain("Broken");
     }
+
+    [Theory]
+    [InlineData("Implicit = new OpenApiOAuthFlow { Scopes = new Dictionary<string, string>() }", "AuthorizationUrl")]
+    [InlineData("Implicit = new OpenApiOAuthFlow()", "AuthorizationUrl")]
+    [InlineData("Password = new OpenApiOAuthFlow { AuthorizationUrl = new Uri(\"https://a.example.com\") }", "TokenUrl")]
+    [InlineData("ClientCredentials = new OpenApiOAuthFlow()", "TokenUrl")]
+    [InlineData("AuthorizationCode = new OpenApiOAuthFlow { AuthorizationUrl = new Uri(\"https://a.example.com\") }", "TokenUrl")]
+    [InlineData("AuthorizationCode = new OpenApiOAuthFlow { TokenUrl = new Uri(\"https://a.example.com/token\") }", "AuthorizationUrl")]
+    [InlineData("DeviceAuthorization = new OpenApiOAuthFlow { TokenUrl = new Uri(\"https://a.example.com/token\") }", "DeviceAuthorizationUrl")]
+    [InlineData("DeviceAuthorization = new OpenApiOAuthFlow { DeviceAuthorizationUrl = new Uri(\"https://a.example.com/device\") }", "TokenUrl")]
+    public void LiteralFlow_WithoutARequiredUrl_IsAnExtractionError(string flow, string member)
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"),
+            $$"""
+            builder.Services.AddSwaggerGen(c => c.AddSecurityDefinition("Broken", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.OAuth2,
+                Flows = new OpenApiOAuthFlows { {{flow}} },
+            }));
+            """);
+
+        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.ModernApiDll,
+            XmlPath      = TestPaths.ModernApiXml,
+            SourceRoot   = directory.Path,
+        });
+
+        var error = build.Should().Throw<OpenApiExtractionException>().Which;
+        error.TypeName.Should().Be("Microsoft.OpenApi.OpenApiOAuthFlow");
+        error.MemberName.Should().Be(member);
+        error.Message.Should().Contain("Broken");
+    }
 }

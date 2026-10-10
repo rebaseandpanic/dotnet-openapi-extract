@@ -346,6 +346,9 @@ public static class SecuritySchemeExtractor
                 "Microsoft.OpenApi.OpenApiSecurityScheme", "Flows");
         }
 
+        if (scheme.Type == SecuritySchemeType.OAuth2)
+            RequireFlowUrls(scheme.Flows!, schemeName);
+
         if (scheme.Type == SecuritySchemeType.OpenIdConnect && scheme.OpenIdConnectUrl == null)
         {
             throw new OpenApiExtractionException(
@@ -355,6 +358,31 @@ public static class SecuritySchemeExtractor
         }
 
         return scheme;
+    }
+
+    /// <summary>
+    /// Every flow of a fully known OAuth2 declaration must have the URLs OpenAPI requires for it:
+    /// <c>implicit</c> an authorization URL, <c>password</c> and <c>clientCredentials</c> a token URL,
+    /// <c>authorizationCode</c> both, <c>deviceAuthorization</c> a device authorization URL and a token
+    /// URL (OpenAPI 3.2). A missing one is an extraction error naming the scheme, the flow and the member.
+    /// </summary>
+    private static void RequireFlowUrls(OpenApiOAuthFlows flows, string schemeName)
+    {
+        void Require(OpenApiOAuthFlow? flow, string flowName, string member, Uri? value)
+        {
+            if (flow != null && value == null)
+                throw new OpenApiExtractionException(
+                    $"Security scheme '{schemeName}': the {flowName} OAuth2 flow has no {member}, which OpenAPI requires for it.",
+                    "Microsoft.OpenApi.OpenApiOAuthFlow", member);
+        }
+
+        Require(flows.Implicit, "implicit", "AuthorizationUrl", flows.Implicit?.AuthorizationUrl);
+        Require(flows.Password, "password", "TokenUrl", flows.Password?.TokenUrl);
+        Require(flows.ClientCredentials, "clientCredentials", "TokenUrl", flows.ClientCredentials?.TokenUrl);
+        Require(flows.AuthorizationCode, "authorizationCode", "AuthorizationUrl", flows.AuthorizationCode?.AuthorizationUrl);
+        Require(flows.AuthorizationCode, "authorizationCode", "TokenUrl", flows.AuthorizationCode?.TokenUrl);
+        Require(flows.DeviceAuthorization, "deviceAuthorization", "DeviceAuthorizationUrl", flows.DeviceAuthorization?.DeviceAuthorizationUrl);
+        Require(flows.DeviceAuthorization, "deviceAuthorization", "TokenUrl", flows.DeviceAuthorization?.TokenUrl);
     }
 
     /// <summary>The object creation <c>new T { … }</c> / <c>new() { … }</c> behind <paramref name="value"/>, if it is one.</summary>
@@ -418,6 +446,8 @@ public static class SecuritySchemeExtractor
             }
         }
 
+        // OpenAPI requires the scopes map; a flow that names none has an empty one.
+        flow.Scopes ??= new Dictionary<string, string>(StringComparer.Ordinal);
         return flow;
     }
 
