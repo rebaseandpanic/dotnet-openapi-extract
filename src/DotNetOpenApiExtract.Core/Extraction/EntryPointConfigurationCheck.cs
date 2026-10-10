@@ -17,10 +17,14 @@ namespace DotNetOpenApiExtract.Core.Extraction;
 /// <list type="bullet">
 ///   <item>A configuration call — <c>SwaggerDoc</c>, <c>AddSecurityDefinition</c>,
 ///   <c>AddSecurityRequirement</c>, <c>AddTag</c> — anywhere in it (also inside
-///   <c>Configure&lt;SwaggerGenOptions&gt;(…)</c>), or <c>AddSwaggerGen</c> / <c>AddOpenApi</c> called
-///   with arguments: the configuration is here. No warning.</item>
-///   <item><c>AddSwaggerGen()</c> / <c>AddOpenApi()</c> called without arguments and nothing else: the
-///   registration is here and it configures nothing. No warning.</item>
+///   <c>Configure&lt;SwaggerGenOptions&gt;(…)</c>): the configuration is here. No warning.</item>
+///   <item><c>AddSwaggerGen</c> / <c>AddOpenApi</c> called without arguments, with a literal document
+///   name, or with a lambda that configures the options itself (<c>c =&gt; c.IncludeXmlComments(…)</c>):
+///   the registration is here and it configures nothing the document is built from. No warning.</item>
+///   <item>The registration hands the options to code elsewhere — a method group
+///   (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>), a delegate variable, a lambda passing its options to
+///   another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>): the configuration is in that code.
+///   Warning.</item>
 ///   <item>The same bare registration next to an options class registered for them — a type argument
 ///   naming <c>SwaggerGenOptions</c> / <c>OpenApiOptions</c> (<c>AddTransient&lt;IConfigureOptions&lt;SwaggerGenOptions&gt;, X&gt;()</c>),
 ///   or <c>ConfigureOptions&lt;T&gt;()</c> with a <c>T</c> named after Swagger / OpenApi: the
@@ -55,11 +59,12 @@ internal static class EntryPointConfigurationCheck
         if (packages.Count == 0)
             return;
 
-        var registrations = Registrations.SelectMany(name => InvocationMatcher.FindInvocations(context, name)).ToList();
-        if (registrations.Any(r => r.ArgumentList.Arguments.Count > 0)
-            || ConfigurationCalls.Any(name => InvocationMatcher.FindInvocations(context, name).Any()))
+        if (ConfigurationCalls.Any(name => InvocationMatcher.FindInvocations(context, name).Any()))
             return;
-        if (registrations.Count > 0 && !RegistersOptionsClass(entryPoint))
+        var registrations = Registrations.SelectMany(name => InvocationMatcher.FindInvocations(context, name)).ToList();
+        if (registrations.Count > 0
+            && !registrations.Any(r => r.ArgumentList.Arguments.Any(a => Delegates(a.Expression)))
+            && !RegistersOptionsClass(entryPoint))
             return;
 
         var where = SourceLocations.Of(entryPoint, context);
@@ -74,6 +79,31 @@ internal static class EntryPointConfigurationCheck
             SourceLocation = where,
             Subjects       = [.. packages],
         });
+    }
+
+    /// <summary>
+    /// Whether a registration argument hands the configuration to code elsewhere: a method group or a
+    /// delegate variable (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>), or a lambda that passes its options
+    /// to another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>). A literal (the document name of
+    /// <c>AddOpenApi("v1")</c>) and a lambda configuring the options itself do not.
+    /// </summary>
+    private static bool Delegates(ExpressionSyntax argument)
+    {
+        argument = ObjectCreations.Unwrap(argument);
+        if (argument is IdentifierNameSyntax or MemberAccessExpressionSyntax)
+            return true;
+        if (argument is not AnonymousFunctionExpressionSyntax lambda)
+            return false;
+
+        List<string> parameters = lambda switch
+        {
+            SimpleLambdaExpressionSyntax simple => [simple.Parameter.Identifier.Text],
+            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.Select(p => p.Identifier.Text).ToList(),
+            AnonymousMethodExpressionSyntax method => method.ParameterList?.Parameters.Select(p => p.Identifier.Text).ToList() ?? [],
+            _ => [],
+        };
+        return lambda.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>
+            invocation.ArgumentList.Arguments.Any(a => a.Expression is IdentifierNameSyntax id && parameters.Contains(id.Identifier.Text)));
     }
 
     /// <summary>Whether the entry point registers an options class for SwaggerGen or AddOpenApi.</summary>

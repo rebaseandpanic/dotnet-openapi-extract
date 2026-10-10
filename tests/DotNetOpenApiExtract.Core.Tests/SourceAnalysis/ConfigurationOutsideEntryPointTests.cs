@@ -55,6 +55,9 @@ public class ConfigurationOutsideEntryPointTests
         "builder.Services.AddApiSwagger();",
         "builder.Services.AddSwaggerGen(); builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();",
         "builder.Services.AddSwaggerGen(); builder.Services.ConfigureOptions<ConfigureSwaggerOptions>();",
+        "builder.Services.AddSwaggerGen(SwaggerSetup.Configure);",
+        "builder.Services.AddSwaggerGen(c => SwaggerSetup.Configure(c));",
+        "builder.Services.AddSwaggerGen(c => { c.IncludeXmlComments(\"api.xml\"); SwaggerSetup.Configure(c); });",
     };
 
     [Theory]
@@ -72,6 +75,7 @@ public class ConfigurationOutsideEntryPointTests
         """builder.Services.Configure<SwaggerGenOptions>(o => o.SwaggerDoc("v1", new() { Title = "T" }));""",
         // registered without configuration
         "builder.Services.AddSwaggerGen();",
+        """builder.Services.AddSwaggerGen(c => c.IncludeXmlComments("api.xml"));""",
         "builder.Services.AddSwaggerGen(); builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();",
     };
 
