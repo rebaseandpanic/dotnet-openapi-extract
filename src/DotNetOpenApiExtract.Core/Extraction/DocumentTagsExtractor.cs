@@ -475,8 +475,8 @@ public static class DocumentTagsExtractor
     /// of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the <c>License</c> / <c>ExternalDocs</c> of
     /// an info, the argument of <c>AddTag</c> and a tag's <c>ExternalDocs</c> that are not object creations,
     /// and the values of the info fields that are read (<c>Summary</c>, the license <c>Name</c>,
-    /// <c>Url</c>, <c>Identifier</c>, the external docs <c>Url</c>, <c>Description</c>) that are not literals
-    /// or constants. <c>null</c> and <c>default</c> are a known absence, not a loss. Each warning carries
+    /// <c>Url</c>, <c>Identifier</c>, the external docs <c>Url</c>, <c>Description</c> of an info or a tag)
+    /// that are not literals or constants. <c>null</c> and <c>default</c> are a known absence, not a loss. Each warning carries
     /// the place in the source and, as its last subjects, the CLI flags that set the value instead.
     /// </summary>
     private static void ReportUnreadMetadata(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
@@ -574,7 +574,15 @@ public static class DocumentTagsExtractor
             if (invocation.ArgumentList.Arguments is not [var tag, ..])
                 continue;
             if (ObjectCreations.Of(tag.Expression) is { } creation)
+            {
                 CheckMembers(creation, "OpenApiTag", ("ExternalDocs", []));
+                foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+                {
+                    if ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text == "ExternalDocs"
+                        && ObjectCreations.Of(assignment.Right) is { } docs)
+                        CheckValues(docs, "OpenApiExternalDocs", ("Url", true, []), ("Description", false, []));
+                }
+            }
             else
                 ReportCreation("AddTag", tag.Expression);
         }

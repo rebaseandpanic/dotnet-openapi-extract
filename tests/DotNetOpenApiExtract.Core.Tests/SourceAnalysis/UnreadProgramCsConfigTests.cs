@@ -24,7 +24,7 @@ public class UnreadProgramCsConfigTests
 
     private const string Line = "Program.cs:4";
 
-    public static TheoryData<string, string, string?> UnreadInfoValues => new()
+    public static TheoryData<string, string, string?> UnreadMetadataValues => new()
     {
         // statement on line 4 → the place named first → the flag that sets the value
         { """c.SwaggerDoc("v1", new() { Title = "T", Summary = settings.Summary });""", "OpenApiInfo.Summary", "--summary" },
@@ -34,11 +34,13 @@ public class UnreadProgramCsConfigTests
         { """c.SwaggerDoc("v1", new() { Title = "T", ExternalDocs = new() { Url = new Uri(settings.Docs) } });""", "OpenApiExternalDocs.Url", null },
         { """c.SwaggerDoc("v1", new() { Title = "T", License = settings.LicenseObject });""", "OpenApiInfo.License", "--license-name" },
         { """c.SwaggerDoc("v1", settings.Info);""", "SwaggerDoc info", "--summary" },
+        { """c.AddTag(new OpenApiTag { Name = "Items", ExternalDocs = new() { Url = new Uri(settings.Docs) } });""", "OpenApiExternalDocs.Url", null },
+        { """c.AddTag(new OpenApiTag { Name = "Items", ExternalDocs = new() { Url = new Uri("https://docs.example.com"), Description = settings.Text } });""", "OpenApiExternalDocs.Description", null },
     };
 
     [Theory]
-    [MemberData(nameof(UnreadInfoValues))]
-    public void UnreadInfoValue_IsReported_WithItsPlace_AndFlag(string statement, string place, string? flag)
+    [MemberData(nameof(UnreadMetadataValues))]
+    public void UnreadMetadataValue_IsReported_WithItsPlace_AndFlag(string statement, string place, string? flag)
     {
         var (_, diagnostics) = Build(statement);
 

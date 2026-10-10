@@ -351,6 +351,23 @@ public class InvocationMatcherTests
             because: "without a compilation, member-access expressions cannot be resolved statically");
     }
 
+    /// <summary>
+    /// Without a compilation the folding is syntactic and still evaluates as C# does: doubled braces are
+    /// one brace in a regular or verbatim interpolation, a raw interpolation takes its braces as written.
+    /// </summary>
+    [Theory]
+    [InlineData("""app.UsePathBase($"{{{"a"}}}");""", "{a}")]
+    [InlineData("""app.UsePathBase($@"{{{"a"}}}");""", "{a}")]
+    [InlineData("""app.UsePathBase($"x{{y}}{"z"}" + "!");""", "x{y}z!")]
+    [InlineData("app.UsePathBase($$\"\"\"{x} {{\"a\"}}\"\"\");", "{x} a")]
+    public void InvocationMatcher_StringValue_InterpolationWithoutCompilation_UnescapesBraces(string source, string expected)
+    {
+        var invocation = InvocationMatcher.FindInvocations(ParseRoot(source), "UsePathBase").Single();
+
+        InvocationMatcher.GetStringValue(invocation.ArgumentList.Arguments[0].Expression, compilation: null)
+            .Should().Be(expected);
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────

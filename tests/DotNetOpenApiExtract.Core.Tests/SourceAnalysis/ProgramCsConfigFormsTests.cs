@@ -206,3 +206,31 @@ public class Swashbuckle9ConfigFormsTests(Swashbuckle9FormsFixture fixture) : IC
             .Should().BeEmpty();
     }
 }
+
+/// <summary>
+/// Interpolated strings evaluate as C# evaluates them: <c>{{</c> / <c>}}</c> are one brace in a regular
+/// or verbatim interpolation, a raw interpolation takes its braces literally outside the holes.
+/// </summary>
+public class InterpolatedStringFormsTests
+{
+    public static TheoryData<string, string> Interpolations => new()
+    {
+        // the Summary expression → the info.summary Swashbuckle serves
+        { "$\"{{{\"a\"}}}\"", "{a}" },
+        { "$@\"{{{\"a\"}}}\"", "{a}" },
+        { "$\"x{{y}}{\"z\"}\"", "x{y}z" },
+        { "$$\"\"\"{x} {{\"a\"}}\"\"\"", "{x} a" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Interpolations))]
+    public void InterpolatedSummary_IsTheCSharpValue(string expression, string expected)
+    {
+        var (document, diagnostics) = ConfigFormsBuild.BuildWithSources(("Program.cs",
+            $"builder.Services.AddSwaggerGen(c => c.SwaggerDoc(\"v1\", new() {{ Title = \"T\", Summary = {expression} }}));"));
+
+        document["info"]?["summary"]?.GetValue<string>().Should().Be(expected);
+        document["info"]!.AsObject().ContainsKey("summary").Should().BeTrue();
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.DocumentMetadataNotStatic);
+    }
+}

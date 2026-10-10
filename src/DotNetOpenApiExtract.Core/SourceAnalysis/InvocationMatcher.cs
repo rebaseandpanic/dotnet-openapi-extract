@@ -191,10 +191,10 @@ public static class InvocationMatcher
 
     /// <summary>
     /// Attempts to extract a string value from an expression: the constant string C# itself would
-    /// compute for it. Literals (plain, verbatim and raw), parentheses, concatenation with <c>+</c> and
-    /// interpolation are folded syntactically when every part is a string; anything else (in-project
-    /// <c>const string</c> members, <c>nameof</c>, a mix of these with literals) goes through the
-    /// semantic model.
+    /// compute for it. The semantic model evaluates it first (in-project <c>const string</c> members,
+    /// <c>nameof</c>, concatenation, constant interpolation); without a compilation, or when the model
+    /// cannot bind the expression, literals (plain, verbatim and raw), parentheses, concatenation with
+    /// <c>+</c> and interpolation of such strings are folded syntactically.
     /// </summary>
     /// <param name="expression">The expression to resolve.</param>
     /// <param name="compilation">
@@ -202,7 +202,7 @@ public static class InvocationMatcher
     /// When <see langword="null"/>, only syntactic strategies are attempted.
     /// </param>
     private static string? ExtractStringValue(ExpressionSyntax expression, CSharpCompilation? compilation)
-        => FoldString(expression) ?? SemanticConstant(expression, compilation);
+        => SemanticConstant(expression, compilation) ?? FoldString(expression);
 
     /// <summary>
     /// The string <paramref name="expression"/> stands for when it is built only from string literals:
@@ -224,13 +224,17 @@ public static class InvocationMatcher
                 return FoldString(binary.Left) is { } left && FoldString(binary.Right) is { } right ? left + right : null;
 
             case InterpolatedStringExpressionSyntax interp:
+                // In a regular or verbatim interpolation a literal brace is written doubled and the text
+                // token keeps it doubled; a raw interpolation ($$"""…""") writes its braces as they are.
+                var raw = interp.StringStartToken.IsKind(SyntaxKind.InterpolatedSingleLineRawStringStartToken)
+                          || interp.StringStartToken.IsKind(SyntaxKind.InterpolatedMultiLineRawStringStartToken);
                 var sb = new StringBuilder();
                 foreach (var content in interp.Contents)
                 {
                     switch (content)
                     {
                         case InterpolatedStringTextSyntax text:
-                            sb.Append(text.TextToken.ValueText);
+                            sb.Append(raw ? text.TextToken.ValueText : text.TextToken.ValueText.Replace("{{", "{").Replace("}}", "}"));
                             break;
                         case InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
                             when FoldString(hole.Expression) is { } part:

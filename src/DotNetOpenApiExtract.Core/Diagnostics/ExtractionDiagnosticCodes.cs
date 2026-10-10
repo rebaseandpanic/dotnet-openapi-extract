@@ -304,7 +304,7 @@ public static class ExtractionDiagnosticCodes
     /// <c>License</c> or <c>ExternalDocs</c>, an <c>AddTag</c> argument or a tag's <c>ExternalDocs</c>.
     /// The fields it holds (license, summary, externalDocs, tag fields) are not written. Also a value
     /// of a field that is read — the info <c>Summary</c>, the license <c>Name</c> / <c>Url</c> /
-    /// <c>Identifier</c>, the external docs <c>Url</c> / <c>Description</c> — that is not a constant
+    /// <c>Identifier</c>, the external docs <c>Url</c> / <c>Description</c> of the info or of a tag — that is not a constant
     /// string. <see cref="ExtractionDiagnostic.SourceLocation"/>: the value. Subjects: the member or call,
     /// the expression, then the CLI flags that set the value instead (<c>--summary</c>,
     /// <c>--license-name</c>, <c>--license-url</c>, <c>--license-identifier</c>), when there are any.
