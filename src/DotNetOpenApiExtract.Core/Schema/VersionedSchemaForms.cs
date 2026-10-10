@@ -55,16 +55,35 @@ internal static class VersionedSchemaForms
             : new OpenApiSchema { Type = JsonSchemaType.String, ContentEncoding = "base64" };
 
     /// <summary>
-    /// The nullable form of an <c>anyOf</c> union, by version: 3.0 marks the union itself
-    /// <c>nullable: true</c> (the library writes a <c>null</c> type that way); 3.1+ adds a
-    /// <c>{type: "null"}</c> branch, since a sibling <c>type: "null"</c> would require both.
+    /// The nullable form of an <c>anyOf</c> union: a branch that admits <c>null</c>
+    /// (<see cref="NullBranch"/>). A <c>nullable</c> or <c>type: "null"</c> beside <c>anyOf</c> would
+    /// not do: OpenAPI 3.0 applies <c>nullable</c> only next to an explicit <c>type</c>, and in 3.1+ a
+    /// sibling <c>type: "null"</c> would require every value to be both.
     /// </summary>
     public static OpenApiSchema NullableUnion(OpenApiSchema union, OpenApiSpecVersion version)
     {
-        if (version == OpenApiSpecVersion.OpenApi3_0)
-            union.Type = JsonSchemaType.Null;
-        else
-            union.AnyOf!.Add(new OpenApiSchema { Type = JsonSchemaType.Null });
+        union.AnyOf!.Add(NullBranch(version));
         return union;
     }
+
+    /// <summary>
+    /// The <c>anyOf</c> branch that admits only <c>null</c>, by version: <c>{type: "null"}</c> for 3.1+;
+    /// for 3.0, which has no <c>null</c> type, <c>{type: "object", nullable: true, enum: [null]}</c>.
+    /// OpenAPI 3.0.3 applies <c>nullable</c> only when <c>type</c> is defined in the same schema object
+    /// (Microsoft.OpenApi writes a bare <c>null</c> type as <c>{enum: [null], nullable: true}</c>,
+    /// which admits nothing under that rule); <c>enum: [null]</c> keeps the branch to <c>null</c> alone,
+    /// whatever <c>type</c> says.
+    /// </summary>
+    public static OpenApiSchema NullBranch(OpenApiSpecVersion version) =>
+        version == OpenApiSpecVersion.OpenApi3_0
+            ? new OpenApiSchema { Type = JsonSchemaType.Object | JsonSchemaType.Null, Enum = [null!] }
+            : new OpenApiSchema { Type = JsonSchemaType.Null };
+
+    /// <summary>Whether <paramref name="schema"/> is a <see cref="NullBranch"/> of either version.</summary>
+    public static bool IsNullBranch(IOpenApiSchema? schema) => schema switch
+    {
+        OpenApiSchema { Type: JsonSchemaType.Null } => true,
+        OpenApiSchema { Type: { } type, Enum: [null] } => (type & JsonSchemaType.Null) != 0,
+        _ => false,
+    };
 }

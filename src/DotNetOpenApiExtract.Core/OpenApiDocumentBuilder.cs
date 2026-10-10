@@ -1503,7 +1503,7 @@ public sealed class OpenApiDocumentBuilder
     private static IOpenApiSchema ElementSchema(SchemaGenerator generator, Type elementType, bool nullable)
     {
         var schema = generator.GenerateSchema(elementType);
-        return nullable ? SchemaGenerator.MakeNullable(schema) : schema;
+        return nullable ? SchemaGenerator.MakeNullable(schema, generator.OpenApiVersion) : schema;
     }
 
     // =========================================================================

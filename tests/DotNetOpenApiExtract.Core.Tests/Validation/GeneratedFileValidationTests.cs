@@ -15,6 +15,9 @@ public sealed class GeneratedFileValidationFixture : IAsyncLifetime
 {
     private readonly TempDirectory _directory = new();
 
+    /// <summary>The written JSON documents, by fixture and version.</summary>
+    public Dictionary<(string Fixture, OpenApiSpecVersion Version), JsonNode> Documents { get; } = [];
+
     /// <summary>Report of <c>validate --spec</c>, by fixture, version and format.</summary>
     public Dictionary<(string Fixture, OpenApiSpecVersion Version, DocumentFormat Format), JsonNode> Reports { get; } = [];
 
@@ -38,6 +41,8 @@ public sealed class GeneratedFileValidationFixture : IAsyncLifetime
                     ? await document.SerializeAsJsonAsync(version, ct)
                     : await document.SerializeAsYamlAsync(version, ct);
                 await File.WriteAllTextAsync(spec, text, ct);
+                if (format == DocumentFormat.Json)
+                    Documents[(name, version)] = JsonNode.Parse(text)!;
 
                 var result = await CliRunner.RunAsync(["validate", "--spec", spec], _directory.Path, ct);
                 if (result.ExitCode == 2)
@@ -160,5 +165,47 @@ public class GeneratedFileValidationTests(GeneratedFileValidationFixture fixture
         result.ExitCode.Should().NotBe(2, result.StdErr);
         Pointers(JsonNode.Parse(result.StdOut)!, "schema.typed-enum")
             .Should().Equal("#/components/schemas/Mode/enum/0", "#/components/schemas/Mode/enum/2");
+    }
+
+    /// <summary>
+    /// OpenAPI 3.0.3, Schema Object, <c>nullable</c>: "A true value adds "null" to the allowed type
+    /// specified by the type keyword, only if type is explicitly defined within the same Schema
+    /// Object." Every <c>nullable: true</c> of a written 3.0 document stands next to a <c>type</c>, so
+    /// that it admits <c>null</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("ModernApi")]
+    [InlineData("SampleApi")]
+    public void Generated30File_HasNullableOnlyNextToAType(string name)
+    {
+        var document = fixture.Documents[(name, OpenApiSpecVersion.OpenApi3_0)];
+        var nullable = new List<string>();
+        var untyped = new List<string>();
+
+        void Walk(JsonNode? node, string pointer)
+        {
+            switch (node)
+            {
+                case JsonObject obj:
+                    if (obj["nullable"] is JsonValue flag && flag.GetValueKind() == System.Text.Json.JsonValueKind.True)
+                    {
+                        nullable.Add(pointer);
+                        if (!obj.ContainsKey("type"))
+                            untyped.Add(pointer);
+                    }
+                    foreach (var (key, child) in obj)
+                        Walk(child, $"{pointer}/{key.Replace("~", "~0").Replace("/", "~1")}");
+                    break;
+                case JsonArray array:
+                    for (var i = 0; i < array.Count; i++)
+                        Walk(array[i], $"{pointer}/{i}");
+                    break;
+            }
+        }
+
+        Walk(document, "#");
+
+        nullable.Should().NotBeEmpty(because: "the fixture has nullable references, unions and values");
+        untyped.Should().BeEmpty();
     }
 }

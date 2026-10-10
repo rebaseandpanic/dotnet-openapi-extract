@@ -119,7 +119,8 @@ public class SampleApi30InvariantsTests(SampleApi30Fixture fixture) : IClassFixt
 
         branches.Should().HaveCount(2);
         branches[0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/UserProfile");
-        JsonNode.DeepEquals(branches[1], JsonNode.Parse("""{"enum":[null],"nullable":true}""")).Should().BeTrue();
+        // OAS 3.0.3 applies nullable only next to an explicit type; enum [null] keeps the branch to null.
+        JsonNode.DeepEquals(branches[1], JsonNode.Parse("""{"type":"object","nullable":true,"enum":[null]}""")).Should().BeTrue(branches[1]!.ToJsonString());
         profile.AsObject().ContainsKey("nullable").Should().BeFalse(because: "0.16.0 moved the null branch into the composite");
     }
 

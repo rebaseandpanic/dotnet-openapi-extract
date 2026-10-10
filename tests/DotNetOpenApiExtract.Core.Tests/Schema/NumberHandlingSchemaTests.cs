@@ -192,15 +192,17 @@ public class NumberHandlingSchemaTests(NumberHandlingDocumentFixture fixture) : 
     }
 
     [Fact]
-    public void Nullable_IsOnTheWholeUnion_ByVersion()
+    public void Nullable_IsANullBranchOfTheUnion_ByVersion()
     {
         var v31 = (OpenApiSchema)Properties(typeof(PropertyLevelHandling), null, OpenApiSpecVersion.OpenApi3_1)["optional"];
         v31.Type.Should().BeNull();
         v31.AnyOf!.Cast<OpenApiSchema>().Should().Contain(b => b.Type == JsonSchemaType.Null);
 
+        // 3.0 has no null type, and nullable beside anyOf (without a type) admits nothing under OAS 3.0.3.
         var v30 = (OpenApiSchema)Properties(typeof(PropertyLevelHandling), null, OpenApiSpecVersion.OpenApi3_0)["optional"];
-        v30.Type.Should().Be(JsonSchemaType.Null, because: "3.0 writes the union itself as nullable: true");
-        v30.AnyOf.Should().HaveCount(2);
+        v30.Type.Should().BeNull();
+        v30.AnyOf.Should().HaveCount(3);
+        v30.AnyOf!.Cast<OpenApiSchema>().Should().Contain(b => b.Type == (JsonSchemaType.Object | JsonSchemaType.Null) && b.Enum!.Count == 1 && b.Enum[0] == null);
     }
 
     // ── SC-003: what STJ writes and reads passes the schema ─────────────────
@@ -395,7 +397,7 @@ public class NumberHandlingSchemaTests(NumberHandlingDocumentFixture fixture) : 
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void RangeAndExample_AreOnTheNumericBranch_NullableOnTheWholeUnion_ItemsForACollection(OpenApiSpecVersion version)
+    public void RangeAndExample_AreOnTheNumericBranch_NullAsABranch_ItemsForACollection(OpenApiSpecVersion version)
     {
         const string pointer = "#/components/schemas/NumberPlacementModel/properties/";
         var properties = fixture.Documents[version]["components"]!["schemas"]!["NumberPlacementModel"]!["properties"]!;
@@ -413,8 +415,9 @@ public class NumberHandlingSchemaTests(NumberHandlingDocumentFixture fixture) : 
         bounded.Where(p => constraintKeys.Contains(p.Key)).Should().BeEmpty(because: "the union itself carries no constraint");
         branches.Skip(1).Where(b => b["type"]?.GetValue<string>() == "string")
             .Should().ContainSingle().Which.Where(p => constraintKeys.Contains(p.Key)).Should().BeEmpty();
+        bounded.ContainsKey("nullable").Should().BeFalse(because: "nullable without a type admits nothing in 3.0");
         if (version == OpenApiSpecVersion.OpenApi3_0)
-            bounded["nullable"]!.GetValue<bool>().Should().BeTrue();
+            branches.Should().ContainSingle(b => b["nullable"] != null && b["type"]!.GetValue<string>() == "object" && b["enum"]!.ToJsonString() == "[null]");
         else
             branches.Should().ContainSingle(b => b["type"] != null && b["type"]!.GetValue<string>() == "null");
 

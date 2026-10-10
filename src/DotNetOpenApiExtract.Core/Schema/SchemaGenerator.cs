@@ -267,7 +267,7 @@ public sealed class SchemaGenerator
             var inner = GenerateSchema(type.GetGenericArguments()[0]);
             return inner is OpenApiSchema { Type: null, AnyOf.Count: > 0 } union
                 ? VersionedSchemaForms.NullableUnion(union, _options.OpenApiVersion)
-                : MakeNullable(inner);
+                : MakeNullable(inner, _options.OpenApiVersion);
         }
 
         // --- 3b. BCL JSON container types (JsonElement, JsonNode, JObject, etc.) ---
@@ -886,7 +886,7 @@ public sealed class SchemaGenerator
                     ? GenerateEnumSchema(converted, propConverterHint.EnumNaming)
                     : BuildSchemaFromHint(propConverterHint);
                 if (underlying != null)
-                    propSchema = MakeNullable(propSchema);
+                    propSchema = MakeNullable(propSchema, _options.OpenApiVersion);
             }
             else if (propType.FullName == "System.String"
                      && AttributeHelper.HasAttribute(propAttrData, AttributeHelper.Names.Base64String))
@@ -900,7 +900,7 @@ public sealed class SchemaGenerator
             // annotates them as non-nullable (byte=1).
             if (!propType.IsValueType && IsNullableReferenceProperty(propAttrData, propInfo))
             {
-                propSchema = MakeNullable(propSchema);
+                propSchema = MakeNullable(propSchema, _options.OpenApiVersion);
             }
 
             // Apply validation and documentation attributes to the property schema.
@@ -2009,7 +2009,7 @@ public sealed class SchemaGenerator
     {
         static bool HasNull(JsonSchemaType? type) => type.HasValue && (type.Value & JsonSchemaType.Null) != 0;
 
-        var nullBranch = schema.AnyOf?.Any(b => b is OpenApiSchema { Type: JsonSchemaType.Null }) == true;
+        var nullBranch = schema.AnyOf?.Any(VersionedSchemaForms.IsNullBranch) == true;
 
         if (NumberUnionBranches(schema) is { } union)
             return (union.Number, WithoutNull(union.Number.Type), HasNull(schema.Type) || nullBranch);
@@ -2704,12 +2704,16 @@ public sealed class SchemaGenerator
             && type.GetGenericTypeDefinition().FullName == NullableGenericFullName;
     }
 
+    /// <summary>The OpenAPI version this generator builds schemas for.</summary>
+    internal OpenApiSpecVersion OpenApiVersion => _options.OpenApiVersion;
+
     /// <summary>
-    /// Adds <c>JsonSchemaType.Null</c> to the type flags of <paramref name="schema"/>
-    /// (OpenAPI 3.1 style). When the schema is an <see cref="OpenApiSchemaReference"/>
-    /// it is wrapped in an allOf+null composite.
+    /// Adds <c>JsonSchemaType.Null</c> to the type flags of <paramref name="schema"/> (written as
+    /// <c>nullable: true</c> in 3.0). When the schema is an <see cref="OpenApiSchemaReference"/> it is
+    /// wrapped in <c>anyOf: [$ref, null branch]</c> with the null branch of <paramref name="version"/>
+    /// (<see cref="VersionedSchemaForms.NullBranch"/>).
     /// </summary>
-    internal static IOpenApiSchema MakeNullable(IOpenApiSchema schema)
+    internal static IOpenApiSchema MakeNullable(IOpenApiSchema schema, OpenApiSpecVersion version)
     {
         if (schema is OpenApiSchema concrete)
         {
@@ -2721,13 +2725,13 @@ public sealed class SchemaGenerator
         }
 
         // $ref schemas cannot carry extra keywords directly in OpenAPI 3.1.
-        // Wrap in an anyOf to express nullability: anyOf: [$ref, {type: null}]
+        // Wrap in an anyOf to express nullability: anyOf: [$ref, null branch of the version]
         return new OpenApiSchema
         {
             AnyOf = new List<IOpenApiSchema>
             {
                 schema,
-                new OpenApiSchema { Type = JsonSchemaType.Null },
+                VersionedSchemaForms.NullBranch(version),
             },
         };
     }
