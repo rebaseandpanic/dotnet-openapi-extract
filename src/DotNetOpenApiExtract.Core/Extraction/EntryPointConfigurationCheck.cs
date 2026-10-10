@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using DotNetOpenApiExtract.Core.Diagnostics;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
@@ -62,38 +63,67 @@ internal static class EntryPointConfigurationCheck
         if (ConfigurationCalls.Any(name => InvocationMatcher.FindInvocations(context, name).Any()))
             return;
         var registrations = Registrations.SelectMany(name => InvocationMatcher.FindInvocations(context, name)).ToList();
-        if (registrations.Count > 0
-            && !registrations.Any(r => r.ArgumentList.Arguments.Any(a => Delegates(a.Expression)))
-            && !RegistersOptionsClass(entryPoint))
+        var delegated = registrations
+            .SelectMany(r => r.ArgumentList.Arguments.Select(a => (Registration: r, Target: DelegationTarget(a.Expression))))
+            .FirstOrDefault(d => d.Target != null);
+        var optionsClass = OptionsClassRegistration(entryPoint);
+        if (registrations.Count > 0 && delegated.Target == null && optionsClass == null)
             return;
 
-        var where = SourceLocations.Of(entryPoint, context);
+        const string Consequence =
+            "the document lacks its title, description, license, security schemes and requirements. Set them with --title, --version, " +
+            "--description, --summary, --contact-name, --contact-email, --contact-url, --license-name, --license-url, " +
+            "--license-identifier and --terms-of-service.";
+        var packageNames = string.Join(", ", packages);
+
+        // The place: the call that hands the configuration elsewhere; without a registration, the first
+        // call named after Swagger / OpenApi (an extension method such as AddApiSwagger()), else the entry point.
+        SyntaxNode place;
+        string message;
+        if (delegated.Target != null)
+        {
+            place = delegated.Registration;
+            message = $"the {InvocationMatcher.GetSimpleMethodName(delegated.Registration.Expression)} options are configured by {delegated.Target} " +
+                      $"in another file, which the tool does not read: {Consequence}";
+        }
+        else if (optionsClass != null)
+        {
+            place = optionsClass;
+            message = $"the Swagger / OpenAPI options are configured by the class registered with {optionsClass}, which the tool does not read: {Consequence}";
+        }
+        else
+        {
+            place = entryPoint.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                .FirstOrDefault(i => InvocationMatcher.GetSimpleMethodName(i.Expression) is { } name
+                    && (name.Contains("Swagger", StringComparison.OrdinalIgnoreCase) || name.Contains("OpenApi", StringComparison.OrdinalIgnoreCase)))
+                ?? entryPoint;
+            message = $"no Swagger / OpenAPI configuration found in the entry point ({packageNames} is referenced). " +
+                      $"If it is in another file (an extension method, Startup, IConfigureOptions<SwaggerGenOptions>), the tool does not read it: {Consequence}";
+        }
+
+        var where = SourceLocations.Of(place, context);
         DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
         {
             Code           = ExtractionDiagnosticCodes.DocumentConfigurationNotInEntryPoint,
-            Message        = $"{where}: no Swagger / OpenAPI configuration found in the entry point ({string.Join(", ", packages)} is referenced). " +
-                             "If it is in another file (an extension method, Startup, IConfigureOptions<SwaggerGenOptions>), the tool does not read it: " +
-                             "the document lacks its title, description, license, security schemes and requirements. Set them with --title, --version, " +
-                             "--description, --summary, --contact-name, --contact-email, --contact-url, --license-name, --license-url, " +
-                             "--license-identifier and --terms-of-service.",
+            Message        = $"{where}: {message}",
             SourceLocation = where,
             Subjects       = [.. packages],
         });
     }
 
     /// <summary>
-    /// Whether a registration argument hands the configuration to code elsewhere: a method group or a
+    /// The code a registration argument hands the configuration to, or <see langword="null"/>: a method group or a
     /// delegate variable (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>), or a lambda that passes its options
     /// to another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>). A literal (the document name of
     /// <c>AddOpenApi("v1")</c>) and a lambda configuring the options itself do not.
     /// </summary>
-    private static bool Delegates(ExpressionSyntax argument)
+    private static string? DelegationTarget(ExpressionSyntax argument)
     {
         argument = ObjectCreations.Unwrap(argument);
         if (argument is IdentifierNameSyntax or MemberAccessExpressionSyntax)
-            return true;
+            return argument.ToString();
         if (argument is not AnonymousFunctionExpressionSyntax lambda)
-            return false;
+            return null;
 
         List<string> parameters = lambda switch
         {
@@ -102,15 +132,24 @@ internal static class EntryPointConfigurationCheck
             AnonymousMethodExpressionSyntax method => method.ParameterList?.Parameters.Select(p => p.Identifier.Text).ToList() ?? [],
             _ => [],
         };
-        return lambda.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>
-            invocation.ArgumentList.Arguments.Any(a => a.Expression is IdentifierNameSyntax id && parameters.Contains(id.Identifier.Text)));
+        return lambda.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
+            .FirstOrDefault(invocation => invocation.ArgumentList.Arguments.Any(a => a.Expression is IdentifierNameSyntax id && parameters.Contains(id.Identifier.Text)))
+            ?.Expression.ToString();
     }
 
-    /// <summary>Whether the entry point registers an options class for SwaggerGen or AddOpenApi.</summary>
-    private static bool RegistersOptionsClass(Microsoft.CodeAnalysis.SyntaxNode entryPoint) =>
-        entryPoint.DescendantNodes().OfType<GenericNameSyntax>().Any(generic =>
-            generic.TypeArgumentList.Arguments.Any(argument =>
-                OptionsTypes.Any(type => argument.ToString().Contains(type, StringComparison.Ordinal))
-                || (generic.Identifier.Text == "ConfigureOptions"
-                    && (argument.ToString().Contains("Swagger", StringComparison.Ordinal) || argument.ToString().Contains("OpenApi", StringComparison.Ordinal)))));
+    /// <summary>The call of the entry point that registers an options class for SwaggerGen or AddOpenApi, or <see langword="null"/>.</summary>
+    private static InvocationExpressionSyntax? OptionsClassRegistration(SyntaxNode entryPoint) =>
+        entryPoint.DescendantNodes().OfType<InvocationExpressionSyntax>().FirstOrDefault(invocation =>
+            invocation.Expression switch
+            {
+                MemberAccessExpressionSyntax { Name: GenericNameSyntax generic } => IsOptionsClass(generic),
+                GenericNameSyntax generic => IsOptionsClass(generic),
+                _ => false,
+            });
+
+    private static bool IsOptionsClass(GenericNameSyntax generic) =>
+        generic.TypeArgumentList.Arguments.Any(argument =>
+            OptionsTypes.Any(type => argument.ToString().Contains(type, StringComparison.Ordinal))
+            || (generic.Identifier.Text == "ConfigureOptions"
+                && (argument.ToString().Contains("Swagger", StringComparison.Ordinal) || argument.ToString().Contains("OpenApi", StringComparison.Ordinal))));
 }

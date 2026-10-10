@@ -342,8 +342,9 @@ public static class ExtractionDiagnosticCodes
     /// not called there or called without arguments next to an options class registered for it. The
     /// configuration is then in another file — an extension method, a <c>Startup</c> class, an
     /// <c>IConfigureOptions&lt;SwaggerGenOptions&gt;</c> — which is not read: the document lacks the
-    /// metadata and security it declares. <see cref="ExtractionDiagnostic.SourceLocation"/>: the entry
-    /// point. Subjects: the referenced packages.
+    /// metadata and security it declares. <see cref="ExtractionDiagnostic.SourceLocation"/>: the call that
+    /// hands the configuration elsewhere (the registration, the options-class registration, or the first
+    /// call named after Swagger / OpenApi), else the entry point. Subjects: the referenced packages.
     /// </summary>
     public const string DocumentConfigurationNotInEntryPoint = "document.configuration-not-in-entry-point";
 

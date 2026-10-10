@@ -46,7 +46,7 @@ public class ConfigurationOutsideEntryPointTests
         var diagnostics = Diagnostics(TestPaths.SwaggerSetupApiDll, sourceRoot: null);
 
         var warning = diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.DocumentConfigurationNotInEntryPoint).Subject;
-        warning.SourceLocation.Should().StartWith("Program.cs:");
+        warning.SourceLocation.Should().Be("Program.cs:5", "the AddApiSwagger() call");
         warning.Subjects.Should().Equal("Swashbuckle.AspNetCore.SwaggerGen");
     }
 
@@ -65,7 +65,8 @@ public class ConfigurationOutsideEntryPointTests
     public void ConfigurationOutsideTheEntryPoint_IsReported(string statements)
     {
         DiagnosticsOfSwaggerGenProject(statements)
-            .Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.DocumentConfigurationNotInEntryPoint);
+            .Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.DocumentConfigurationNotInEntryPoint)
+            .Which.SourceLocation.Should().Be("Program.cs:2", "the line of the call that hands the configuration elsewhere");
     }
 
     public static TheoryData<string> NothingElsewhere => new()
