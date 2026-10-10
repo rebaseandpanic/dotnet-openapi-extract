@@ -737,9 +737,17 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
     OpenApiSpecVersion? loadedSpecVersion = null;
     try
     {
-        var readSettings = new OpenApiReaderSettings();
+        var readSettings = new OpenApiReaderSettings { BaseUrl = new Uri(specFile.FullName) };
         readSettings.TryAddReader("yaml", new OpenApiYamlReader());
-        var readResult = await OpenApiDocument.LoadAsync(specFile.FullName, readSettings, cancellationToken);
+
+        // One snapshot of the file serves both the loader and the paths check below. The format
+        // comes from the extension, as when loading by path, and BaseUrl resolves relative
+        // external references against the file, as loading by path does.
+        var specBytes = await File.ReadAllBytesAsync(specFile.FullName, cancellationToken);
+        var specFormat = specFile.Extension.TrimStart('.');
+        ReadResult readResult;
+        using (var specStream = new MemoryStream(specBytes, writable: false))
+            readResult = await OpenApiDocument.LoadAsync(specStream, specFormat, readSettings, cancellationToken);
 
         if (readResult.Document == null)
         {
@@ -760,7 +768,7 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         // The reader gives a document without a paths object an empty one, the same as
         // `paths: {}`; spec.paths-or-webhooks-or-components tells the two apart, so a missing
         // paths object is passed on as missing.
-        if (!await HasTopLevelKeyAsync(specFile.FullName, "paths", cancellationToken))
+        if (!HasTopLevelKey(specBytes, readResult.Diagnostic?.Format ?? specFormat, "paths"))
             document.Paths = null!;
     }
     catch (Exception ex)
@@ -833,14 +841,19 @@ return await rootCommand.Parse(args).InvokeAsync();
 /// Priority: explicit --warn-rule / --error-rule wins over --strict.
 /// --strict promotes remaining warnings (not explicitly overridden) to errors.
 /// </summary>
-// Whether the top-level object of a JSON or YAML document has the key. A document whose text
-// starts with '{' is read as JSON (tolerating comments and trailing commas), any other as YAML.
-static async Task<bool> HasTopLevelKeyAsync(string path, string key, CancellationToken cancellationToken)
+// Whether the top-level object of the document the loader read has the key. The bytes and the
+// format are the loader's: JSON through System.Text.Json (as tolerant as the JSON reader of comments
+// and trailing commas), YAML through the YAML event parser — and only up to the end of the root
+// mapping of the first document, the one the YAML reader loads, so later documents of a
+// multi-document stream are never parsed. A byte order mark and any line breaks are read as the
+// loader reads them.
+static bool HasTopLevelKey(byte[] content, string format, string key)
 {
-    var text = await File.ReadAllTextAsync(path, cancellationToken);
-    if (text.TrimStart().StartsWith('{'))
+    using var text = new StreamReader(new MemoryStream(content, writable: false), detectEncodingFromByteOrderMarks: true);
+
+    if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
     {
-        using var json = System.Text.Json.JsonDocument.Parse(text, new System.Text.Json.JsonDocumentOptions
+        using var json = System.Text.Json.JsonDocument.Parse(text.ReadToEnd(), new System.Text.Json.JsonDocumentOptions
         {
             CommentHandling     = System.Text.Json.JsonCommentHandling.Skip,
             AllowTrailingCommas = true,
@@ -849,13 +862,29 @@ static async Task<bool> HasTopLevelKeyAsync(string path, string key, Cancellatio
             && json.RootElement.TryGetProperty(key, out _);
     }
 
-    var stream = new SharpYaml.Serialization.YamlStream();
-    using (var reader = new StringReader(text))
-        stream.Load(reader);
+    var events = new SharpYaml.EventReader(SharpYaml.Parser.CreateParser(text));
+    events.Expect<SharpYaml.Events.StreamStart>();
+    events.Expect<SharpYaml.Events.DocumentStart>();
+    if (!events.Accept<SharpYaml.Events.MappingStart>())
+        return false;
 
-    return stream.Documents.Count > 0
-        && stream.Documents[0].RootNode is SharpYaml.Serialization.YamlMappingNode root
-        && root.Children.Keys.Any(k => k is SharpYaml.Serialization.YamlScalarNode { Value: var value } && value == key);
+    events.Expect<SharpYaml.Events.MappingStart>();
+    while (!events.Accept<SharpYaml.Events.MappingEnd>())
+    {
+        if (events.Allow<SharpYaml.Events.Scalar>() is { } name)
+        {
+            if (name.Value == key)
+                return true;
+        }
+        else
+        {
+            events.Skip(); // a key that is not a plain name
+        }
+
+        events.Skip(); // its value
+    }
+
+    return false;
 }
 
 static IReadOnlyDictionary<string, ValidationSeverity>? BuildSeverityOverrides(

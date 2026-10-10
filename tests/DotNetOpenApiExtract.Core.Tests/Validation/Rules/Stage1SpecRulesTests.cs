@@ -134,6 +134,18 @@ public sealed class Stage1SpecRulesTests
     [InlineData("openapi.yaml", "openapi: 3.0.4\ninfo:\n  title: T\n  version: '1'\ncomponents: {}\n", true)]
     [InlineData("openapi.yaml", "openapi: 3.1.2\ninfo:\n  title: T\n  version: '1'\npaths: {}\n", false)]
     [InlineData("openapi.yaml", "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1'\n", true)]
+    // Multi-document YAML: the loader reads the first document only, and so does the paths check —
+    // a malformed second document changes nothing.
+    [InlineData("openapi.yaml", "openapi: 3.0.4\ninfo: {title: T, version: '1'}\npaths: {}\n---\n[unterminated\n", false)]
+    [InlineData("openapi.yaml", "openapi: 3.0.4\ninfo: {title: T, version: '1'}\ncomponents: {}\n---\n[unterminated\n", true)]
+    [InlineData("openapi.yaml", "openapi: 3.1.2\ninfo: {title: T, version: '1'}\n---\npaths: {}\n", true)]
+    // Byte order mark and line breaks.
+    [InlineData("openapi.yaml", "\uFEFFopenapi: 3.1.2\r\ninfo:\r\n  title: T\r\n  version: '1'\r\npaths: {}\r\n", false)]
+    [InlineData("openapi.yaml", "\uFEFFopenapi: 3.1.2\r\ninfo:\r\n  title: T\r\n  version: '1'\r\n", true)]
+    [InlineData("openapi.json", "\uFEFF{\r\n  \"openapi\": \"3.0.4\",\r\n  \"info\": { \"title\": \"T\", \"version\": \"1\" },\r\n  \"paths\": { }\r\n}\r\n", false)]
+    [InlineData("openapi.json", "\uFEFF{ \"openapi\": \"3.0.4\", \"info\": { \"title\": \"T\", \"version\": \"1\" }, \"components\": { } }", true)]
+    // JSON in a .yaml file is read as YAML by the loader, and checked the same way.
+    [InlineData("openapi.yaml", """{ "openapi": "3.1.2", "info": { "title": "T", "version": "1" } }""", true)]
     public async Task Structure_Standalone_TellsMissingPathsFromEmpty(string fileName, string content, bool violates)
     {
         using var directory = new TempDirectory();
