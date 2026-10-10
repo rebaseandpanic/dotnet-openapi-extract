@@ -278,4 +278,56 @@ public class EnumConverterNamingPolicyTests
         result.Mvc.GlobalConverterEnumNamingPolicies.Should().Equal([null]);
         diagnostics.Should().ContainSingle().Which.Code.Should().Be(ExtractionDiagnosticCodes.JsonOptionsUnknownConverterNamingPolicy);
     }
+
+    public static TheoryData<OpenApiSpecVersion> AllVersions => [.. VersionedDocumentHarness.Versions];
+
+    /// <summary>
+    /// A global converter in <c>AddJsonOptions</c> wins over <c>[JsonConverter]</c> on the enum type;
+    /// a converter on the property wins over both. The reference is what System.Text.Json writes for
+    /// the model under the same options.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void GlobalConverter_WinsOverTheTypesConverter_PropertyConverterOverBoth(OpenApiSpecVersion version)
+    {
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var options = JsonOptionsExtractor.Extract(Context(
+            "o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));"), diagnostics.Add);
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            OpenApiVersion = version,
+            GlobalConverterTypeNames = options.Mvc.GlobalConverterTypeNames,
+            GlobalConverterEnumNamingPolicies = options.Mvc.GlobalConverterEnumNamingPolicies,
+        });
+        generator.GenerateSchema(typeof(GlobalOverTypeConverterModel));
+        var components = generator.Schemas.ToDictionary(
+            c => c.Key,
+            c => JsonNode.Parse(c.Value.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult())!);
+
+        var wire = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter(StjNamingPolicy.SnakeCaseLower) },
+        };
+        string Written<T>(T value) => JsonSerializer.Deserialize<string>(JsonSerializer.Serialize(value, wire))!;
+        var model = JsonNode.Parse(JsonSerializer.Serialize(new GlobalOverTypeConverterModel(), wire))!;
+
+        JsonNode EnumSchema(JsonNode property) =>
+            (property["$ref"] ?? property["allOf"]?[0]?["$ref"]) is { } reference
+                ? components[reference.GetValue<string>().Split('/')[^1]]
+                : property;
+        string[] Values(JsonNode property) =>
+            EnumSchema(property)["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+
+        var properties = components[nameof(GlobalOverTypeConverterModel)]["properties"]!;
+
+        Values(properties["typeConverter"]!).Should().Equal(Enum.GetValues<StjTint>().Select(Written));
+        Values(properties["typeConverter"]!).Should().Contain(model["typeConverter"]!.GetValue<string>());
+        properties["typeConverter"]!["default"]!.GetValue<string>().Should().Be(model["typeConverter"]!.GetValue<string>());
+        Values(properties["genericTypeConverter"]!).Should().Equal(Enum.GetValues<GenericStjTint>().Select(Written));
+        Values(properties["genericTypeConverter"]!).Should().Contain(model["genericTypeConverter"]!.GetValue<string>());
+        Values(properties["propertyConverter"]!).Should().Contain(model["propertyConverter"]!.GetValue<string>(),
+            because: "the converter on the property (no naming policy) writes the member as it is");
+        model["typeConverter"]!.GetValue<string>().Should().Be("green", because: "the global converter's policy applies");
+        diagnostics.Should().BeEmpty();
+    }
 }

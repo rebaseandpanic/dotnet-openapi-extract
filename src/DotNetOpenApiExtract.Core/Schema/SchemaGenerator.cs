@@ -578,21 +578,34 @@ public sealed class SchemaGenerator
 
     /// <summary>
     /// How the enum type is written when it is written as strings, or <see langword="null"/> for
-    /// numbers: the converter on the type, else the first global converter that writes enums as
-    /// strings, else <see cref="SchemaOptions.EnumAsString"/> (System.Text.Json's string converter).
-    /// A parameter outside a JSON body is bound by its member name, whatever the converters say.
+    /// numbers: the first global converter that converts enums, else the converter on the type, else
+    /// <see cref="SchemaOptions.EnumAsString"/> (System.Text.Json's string converter).
     /// </summary>
+    /// <remarks>
+    /// System.Text.Json's precedence: a converter on the property (applied by the caller), then
+    /// <c>JsonSerializerOptions.Converters</c>, then <c>[JsonConverter]</c> on the type. The global
+    /// converters are read from the System.Text.Json options. A Newtonsoft converter given globally
+    /// through <see cref="SchemaOptions.GlobalConverterTypeNames"/> wins as well: Newtonsoft.Json
+    /// ignores System.Text.Json's <c>[JsonConverter]</c>, the only one the extractor reads.
+    /// A parameter outside a JSON body is bound by its member name, whatever the converters say.
+    /// </remarks>
     private EnumWireNaming? TypeEnumNaming(Type enumType)
     {
+        // Read first, so that an unknown converter on the type is reported even when a global one wins.
+        var typeHint = GetConverterHintForType(enumType, enumType.GetCustomAttributesData());
+
         EnumWireNaming? naming = null;
-        if (GetConverterHintForType(enumType, enumType.GetCustomAttributesData()) is { SchemaType: JsonSchemaType.String } typeHint)
+        if (GlobalEnumConverter() is { } global)
+        {
+            if (global.Hint.SchemaType == JsonSchemaType.String)
+                naming = global.Hint.EnumNaming with
+                {
+                    Policy = global.Naming?.Policy,
+                    OverrideSpecifiedNames = global.Naming?.OverrideSpecifiedNames ?? false,
+                };
+        }
+        else if (typeHint is { SchemaType: JsonSchemaType.String })
             naming = typeHint.EnumNaming;
-        else if (GlobalEnumConverter() is { } global)
-            naming = global.Hint.EnumNaming with
-            {
-                Policy = global.Naming?.Policy,
-                OverrideSpecifiedNames = global.Naming?.OverrideSpecifiedNames ?? false,
-            };
         else if (_options.EnumAsString)
             naming = EnumWireNaming.JsonStringEnumMemberName;
 

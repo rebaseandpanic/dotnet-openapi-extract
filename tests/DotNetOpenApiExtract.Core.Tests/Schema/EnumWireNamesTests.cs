@@ -31,7 +31,7 @@ public sealed class EnumWireNamesFixture
 
 /// <summary>
 /// The values of a string enum are the members' names on the wire, by the converter in force
-/// (property, then type, then global): System.Text.Json reads <c>[JsonStringEnumMemberName]</c>,
+/// (property, then global, then type, as System.Text.Json): System.Text.Json reads <c>[JsonStringEnumMemberName]</c>,
 /// Newtonsoft.Json <c>[EnumMember(Value)]</c>. <c>x-enum-varnames</c> and <c>x-enum-descriptions</c>
 /// keep the CLR members. The expected names are what the serializers really write.
 /// </summary>
@@ -199,7 +199,7 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
         single["default"]!.GetValue<string>().Should().Be(nameof(StjTint.Red));
     }
 
-    // ── Global converters: below the type's converter ─────────────────────────
+    // ── Global converters: above the type's converter ─────────────────────────
 
     private static JsonObject Generate(string globalConverter, Type type)
     {
@@ -209,12 +209,18 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
             .GetAwaiter().GetResult())!.AsObject();
     }
 
+    /// <summary>
+    /// A global converter names an enum without a converter of its own, and wins over a converter
+    /// on the type: System.Text.Json takes the options' converters before the type's attribute, and
+    /// Newtonsoft.Json ignores System.Text.Json's attribute. Expected names are what the serializers
+    /// write with the converter given globally (Writer.Newtonsoft, Writer.StjConverter).
+    /// </summary>
     [Fact]
-    public void GlobalConverter_NamesAnEnumWithoutOneOfItsOwn_TheTypeConverterWins()
+    public void GlobalConverter_NamesTheEnum_OverTheTypesConverter()
     {
         Strings(Generate(typeof(NewtonsoftConverter).FullName!, typeof(Tint))["enum"]).Should().Equal(Written<Tint>(Writer.Newtonsoft));
         Strings(Generate(typeof(JsonStringEnumConverter).FullName!, typeof(Tint))["enum"]).Should().Equal(Written<Tint>(Writer.StjConverter));
-        Strings(Generate(typeof(NewtonsoftConverter).FullName!, typeof(StjTint))["enum"]).Should().Equal(Written<StjTint>(Writer.StjOnType));
+        Strings(Generate(typeof(NewtonsoftConverter).FullName!, typeof(StjTint))["enum"]).Should().Equal(Written<StjTint>(Writer.Newtonsoft));
     }
 
     private sealed class NullableHolder

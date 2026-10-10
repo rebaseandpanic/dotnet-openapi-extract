@@ -52,6 +52,24 @@ public enum GenericStjTint
     Plain,
 }
 
+/// <summary>
+/// Enums with a converter on the type, read under a global converter: System.Text.Json takes the
+/// property's converter, then the options' converters, then the type's.
+/// </summary>
+public class GlobalOverTypeConverterModel
+{
+    /// <summary>Converter on the type only.</summary>
+    [DefaultValue(StjTint.Green)]
+    public StjTint TypeConverter { get; set; } = StjTint.Green;
+
+    /// <summary>Generic converter on the type only.</summary>
+    public GenericStjTint GenericTypeConverter { get; set; } = GenericStjTint.Plain;
+
+    /// <summary>Converter on the property, over the global one.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StjTint PropertyConverter { get; set; } = StjTint.Crimson;
+}
+
 /// <summary>Enum members under every converter the extractor knows.</summary>
 public class EnumWireNamesModel
 {
