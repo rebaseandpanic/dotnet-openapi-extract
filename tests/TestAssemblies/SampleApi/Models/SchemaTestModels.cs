@@ -574,11 +574,11 @@ public sealed class InnerDto
 /// with sibling description, default, and validation constraints.</summary>
 public sealed class OuterWithRefPropertyModel
 {
-    /// <summary>Reference to inner DTO with this XML summary.</summary>
+    // Inner and RequiredInner have no XML summary on purpose: an XML summary wins over
+    // [Description], and these members show the attribute reaching the allOf wrapper.
     [System.ComponentModel.Description("Inner reference description")]
     public InnerDto? Inner { get; set; }
 
-    /// <summary>Non-nullable inner reference — not wrapped by MakeNullable, so truly tests the $ref path.</summary>
     [System.ComponentModel.Description("Non-nullable inner ref description")]
     public required InnerDto RequiredInner { get; set; }
 

@@ -225,8 +225,9 @@ public sealed class DocumentationResolver
     /// <remarks>
     /// Fallback chain:
     /// <list type="bullet">
-    ///   <item>Description: [SwaggerSchema(Description = "...")] → [Description("...")] →
-    ///   [Display(Description = "...")] → XML &lt;summary&gt;</item>
+    ///   <item>Description: XML &lt;summary&gt; → [SwaggerSchema(Description = "...")] →
+    ///   [Description("...")] → [Display(Description = "...")], the order of Swashbuckle at run
+    ///   time with <c>EnableAnnotations()</c> and <c>IncludeXmlComments()</c></item>
     ///   <item>Example: XML &lt;example&gt; on the property</item>
     /// </list>
     /// </remarks>
@@ -242,9 +243,6 @@ public sealed class DocumentationResolver
         // parameter (default target) are seen, in addition to attributes on the property itself.
         var propertyAttrs = AttributeHelper.GetMergedPropertyAttributes(property);
 
-        // Priorities 1–3: [SwaggerSchema(Description)] → [Description] → [Display(Description)]
-        var description = AttributeDescription(propertyAttrs);
-
         // XML doc keys live under the type that DECLARES the property.
         // For inherited properties this is the base; for overridden properties it's
         // the most-derived type that re-declares them. property.DeclaringType is
@@ -253,9 +251,11 @@ public sealed class DocumentationResolver
         var xmlDocOwner = property.DeclaringType ?? declaringType;
         var xmlPropDoc = _xmlParser.GetPropertyDoc(xmlDocOwner, property.Name);
 
-        // Priority 4: XML <summary>
+        // XML <summary> first, as Swashbuckle's XML comments filter overwrites what the annotations
+        // set; then [SwaggerSchema(Description)] → [Description] → [Display(Description)].
+        var description = xmlPropDoc?.Summary;
         if (string.IsNullOrEmpty(description))
-            description = xmlPropDoc?.Summary;
+            description = AttributeDescription(propertyAttrs);
 
         if (string.IsNullOrEmpty(description))
             description = null;

@@ -181,6 +181,21 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
 
     // ── [Display(Description)] ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Without an XML summary: <c>[SwaggerSchema]</c> (named or constructor) → <c>[Description]</c> →
+    /// <c>[Display(Description)]</c>. With one, the XML summary wins over each of them, as in
+    /// Swashbuckle at run time.
+    /// </summary>
+    /// <remarks>
+    /// Reference for the XML rows: Swashbuckle.AspNetCore 10.3.0, <c>AddSwaggerGen(c =&gt; {
+    /// c.EnableAnnotations(); c.IncludeXmlComments(xml); })</c>, document from
+    /// <c>ISwaggerProvider.GetSwagger("v1")</c>, on properties with <c>/// &lt;summary&gt;</c> plus
+    /// <c>[SwaggerSchema("ctor")]</c>, <c>[SwaggerSchema(Description = "named")]</c>,
+    /// <c>[Description("…")]</c> and <c>[Display(Description = "…")]</c>: each property's
+    /// <c>description</c> was the XML summary; a property with only <c>[Description]</c> kept the
+    /// attribute. Run once outside the test suite (Swashbuckle 10 needs Microsoft.OpenApi 2.x, the
+    /// extractor 3.x), recorded here as literals.
+    /// </remarks>
     public static TheoryData<OpenApiSpecVersion, string, string> DescriptionWinners()
     {
         var data = new TheoryData<OpenApiSpecVersion, string, string>();
@@ -189,18 +204,33 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
             data.Add(version, "schemaOverDisplay", "From SwaggerSchema");
             data.Add(version, "schemaConstructorOverDisplay", "From the SwaggerSchema constructor");
             data.Add(version, "descriptionOverDisplay", "From Description");
-            data.Add(version, "displayOverXml", "From Display");
+            data.Add(version, "displayOnly", "From Display");
+            data.Add(version, "xmlOverSchemaConstructor", "Xml summary.");
+            data.Add(version, "xmlOverSchemaNamed", "Xml summary.");
+            data.Add(version, "xmlOverDescription", "Xml summary.");
+            data.Add(version, "xmlOverDisplay", "Xml summary.");
             data.Add(version, "displayWithoutDescription", "Xml summary.");
             data.Add(version, "displayResourceKey", "Xml summary.");
             data.Add(version, "displayOnNullableNumber", "From Display");
+            data.Add(version, "xmlOverDisplayOnNullableNumber", "Xml summary.");
         }
         return data;
     }
 
     [Theory]
     [MemberData(nameof(DescriptionWinners))]
-    public void Display_IsBelowSwaggerSchemaAndDescription_AndAboveXml(OpenApiSpecVersion version, string property, string winner) =>
+    public void PropertyDescription_XmlSummaryFirst_ThenSwaggerSchema_Description_Display(OpenApiSpecVersion version, string property, string winner) =>
         Text(Property(version, "DescriptionPriorityModel", property), "description").Should().Be(winner);
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void XmlSummary_OnAReference_WinsOverTheAttribute_OnTheWrapper(OpenApiSpecVersion version)
+    {
+        var wrapper = Property(version, "DescriptionPriorityModel", "xmlOverSchemaOnReference");
+
+        Text(wrapper, "description").Should().Be("Xml summary.");
+        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+    }
 
     [Theory]
     [MemberData(nameof(AllVersions))]

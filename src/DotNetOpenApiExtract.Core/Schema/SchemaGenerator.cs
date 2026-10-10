@@ -1408,7 +1408,7 @@ public sealed class SchemaGenerator
 
         // [SwaggerSchema(Description)] → [Description] → [Display(Description)]: always wins over a
         // default set by a converter hint or the BCL registry, because a property-level annotation is
-        // a direct user statement. The XML <summary> is applied later, only where none of them is set.
+        // a direct user statement. The XML <summary>, applied with the components, replaces it.
         var description = DocumentationResolver.AttributeDescription(attrData);
         if (description != null)
             schema.Description = description;

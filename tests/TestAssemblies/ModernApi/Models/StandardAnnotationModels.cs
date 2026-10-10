@@ -184,24 +184,39 @@ public static class AnnotationResources
     public static string LocalizedText => "Localized text";
 }
 
-/// <summary>Competing description sources on one member.</summary>
+/// <summary>
+/// Competing description sources on one member. Members without an XML summary order the
+/// attributes among themselves; members with one show that the XML summary wins over each.
+/// </summary>
 public class DescriptionPriorityModel
 {
-    /// <summary>Xml summary.</summary>
     [SwaggerSchema(Description = "From SwaggerSchema"), Display(Description = "From Display")]
     public string SchemaOverDisplay { get; set; } = string.Empty;
 
-    /// <summary>Xml summary.</summary>
     [SwaggerSchema("From the SwaggerSchema constructor"), Display(Description = "From Display")]
     public string SchemaConstructorOverDisplay { get; set; } = string.Empty;
 
-    /// <summary>Xml summary.</summary>
     [Description("From Description"), Display(Description = "From Display")]
     public string DescriptionOverDisplay { get; set; } = string.Empty;
 
+    [Display(Description = "From Display")]
+    public string DisplayOnly { get; set; } = string.Empty;
+
+    /// <summary>Xml summary.</summary>
+    [SwaggerSchema("From the SwaggerSchema constructor")]
+    public string XmlOverSchemaConstructor { get; set; } = string.Empty;
+
+    /// <summary>Xml summary.</summary>
+    [SwaggerSchema(Description = "From SwaggerSchema")]
+    public string XmlOverSchemaNamed { get; set; } = string.Empty;
+
+    /// <summary>Xml summary.</summary>
+    [Description("From Description")]
+    public string XmlOverDescription { get; set; } = string.Empty;
+
     /// <summary>Xml summary.</summary>
     [Display(Description = "From Display")]
-    public string DisplayOverXml { get; set; } = string.Empty;
+    public string XmlOverDisplay { get; set; } = string.Empty;
 
     /// <summary>Xml summary.</summary>
     [Display(Name = "Shown name")]
@@ -211,13 +226,19 @@ public class DescriptionPriorityModel
     [Display(Description = nameof(AnnotationResources.LocalizedText), ResourceType = typeof(AnnotationResources))]
     public string DisplayResourceKey { get; set; } = string.Empty;
 
-    /// <summary>Xml summary.</summary>
     [Display(Description = "From Display")]
     public AnnotatedTarget DisplayOnReference { get; set; } = new();
 
     /// <summary>Xml summary.</summary>
+    [SwaggerSchema("From the SwaggerSchema constructor")]
+    public AnnotatedTarget XmlOverSchemaOnReference { get; set; } = new();
+
     [Display(Description = "From Display")]
     public int? DisplayOnNullableNumber { get; set; }
+
+    /// <summary>Xml summary.</summary>
+    [Display(Description = "From Display")]
+    public int? XmlOverDisplayOnNullableNumber { get; set; }
 }
 
 /// <summary>readOnly, writeOnly and title sources.</summary>

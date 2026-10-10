@@ -431,18 +431,18 @@ public sealed class BugFixIntegrationTests
     }
 
     /// <summary>
-    /// <c>[Description("Internal description override")]</c> as a default-target attribute
-    /// on a positional ctor parameter must reach the inline property schema's
-    /// <c>description</c> via the merge — overriding any XML-derived description.
+    /// <c>[Description("Internal description override")]</c> as a default-target attribute on a
+    /// positional ctor parameter, together with an XML <c>&lt;param&gt;</c>: the XML text wins, as
+    /// an XML summary wins over every description attribute (Swashbuckle at run time).
     /// </summary>
     [Fact]
-    public void CreatePositionalCustomerRequest_DescriptionProperty_UsesAttributeOverride()
+    public void CreatePositionalCustomerRequest_DescriptionProperty_XmlParamWinsOverAttribute()
     {
         var schema = ResolveComponentSchema("CreatePositionalCustomerRequest");
 
         var descProp = (OpenApiSchema)schema.Properties!["description"];
-        descProp.Description.Should().Be("Internal description override",
-            because: "[Description(...)] on the positional ctor param wins over XML <param>");
+        descProp.Description.Should().Be("Free-form description for the customer record",
+            because: "the XML <param> of a positional record is the property's summary, which wins over [Description]");
     }
 
     /// <summary>
