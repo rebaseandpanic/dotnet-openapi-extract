@@ -57,6 +57,13 @@ public sealed class SecuritySchemeExtractionResult
     public IReadOnlyList<string> OmittedSchemes { get; init; } = [];
 
     /// <summary>
+    /// <c>AddSecurityDefinition</c> declarations omitted because a URL given as a literal or constant
+    /// is not a URI reference: scheme name → the text.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> SchemesWithInvalidUri { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
     /// [DEPRECATED] All scheme names from <see cref="GlobalRequirements"/>, flattened in
     /// order. The flattening loses which names are alternatives and which must be combined.
     /// Setting it replaces <see cref="GlobalRequirements"/> with a single requirement that
@@ -126,6 +133,7 @@ public static class SecuritySchemeExtractor
         var schemes = new Dictionary<string, OpenApiSecurityScheme>(StringComparer.Ordinal);
         var globalRequirements = new List<IReadOnlyList<SecurityRequirementEntry>>();
         var omitted = new List<string>();
+        var invalidUris = new Dictionary<string, string>(StringComparer.Ordinal);
 
         // ── 1. AddJwtBearer registrations ─────────────────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddJwtBearer"))
@@ -172,11 +180,17 @@ public static class SecuritySchemeExtractor
                 continue;
             }
 
-            var scheme = TryParseSecuritySchemeFromInvocation(invocation, name!, context.CompilationResult?.Compilation, out var notStatic);
+            var scheme = TryParseSecuritySchemeFromInvocation(invocation, name!, context.CompilationResult?.Compilation, out var notStatic, out var invalidUri);
             if (notStatic)
             {
                 if (!schemes.ContainsKey(name!) && !omitted.Contains(name!))
                     omitted.Add(name!);
+                continue;
+            }
+
+            if (invalidUri != null)
+            {
+                invalidUris.TryAdd(name!, invalidUri);
                 continue;
             }
 
@@ -205,6 +219,8 @@ public static class SecuritySchemeExtractor
             Schemes = schemes,
             GlobalRequirementEntries = globalRequirements,
             OmittedSchemes = omitted.Where(n => !schemes.ContainsKey(n)).ToList(),
+            SchemesWithInvalidUri = invalidUris.Where(e => !schemes.ContainsKey(e.Key))
+                .ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal),
         };
     }
 
@@ -219,9 +235,10 @@ public static class SecuritySchemeExtractor
     /// with <paramref name="notStatic"/> set when a value the scheme needs cannot be resolved statically.
     /// </summary>
     private static OpenApiSecurityScheme? TryParseSecuritySchemeFromInvocation(
-        InvocationExpressionSyntax invocation, string schemeName, CSharpCompilation? compilation, out bool notStatic)
+        InvocationExpressionSyntax invocation, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri)
     {
         notStatic = false;
+        invalidUri = null;
         var args = invocation.ArgumentList.Arguments;
         if (args.Count < 2)
             return null;
@@ -241,7 +258,7 @@ public static class SecuritySchemeExtractor
         if (!typeName.Contains("SecurityScheme", StringComparison.Ordinal))
             return null;
 
-        return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic);
+        return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic, out invalidUri);
     }
 
     /// <summary>
@@ -254,14 +271,15 @@ public static class SecuritySchemeExtractor
     /// document can hold it.
     /// </summary>
     private static OpenApiSecurityScheme? ParseObjectInitializer(
-        InitializerExpressionSyntax? initializer, string schemeName, CSharpCompilation? compilation, out bool notStatic)
+        InitializerExpressionSyntax? initializer, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri)
     {
         notStatic = false;
+        invalidUri = null;
         if (initializer == null)
             return null;
 
         var scheme = new OpenApiSecurityScheme();
-        var unresolved = false;
+        var issues = new ParseIssues();
 
         foreach (var expr in initializer.Expressions)
         {
@@ -305,15 +323,15 @@ public static class SecuritySchemeExtractor
                     break;
 
                 case "Flows":
-                    scheme.Flows = ParseFlows(value, compilation, ref unresolved);
+                    scheme.Flows = ParseFlows(value, compilation, issues);
                     break;
 
                 case "OpenIdConnectUrl":
-                    scheme.OpenIdConnectUrl = ParseUri(value, compilation, ref unresolved);
+                    scheme.OpenIdConnectUrl = ParseUri(value, compilation, issues);
                     break;
 
                 case "OAuth2MetadataUrl":
-                    scheme.OAuth2MetadataUrl = ParseUri(value, compilation, ref unresolved);
+                    scheme.OAuth2MetadataUrl = ParseUri(value, compilation, issues);
                     break;
 
                 case "Deprecated":
@@ -323,7 +341,7 @@ public static class SecuritySchemeExtractor
                         && (deprecated.IsKind(SyntaxKind.TrueLiteralExpression) || deprecated.IsKind(SyntaxKind.FalseLiteralExpression)))
                         scheme.Deprecated = deprecated.IsKind(SyntaxKind.TrueLiteralExpression);
                     else
-                        unresolved = true;
+                        issues.Unresolved = true;
                     break;
             }
         }
@@ -332,9 +350,15 @@ public static class SecuritySchemeExtractor
         if (scheme.Type == null)
             return null;
 
-        if (unresolved)
+        if (issues.Unresolved)
         {
             notStatic = true;
+            return null;
+        }
+
+        if (issues.InvalidUri != null)
+        {
+            invalidUri = issues.InvalidUri;
             return null;
         }
 
@@ -387,6 +411,16 @@ public static class SecuritySchemeExtractor
         Require(flows.DeviceAuthorization, "deviceAuthorization", "TokenUrl", flows.DeviceAuthorization?.TokenUrl);
     }
 
+    /// <summary>What reading a security scheme initializer found that keeps the scheme out of the document.</summary>
+    private sealed class ParseIssues
+    {
+        /// <summary>A value that cannot be resolved statically (a variable, a call).</summary>
+        public bool Unresolved { get; set; }
+
+        /// <summary>The first literal or constant URL that is not a URI reference.</summary>
+        public string? InvalidUri { get; set; }
+    }
+
     /// <summary>
     /// Whether <paramref name="value"/> is <c>null</c>, <c>default</c> or <c>default(T)</c>: a known absence
     /// of a value, not a value that cannot be resolved.
@@ -410,16 +444,16 @@ public static class SecuritySchemeExtractor
 
     /// <summary>
     /// <c>new OpenApiOAuthFlows { Implicit = …, Password = …, ClientCredentials = …, AuthorizationCode = …,
-    /// DeviceAuthorization = … }</c>; anything else sets <paramref name="unresolved"/>.
+    /// DeviceAuthorization = … }</c>; anything else marks <paramref name="issues"/> unresolved.
     /// </summary>
-    private static OpenApiOAuthFlows? ParseFlows(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    private static OpenApiOAuthFlows? ParseFlows(ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
     {
         if (IsNoValue(value))
             return null; // known: no flows
 
         if (Creation(value) is not { } creation)
         {
-            unresolved = true;
+            issues.Unresolved = true;
             return null;
         }
 
@@ -428,11 +462,11 @@ public static class SecuritySchemeExtractor
         {
             switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
             {
-                case "Implicit":            flows.Implicit = ParseFlow(assignment.Right, compilation, ref unresolved); break;
-                case "Password":            flows.Password = ParseFlow(assignment.Right, compilation, ref unresolved); break;
-                case "ClientCredentials":   flows.ClientCredentials = ParseFlow(assignment.Right, compilation, ref unresolved); break;
-                case "AuthorizationCode":   flows.AuthorizationCode = ParseFlow(assignment.Right, compilation, ref unresolved); break;
-                case "DeviceAuthorization": flows.DeviceAuthorization = ParseFlow(assignment.Right, compilation, ref unresolved); break;
+                case "Implicit":            flows.Implicit = ParseFlow(assignment.Right, compilation, issues); break;
+                case "Password":            flows.Password = ParseFlow(assignment.Right, compilation, issues); break;
+                case "ClientCredentials":   flows.ClientCredentials = ParseFlow(assignment.Right, compilation, issues); break;
+                case "AuthorizationCode":   flows.AuthorizationCode = ParseFlow(assignment.Right, compilation, issues); break;
+                case "DeviceAuthorization": flows.DeviceAuthorization = ParseFlow(assignment.Right, compilation, issues); break;
             }
         }
 
@@ -441,16 +475,16 @@ public static class SecuritySchemeExtractor
 
     /// <summary>
     /// <c>new OpenApiOAuthFlow { AuthorizationUrl, TokenUrl, RefreshUrl, DeviceAuthorizationUrl, Scopes }</c>;
-    /// a value that is not a literal (or an in-project constant) sets <paramref name="unresolved"/>.
+    /// a value that is not a literal (or an in-project constant) marks <paramref name="issues"/> unresolved.
     /// </summary>
-    private static OpenApiOAuthFlow? ParseFlow(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    private static OpenApiOAuthFlow? ParseFlow(ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
     {
         if (IsNoValue(value))
             return null; // known: no such flow
 
         if (Creation(value) is not { } creation)
         {
-            unresolved = true;
+            issues.Unresolved = true;
             return null;
         }
 
@@ -459,11 +493,11 @@ public static class SecuritySchemeExtractor
         {
             switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
             {
-                case "AuthorizationUrl":       flow.AuthorizationUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
-                case "TokenUrl":               flow.TokenUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
-                case "RefreshUrl":             flow.RefreshUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
-                case "DeviceAuthorizationUrl": flow.DeviceAuthorizationUrl = ParseUri(assignment.Right, compilation, ref unresolved); break;
-                case "Scopes":                 flow.Scopes = ParseScopes(assignment.Right, compilation, ref unresolved); break;
+                case "AuthorizationUrl":       flow.AuthorizationUrl = ParseUri(assignment.Right, compilation, issues); break;
+                case "TokenUrl":               flow.TokenUrl = ParseUri(assignment.Right, compilation, issues); break;
+                case "RefreshUrl":             flow.RefreshUrl = ParseUri(assignment.Right, compilation, issues); break;
+                case "DeviceAuthorizationUrl": flow.DeviceAuthorizationUrl = ParseUri(assignment.Right, compilation, issues); break;
+                case "Scopes":                 flow.Scopes = ParseScopes(assignment.Right, compilation, issues); break;
             }
         }
 
@@ -474,34 +508,42 @@ public static class SecuritySchemeExtractor
 
     /// <summary>
     /// <c>new Uri("…")</c> (or <c>new("…")</c>, an optional <c>UriKind</c>) with a literal or in-project
-    /// constant string; anything else sets <paramref name="unresolved"/>.
+    /// constant string; anything else marks <paramref name="issues"/> unresolved.
     /// </summary>
-    private static Uri? ParseUri(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    private static Uri? ParseUri(ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
     {
         if (IsNoValue(value))
             return null; // known: no URL
 
-        if (Creation(value) is { ArgumentList.Arguments: [var first, ..] }
-            && InvocationMatcher.GetStringValue(first.Expression, compilation) is { } text
-            && Uri.TryCreate(text, UriKind.RelativeOrAbsolute, out var uri))
-            return uri;
+        if (Creation(value) is not { ArgumentList.Arguments: [var first, ..] }
+            || InvocationMatcher.GetStringValue(first.Expression, compilation) is not { } text)
+        {
+            issues.Unresolved = true;
+            return null;
+        }
 
-        unresolved = true;
-        return null;
+        // A known string that is not a URI reference is not an unresolved value: reported on its own.
+        if (!Versioning.DocumentMetadata.IsUriReference(text) || !Uri.TryCreate(text, UriKind.RelativeOrAbsolute, out var uri))
+        {
+            issues.InvalidUri ??= text;
+            return null;
+        }
+
+        return uri;
     }
 
     /// <summary>
     /// <c>new Dictionary&lt;string, string&gt; { ["scope"] = "description", { "scope", "description" } }</c>
-    /// with literal or constant strings; anything else sets <paramref name="unresolved"/>.
+    /// with literal or constant strings; anything else marks <paramref name="issues"/> unresolved.
     /// </summary>
-    private static Dictionary<string, string>? ParseScopes(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
+    private static Dictionary<string, string>? ParseScopes(ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
     {
         if (IsNoValue(value))
             return null; // known: no scopes (written as the empty map)
 
         if (Creation(value) is not { } creation)
         {
-            unresolved = true;
+            issues.Unresolved = true;
             return null;
         }
 
@@ -519,7 +561,7 @@ public static class SecuritySchemeExtractor
                 || InvocationMatcher.GetStringValue(p.Key, compilation) is not { } scope
                 || InvocationMatcher.GetStringValue(p.Value, compilation) is not { } text)
             {
-                unresolved = true;
+                issues.Unresolved = true;
                 return null;
             }
 

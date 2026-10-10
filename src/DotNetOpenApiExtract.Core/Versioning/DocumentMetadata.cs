@@ -19,6 +19,13 @@ internal static class DocumentMetadata
     public const string Dialect32 = "https://spec.openapis.org/oas/3.2/dialect/2025-09-17";
 
     /// <summary>
+    /// Whether <paramref name="text"/> is a well-formed URI reference, absolute or relative: no raw
+    /// spaces or other characters that must be escaped, valid percent-encodings.
+    /// </summary>
+    public static bool IsUriReference(string text) =>
+        !string.IsNullOrWhiteSpace(text) && Uri.IsWellFormedUriString(text, UriKind.RelativeOrAbsolute);
+
+    /// <summary>
     /// Checks the options that need no assembly: server names, <c>$self</c>, the dialect for the
     /// target version, and a license identifier given together with a license URL.
     /// </summary>

@@ -328,4 +328,43 @@ public class OAuthOidcSchemeTests(OAuthOidcSchemeFixture fixture) : IClassFixtur
             .Should().Be("""{"password":{"tokenUrl":"https://a.example.com/token","scopes":{}}}""");
         diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeNotStatic);
     }
+
+    [Fact]
+    public void LiteralThatIsNotAUri_OmitsTheScheme_WithItsOwnWarning()
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), """
+            const string Token = "https://auth.example.com/to ken";
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("Oidc", new OpenApiSecurityScheme { Type = SecuritySchemeType.OpenIdConnect, OpenIdConnectUrl = new Uri("not a uri") });
+                c.AddSecurityDefinition("Client", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.OAuth2,
+                    Flows = new OpenApiOAuthFlows { ClientCredentials = new OpenApiOAuthFlow { TokenUrl = new Uri(Token) } },
+                });
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement { { new OpenApiSecuritySchemeReference("Oidc"), [] } });
+            });
+            """);
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.ModernApiDll,
+            XmlPath      = TestPaths.ModernApiXml,
+            SourceRoot   = directory.Path,
+            OnDiagnostic = onDiagnostic,
+        });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_0, CancellationToken.None).GetAwaiter().GetResult())!;
+
+        json["components"]?["securitySchemes"]?.AsObject().Should().BeNullOrEmpty();
+        json.AsObject().ContainsKey("security").Should().BeFalse();
+        diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeInvalidUri)
+            .Select(d => (d.Location, string.Join("|", d.Subjects)))
+            .Should().BeEquivalentTo(new[]
+            {
+                ("#/components/securitySchemes/Oidc", "Oidc|not a uri"),
+                ("#/components/securitySchemes/Client", "Client|https://auth.example.com/to ken"),
+            });
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeNotStatic
+                                             || (d.Code == ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme && d.Subjects.Contains("Oidc")));
+    }
 }

@@ -862,7 +862,8 @@ public sealed class OpenApiDocumentBuilder
         ApplySecuritySchemes(document, securityResult);
         RecordOmittedSecuritySchemes(securityResult, ledger);
         var removedMutualTls = RemoveMutualTlsBefore31(document, ledger);
-        OmitUndeclaredSecuritySchemes(document, diagnostics, [.. securityResult.OmittedSchemes, .. removedMutualTls]);
+        OmitUndeclaredSecuritySchemes(document, diagnostics,
+            [.. securityResult.OmittedSchemes, .. securityResult.SchemesWithInvalidUri.Keys, .. removedMutualTls]);
 
         // ── Step 8: ProblemDetails ──────────────────────────────────────────
         if (ProblemDetailsDetector.IsRegistered(sourceContext))
@@ -1925,6 +1926,22 @@ public sealed class OpenApiDocumentBuilder
                 Feature  = "securityScheme",
                 Action   = DiagnosticAction.Omitted,
                 Subjects = [name],
+            });
+        }
+
+        foreach (var (name, text) in securityResult.SchemesWithInvalidUri)
+        {
+            ledger.Add(new PendingLoss
+            {
+                Class    = LossClass.Source,
+                Code     = ExtractionDiagnosticCodes.SecuritySchemeInvalidUri,
+                Anchor   = LossAnchor.Document.Instance,
+                Location = $"#/components/securitySchemes/{Validation.JsonPointerHelper.EncodeSegment(name)}",
+                Message  = $"security scheme '{name}' has the URL \"{text}\", which is not a URI reference: the scheme is omitted, " +
+                           "and every requirement that names it loses that scheme.",
+                Feature  = "securityScheme.url",
+                Action   = DiagnosticAction.Omitted,
+                Subjects = [name, text],
             });
         }
     }

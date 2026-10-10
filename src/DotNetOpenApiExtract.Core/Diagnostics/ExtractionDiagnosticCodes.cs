@@ -207,6 +207,13 @@ public static class ExtractionDiagnosticCodes
     public const string SecuritySchemeNotStatic = "security.scheme-not-static";
 
     /// <summary>
+    /// An <c>AddSecurityDefinition</c> declaration gives a URL as a literal or constant that is not a URI
+    /// reference: the scheme is omitted, with the requirements that name it. Location:
+    /// <c>#/components/securitySchemes/{name}</c>. Subjects: the scheme name and the text.
+    /// </summary>
+    public const string SecuritySchemeInvalidUri = "security.scheme-invalid-uri";
+
+    /// <summary>
     /// For a 3.0/3.1 target, the <c>deviceAuthorization</c> flow of an OAuth2 scheme (OpenAPI 3.2) is
     /// written as <c>x-oai-deviceAuthorization</c>; one per scheme, covering the flow's URLs and scopes.
     /// Subjects: the scheme name.
