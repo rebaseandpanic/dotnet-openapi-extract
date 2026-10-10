@@ -9,11 +9,13 @@ namespace DotNetOpenApiExtract.Core.Validation;
 public sealed class OpenApiValidator
 {
     /// <summary>
-    /// All 52 built-in validation rules in canonical order.
+    /// All built-in validation rules in canonical order.
     /// Group A: spec-MUST violations (error severity).
     /// Group B: structural completeness (warning severity).
     /// Group C: developer experience (warning severity, off by default — see <see cref="DefaultOffRuleIds"/>).
     /// Group D: Wave 9 rules (mixed severity, some off by default — see <see cref="DefaultOffRuleIds"/>).
+    /// Group E: document structure of OpenAPI 3.1/3.2 (error, on by default; each rule applies to the
+    /// versions that have the checked field).
     /// </summary>
     public static IReadOnlyList<IValidationRule> AllRules { get; } = new IValidationRule[]
     {
@@ -91,10 +93,17 @@ public sealed class OpenApiValidator
         new OperationOperationIdPascalCaseRule(),    // R50, off by default, warning
         new SchemaAdditionalPropertiesExplicitRule(), // R51, off by default, warning
         new ResponseContentTypeJsonDefaultRule(),    // R52, off by default, warning
+
+        // ── Group E — Document structure of OpenAPI 3.1/3.2 (error, on by default) ──
+        new SpecLicenseIdentifierOrUrlRule(),        // 3.1+
+        new SpecPathsOrWebhooksOrComponentsRule(),   // 3.0: paths; 3.1+: one of the three
+        new TagParentDefinedRule(),                  // 3.2
+        new TagNoParentCycleRule(),                  // 3.2
+        new SpecServerNamesUniqueRule(),             // 3.2
     };
 
     /// <summary>
-    /// The IDs of all 52 built-in rules, in canonical order.
+    /// The IDs of all built-in rules, in canonical order.
     /// </summary>
     public static IReadOnlyList<string> AllRuleIds => AllRules.Select(r => r.Id).ToList();
 

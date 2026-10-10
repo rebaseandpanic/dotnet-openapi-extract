@@ -756,6 +756,12 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         // Capture the spec version from the diagnostic for version-conditional rules
         // (e.g. spec.no-ref-siblings skips on 3.1/3.2 where $ref siblings are legal).
         loadedSpecVersion = readResult.Diagnostic?.SpecificationVersion;
+
+        // The reader gives a document without a paths object an empty one, the same as
+        // `paths: {}`; spec.paths-or-webhooks-or-components tells the two apart, so a missing
+        // paths object is passed on as missing.
+        if (!await HasTopLevelKeyAsync(specFile.FullName, "paths", cancellationToken))
+            document.Paths = null!;
     }
     catch (Exception ex)
     {
@@ -827,6 +833,31 @@ return await rootCommand.Parse(args).InvokeAsync();
 /// Priority: explicit --warn-rule / --error-rule wins over --strict.
 /// --strict promotes remaining warnings (not explicitly overridden) to errors.
 /// </summary>
+// Whether the top-level object of a JSON or YAML document has the key. A document whose text
+// starts with '{' is read as JSON (tolerating comments and trailing commas), any other as YAML.
+static async Task<bool> HasTopLevelKeyAsync(string path, string key, CancellationToken cancellationToken)
+{
+    var text = await File.ReadAllTextAsync(path, cancellationToken);
+    if (text.TrimStart().StartsWith('{'))
+    {
+        using var json = System.Text.Json.JsonDocument.Parse(text, new System.Text.Json.JsonDocumentOptions
+        {
+            CommentHandling     = System.Text.Json.JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+        return json.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+            && json.RootElement.TryGetProperty(key, out _);
+    }
+
+    var stream = new SharpYaml.Serialization.YamlStream();
+    using (var reader = new StringReader(text))
+        stream.Load(reader);
+
+    return stream.Documents.Count > 0
+        && stream.Documents[0].RootNode is SharpYaml.Serialization.YamlMappingNode root
+        && root.Children.Keys.Any(k => k is SharpYaml.Serialization.YamlScalarNode { Value: var value } && value == key);
+}
+
 static IReadOnlyDictionary<string, ValidationSeverity>? BuildSeverityOverrides(
     bool strict,
     string[]? warnRules,

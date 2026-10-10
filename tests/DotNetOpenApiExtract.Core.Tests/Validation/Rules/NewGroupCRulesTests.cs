@@ -272,10 +272,10 @@ public sealed class NewGroupCRulesTests
     }
 
     [Fact]
-    public void AllRules_Count_Is52()
+    public void AllRules_Count_Is57()
     {
-        CoreValidator.AllRules.Should().HaveCount(52,
-            because: "Wave 9 adds 5 rules to the 47 from Wave 7b, for a total of 52");
+        CoreValidator.AllRules.Should().HaveCount(57,
+            because: "Wave 9 adds 5 rules to the 47 from Wave 7b, and the OpenAPI 3.1/3.2 document structure rules 5 more");
     }
 
     [Fact]

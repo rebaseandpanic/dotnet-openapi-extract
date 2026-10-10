@@ -80,16 +80,17 @@ public sealed class SeverityInfrastructureTests
     }
 
     [Fact]
-    public void AllRules_SeverityCounts_27ErrorsAnd25Warnings()
+    public void AllRules_SeverityCounts_32ErrorsAnd25Warnings()
     {
         // Wave 7b added 8 Group-A error rules and 10 Group-B + 5 Group-C warning rules.
         // Wave 9 added 1 error (R48) + 4 warnings (R49, R50, R51, R52).
-        // Total: 47 + 5 = 52 rules.
-        // Errors: 26 + 1 = 27.
+        // Group E added 5 errors (OpenAPI 3.1/3.2 document structure).
+        // Total: 47 + 5 + 5 = 57 rules.
+        // Errors: 26 + 1 + 5 = 32.
         // Warnings: 21 + 4 = 25.
         var errors = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Error);
         var warnings = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Warning);
-        errors.Should().Be(27, because: "27 rules should default to Error (26 from Wave 7b + 1 R48 from Wave 9)");
+        errors.Should().Be(32, because: "32 rules should default to Error (26 from Wave 7b + 1 R48 from Wave 9 + 5 from Group E)");
         warnings.Should().Be(25, because: "25 rules should default to Warning (21 from Wave 7b + 4 from Wave 9)");
     }
 

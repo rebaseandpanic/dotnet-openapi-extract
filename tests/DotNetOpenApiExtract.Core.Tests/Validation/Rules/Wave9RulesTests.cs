@@ -685,9 +685,9 @@ public sealed class Wave9RulesTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void AllRuleIds_Count_Is52()
+    public void AllRuleIds_Count_Is57()
     {
-        CoreValidator.AllRuleIds.Should().HaveCount(52);
+        CoreValidator.AllRuleIds.Should().HaveCount(57);
     }
 
     [Fact]

@@ -143,6 +143,35 @@ public class CliFlagsTests
         }
     }
 
+    /// <summary>
+    /// The version flag reaches the validation, not only the serializer: a Program.cs tag whose
+    /// parent is not declared breaks <c>tag.parent-defined</c>, a rule of OpenAPI 3.2 only.
+    /// </summary>
+    [Theory]
+    [InlineData("3.2", "3.2.0", 1)]
+    [InlineData("3.1", "3.1.2", 0)]
+    public async Task VersionFlag_DrivesTheValidation(string version, string openapi, int exitCode)
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), """
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddTag(new OpenApiTag { Name = "SchemaKeywords", Parent = new OpenApiTagReference("NoSuchTag") });
+            });
+            """);
+        var report = Path.Combine(directory.Path, "report.json");
+        var skips = RulesModernApiBreaks.SelectMany(rule => new[] { "--skip-rule", rule }).ToArray();
+
+        var (result, document) = await Run(directory,
+            ["--openapi-version", version, "--source-root", directory.Path, "--validate", "--validation-report", report, .. skips]);
+
+        result.ExitCode.Should().Be(exitCode, result.StdOut + result.StdErr);
+        document!["openapi"]!.GetValue<string>().Should().Be(openapi);
+        var rules = JsonNode.Parse(await File.ReadAllTextAsync(report, TestContext.Current.CancellationToken))!["violations"]!
+            .AsArray().Select(v => v!["rule"]!.GetValue<string>()).ToList();
+        rules.Count(r => r == "tag.parent-defined").Should().Be(exitCode);
+    }
+
     [Fact]
     public async Task ExtractionWarnings_DoNotChangeTheExitCode_StrictOnlyActsOnValidation()
     {
