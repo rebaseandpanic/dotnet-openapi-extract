@@ -243,19 +243,16 @@ public static class SecuritySchemeExtractor
         if (args.Count < 2)
             return null;
 
-        // The second argument must be an object-creation expression.
-        var secondArg = args[1].Expression;
-
-        // Strip parentheses / cast expressions defensively
-        while (secondArg is ParenthesizedExpressionSyntax paren)
-            secondArg = paren.Expression;
-
-        if (secondArg is not ObjectCreationExpressionSyntax objCreation)
+        // The second argument is new OpenApiSecurityScheme { … } or the target-typed new() { … }
+        // (the parameter is an OpenApiSecurityScheme); loose type check on the explicit form.
+        // Anything else (a variable, a call) cannot be read: the scheme is omitted with a warning.
+        if (ObjectCreations.Of(args[1].Expression) is not { } objCreation)
+        {
+            notStatic = true;
             return null;
+        }
 
-        // The type name should reference OpenApiSecurityScheme (we do a loose check)
-        var typeName = GetUnqualifiedTypeName(objCreation.Type);
-        if (!typeName.Contains("SecurityScheme", StringComparison.Ordinal))
+        if (!ObjectCreations.Creates(objCreation, name => name.Contains("SecurityScheme", StringComparison.Ordinal)))
             return null;
 
         return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic, out invalidUri);
@@ -672,12 +669,18 @@ public static class SecuritySchemeExtractor
         // Only referenceId names a scheme; hostDocument and externalResource (a document
         // URI) are not scheme names. The argument may be a literal or an in-project const
         // (Consts.SchemeName); anything else is reported as skipped.
+        // The target-typed form new("Name", …) stands as the key of a requirement entry, where the type
+        // is OpenApiSecuritySchemeReference: { new("Name"), scopes } or [new("Name")] = scopes.
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>())
+            .OfType<BaseObjectCreationExpressionSyntax>())
         {
-            var typeName = GetUnqualifiedTypeName(objCreation.Type);
-            if (!typeName.Contains("SecuritySchemeReference", StringComparison.Ordinal)
-                || objCreation.ArgumentList == null)
+            var isReference = objCreation switch
+            {
+                ObjectCreationExpressionSyntax explicitCreation =>
+                    GetUnqualifiedTypeName(explicitCreation.Type).Contains("SecuritySchemeReference", StringComparison.Ordinal),
+                _ => IsRequirementKey(objCreation),
+            };
+            if (!isReference || objCreation.ArgumentList is not { Arguments.Count: > 0 })
                 continue;
 
             var referenceIdArg = GetReferenceIdArgument(objCreation.ArgumentList);
@@ -695,7 +698,7 @@ public static class SecuritySchemeExtractor
         //    also signals a security-scheme reference — either via Type = ReferenceType.SecurityScheme or
         //    because the containing ObjectCreation type text contains "OpenApiReference". ──
         foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>())
+            .OfType<BaseObjectCreationExpressionSyntax>())
         {
             if (objCreation.Initializer == null)
                 continue;
@@ -718,8 +721,13 @@ public static class SecuritySchemeExtractor
             //   2. The same initializer contains Type = ReferenceType.SecurityScheme.
             // Using OR would let any OpenApiReference with an Id (e.g. a schema reference
             // inside AddSecurityRequirement) pollute the requirement list.
-            var typeName = GetUnqualifiedTypeName(objCreation.Type);
-            bool isReferenceType = typeName.Contains("OpenApiReference", StringComparison.Ordinal);
+            // The target-typed form new() { … } is an OpenApiReference when it is the Reference of a scheme.
+            bool isReferenceType = objCreation switch
+            {
+                ObjectCreationExpressionSyntax explicitCreation =>
+                    GetUnqualifiedTypeName(explicitCreation.Type).Contains("OpenApiReference", StringComparison.Ordinal),
+                _ => ObjectCreations.AssignedMember(objCreation) == "Reference",
+            };
 
             bool hasSecuritySchemeType = assignments.Any(a =>
                 a.Left is IdentifierNameSyntax l && l.Identifier.Text == "Type" &&
@@ -790,6 +798,24 @@ public static class SecuritySchemeExtractor
         }
 
         return [];
+    }
+
+    /// <summary>
+    /// Whether <paramref name="creation"/> is the key of a requirement entry: the first element of
+    /// <c>{ key, scopes }</c> or the index of <c>[key] = scopes</c>.
+    /// </summary>
+    private static bool IsRequirementKey(BaseObjectCreationExpressionSyntax creation)
+    {
+        SyntaxNode node = creation;
+        while (node.Parent is ParenthesizedExpressionSyntax paren)
+            node = paren;
+
+        return node.Parent switch
+        {
+            InitializerExpressionSyntax { RawKind: (int)SyntaxKind.ComplexElementInitializerExpression, Expressions: [var key, _] } => key == node,
+            ArgumentSyntax { Parent: BracketedArgumentListSyntax { Parent: ImplicitElementAccessSyntax } } => true,
+            _ => false,
+        };
     }
 
     /// <summary>

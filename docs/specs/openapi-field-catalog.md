@@ -15,7 +15,7 @@ It replaces `docs/research/archive/03-openapi-attributes-catalog.md`. That older
 
 ## Context
 
-The tool reads a compiled assembly through `MetadataLoadContext`, XML documentation files, and (optionally) the project's C# sources through Roslyn. It never runs user code. The document model is Microsoft.OpenApi 3.10.2.
+The tool reads a compiled assembly through `MetadataLoadContext`, XML documentation files, and (optionally) the project's C# sources through Roslyn. It never runs user code. Where a row names a Roslyn object creation `new T { … }`, the target-typed form `new() { … }` in the same place is read the same way; document metadata that is not an object creation gives the warning `document.metadata-not-static`. The document model is Microsoft.OpenApi 3.10.2.
 
 The target version (`--openapi-version`, default `3.0`; in Core `OpenApiDocumentOptions.OpenApiVersion` and `SchemaOptions.OpenApiVersion`) is a build parameter: the document builder and the schema generator receive it, the CLI builds, validates and serializes for that one version, and an unsupported value is a configuration error. Version-dependent forms are being added field by field (rows marked "stage 1"); a field without one is built the same for every version and written by the library in the target format. Version-dependent today:
 

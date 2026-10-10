@@ -1,5 +1,7 @@
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using DotNetOpenApiExtract.Core.Diagnostics;
 using DotNetOpenApiExtract.Core.SourceAnalysis;
 using static DotNetOpenApiExtract.Core.SourceAnalysis.TypeSyntaxHelper;
 
@@ -95,10 +97,21 @@ public static class DocumentTagsExtractor
     /// A <see cref="DocumentTagsExtractionResult"/> with any tag enrichments and
     /// optional root-level externalDocs found.
     /// </returns>
-    public static DocumentTagsExtractionResult Extract(SourceAnalysisContext context)
+    public static DocumentTagsExtractionResult Extract(SourceAnalysisContext context) => Extract(context, onDiagnostic: null);
+
+    /// <summary>
+    /// Scans the Roslyn source context as <see cref="Extract(SourceAnalysisContext)"/> does and reports
+    /// to <paramref name="onDiagnostic"/> the metadata it cannot read (code
+    /// <see cref="ExtractionDiagnosticCodes.DocumentMetadataNotStatic"/>).
+    /// </summary>
+    /// <param name="context">The source analysis context built from the entry-point source.</param>
+    /// <param name="onDiagnostic">Receives the warnings; <see langword="null"/> to ignore them.</param>
+    public static DocumentTagsExtractionResult Extract(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (!context.IsAvailable || context.EntryPointNode == null)
             return new DocumentTagsExtractionResult();
+
+        ReportUnreadMetadata(context, onDiagnostic);
 
         var tagsByName = new Dictionary<string, TagMetadata>(StringComparer.Ordinal);
         string? rootExternalDocsUrl = null;
@@ -165,12 +178,8 @@ public static class DocumentTagsExtractor
     private static (string? Summary, LicenseMetadata? License) TryExtractInfoMetadata(
         InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
     {
-        foreach (var objCreation in invocation.ArgumentList.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+        foreach (var objCreation in InfoCreations(invocation))
         {
-            var typeName = GetUnqualifiedTypeName(objCreation.Type);
-            if (!typeName.Contains("OpenApiInfo", StringComparison.Ordinal) && !typeName.EndsWith("Info", StringComparison.Ordinal))
-                continue;
-
             string? summary = null;
             LicenseMetadata? license = null;
             foreach (var assignment in objCreation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
@@ -234,18 +243,9 @@ public static class DocumentTagsExtractor
         if (args.Count < 1)
             return null;
 
-        var firstArg = args[0].Expression;
-
-        // Strip parentheses defensively.
-        while (firstArg is ParenthesizedExpressionSyntax paren)
-            firstArg = paren.Expression;
-
-        if (firstArg is not ObjectCreationExpressionSyntax objCreation)
-            return null;
-
-        // Loose type-name check.
-        var typeName = GetUnqualifiedTypeName(objCreation.Type);
-        if (!typeName.Contains("OpenApiTag", StringComparison.Ordinal) && !typeName.EndsWith("Tag", StringComparison.Ordinal))
+        // new OpenApiTag { … } or the target-typed new() { … } (the parameter is an OpenApiTag);
+        // loose type-name check on the explicit form.
+        if (ObjectCreations.Of(args[0].Expression) is not { } objCreation || !ObjectCreations.Creates(objCreation, IsTagTypeName))
             return null;
 
         return ParseOpenApiTagInitializer(objCreation.Initializer, compilation);
@@ -325,15 +325,10 @@ public static class DocumentTagsExtractor
     private static (string? url, string? description) ParseExternalDocsExpression(
         ExpressionSyntax expression)
     {
-        while (expression is ParenthesizedExpressionSyntax paren)
-            expression = paren.Expression;
-
-        if (expression is not ObjectCreationExpressionSyntax objCreation)
-            return (null, null);
-
-        // Loose type check: OpenApiExternalDocs or ExternalDocs suffix.
-        var typeName = GetUnqualifiedTypeName(objCreation.Type);
-        if (!typeName.Contains("ExternalDocs", StringComparison.Ordinal) && !typeName.Contains("ExternalDoc", StringComparison.Ordinal))
+        // new OpenApiExternalDocs { … } or the target-typed new() { … } (the member is an
+        // OpenApiExternalDocs); loose type check on the explicit form.
+        if (ObjectCreations.Of(expression) is not { } objCreation
+            || !ObjectCreations.Creates(objCreation, name => name.Contains("ExternalDoc", StringComparison.Ordinal)))
             return (null, null);
 
         return ParseExternalDocsInitializer(objCreation.Initializer);
@@ -387,8 +382,8 @@ public static class DocumentTagsExtractor
         while (expression is ParenthesizedExpressionSyntax paren)
             expression = paren.Expression;
 
-        // new Uri("https://...")
-        if (expression is ObjectCreationExpressionSyntax uriCreation)
+        // new Uri("https://...") or the target-typed new("https://...")
+        if (expression is BaseObjectCreationExpressionSyntax uriCreation)
         {
             var arg0 = uriCreation.ArgumentList?.Arguments.FirstOrDefault();
             if (arg0?.Expression is LiteralExpressionSyntax uriLit &&
@@ -419,13 +414,8 @@ public static class DocumentTagsExtractor
     {
         // Scan all object-creation expressions in the argument list for OpenApiInfo
         // with an ExternalDocs property.
-        foreach (var objCreation in invocation.ArgumentList.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>())
+        foreach (var objCreation in InfoCreations(invocation))
         {
-            var typeName = GetUnqualifiedTypeName(objCreation.Type);
-            if (!typeName.Contains("OpenApiInfo", StringComparison.Ordinal) && !typeName.EndsWith("Info", StringComparison.Ordinal))
-                continue;
-
             if (objCreation.Initializer == null)
                 continue;
 
@@ -444,4 +434,98 @@ public static class DocumentTagsExtractor
 
         return (null, null);
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Object creations of the document metadata, both forms
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static bool IsInfoTypeName(string name) =>
+        name.Contains("OpenApiInfo", StringComparison.Ordinal) || name.EndsWith("Info", StringComparison.Ordinal);
+
+    private static bool IsTagTypeName(string name) =>
+        name.Contains("OpenApiTag", StringComparison.Ordinal) || name.EndsWith("Tag", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The <c>OpenApiInfo</c> creations in a <c>SwaggerDoc</c> / <c>AddOpenApi</c> call: an explicit
+    /// <c>new OpenApiInfo { … }</c> anywhere in its arguments, or a target-typed <c>new() { … }</c> where
+    /// an <c>OpenApiInfo</c> is required — the second argument of <c>SwaggerDoc</c>, or the value of an
+    /// <c>Info = …</c> assignment (a document transformer of <c>AddOpenApi</c>).
+    /// </summary>
+    private static IEnumerable<BaseObjectCreationExpressionSyntax> InfoCreations(InvocationExpressionSyntax invocation) =>
+        invocation.ArgumentList.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>().Where(creation => creation switch
+        {
+            ObjectCreationExpressionSyntax explicitCreation => IsInfoTypeName(GetUnqualifiedTypeName(explicitCreation.Type)),
+            _ => IsSwaggerDocInfoArgument(creation, invocation) || ObjectCreations.AssignedMember(creation) == "Info",
+        });
+
+    private static bool IsSwaggerDocInfoArgument(SyntaxNode node, InvocationExpressionSyntax invocation) =>
+        InvocationMatcher.GetSimpleMethodName(invocation.Expression) == "SwaggerDoc" && ObjectCreations.IsArgument(node, invocation, 1);
+
+    /// <summary>
+    /// Warns about document metadata that is not an object creation the extractor reads, instead of
+    /// losing it silently: the info of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the
+    /// <c>License</c> / <c>ExternalDocs</c> of an info, the argument of <c>AddTag</c> and a tag's
+    /// <c>ExternalDocs</c>. <c>null</c> and <c>default</c> are a known absence, not a loss.
+    /// </summary>
+    private static void ReportUnreadMetadata(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
+    {
+        if (onDiagnostic == null)
+            return;
+
+        void Report(string place, ExpressionSyntax value)
+        {
+            if (IsNoValue(value))
+                return;
+            DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+            {
+                Code     = ExtractionDiagnosticCodes.DocumentMetadataNotStatic,
+                Message  = $"{place}: {value} is not an object creation the extractor can read — its fields are not written.",
+                Subjects = [place, value.ToString()],
+            });
+        }
+
+        void CheckMembers(BaseObjectCreationExpressionSyntax creation, string owner, params string[] members)
+        {
+            foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+            {
+                if ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text is { } member
+                    && members.Contains(member) && ObjectCreations.Of(assignment.Right) == null)
+                    Report($"{owner}.{member}", assignment.Right);
+            }
+        }
+
+        foreach (var methodName in SwaggerDocMethodNames)
+        foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
+        {
+            if (methodName == "SwaggerDoc" && invocation.ArgumentList.Arguments is [_, { NameColon: null } info, ..]
+                && ObjectCreations.Of(info.Expression) == null)
+                Report("SwaggerDoc info", info.Expression);
+
+            foreach (var assignment in invocation.ArgumentList.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            {
+                if (assignment.Left is MemberAccessExpressionSyntax { Name.Identifier.Text: "Info" }
+                    && ObjectCreations.Of(assignment.Right) == null)
+                    Report($"{methodName} Info", assignment.Right);
+            }
+
+            foreach (var creation in InfoCreations(invocation))
+                CheckMembers(creation, "OpenApiInfo", "License", "ExternalDocs");
+        }
+
+        foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddTag"))
+        {
+            if (invocation.ArgumentList.Arguments is not [var tag, ..])
+                continue;
+            if (ObjectCreations.Of(tag.Expression) is { } creation)
+                CheckMembers(creation, "OpenApiTag", "ExternalDocs");
+            else
+                Report("AddTag", tag.Expression);
+        }
+    }
+
+    /// <summary>Whether <paramref name="value"/> is <c>null</c>, <c>default</c> or <c>default(T)</c>.</summary>
+    private static bool IsNoValue(ExpressionSyntax value) =>
+        ObjectCreations.Unwrap(value) is LiteralExpressionSyntax literal
+            && (literal.IsKind(SyntaxKind.NullLiteralExpression) || literal.IsKind(SyntaxKind.DefaultLiteralExpression))
+        || ObjectCreations.Unwrap(value) is DefaultExpressionSyntax;
 }

@@ -290,6 +290,15 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string DocumentTagFieldMovedToExtension = "document.tag-field-moved-to-extension";
 
+    /// <summary>
+    /// Document metadata in Program.cs is not an object creation the extractor reads (a variable, a
+    /// call): the <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / an <c>Info = …</c> assignment, its
+    /// <c>License</c> or <c>ExternalDocs</c>, an <c>AddTag</c> argument or a tag's <c>ExternalDocs</c>.
+    /// The fields it holds (license, summary, externalDocs, tag fields) are not written. Subjects: the
+    /// member or call and the expression.
+    /// </summary>
+    public const string DocumentMetadataNotStatic = "document.metadata-not-static";
+
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";
 }

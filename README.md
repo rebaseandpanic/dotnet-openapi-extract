@@ -178,7 +178,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - Global `[Consumes]` / `[Produces]` from MVC filter registrations
 - Request body media types from `[Consumes]` (action, then controller, then a global filter; default `application/json`); a form body uses its `[Consumes]` media type (e.g. `application/x-www-form-urlencoded`), default `multipart/form-data`
 - Document-level tags with descriptions, `externalDocs` and the OpenAPI 3.2 `summary` / `parent` / `kind` from `c.AddTag(...)`; `info.summary` and the license (`name`, `url`, `identifier`) from the `OpenApiInfo` of `SwaggerDoc(...)` / `AddOpenApi(...)` (options and CLI flags win field by field)
-- FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`)
+- FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`), and target-typed creations (`c.SwaggerDoc("v1", new() { License = new() { Name = "MIT", Url = new("…") } })`, `AddSecurityDefinition("x", new() { … })`, `Reference = new() { … }`, `[new("x", document)] = []`). Document metadata that is not an object creation (`c.SwaggerDoc("v1", info)`, `License = license`, `AddTag(tag)`) is reported with the warning `document.metadata-not-static`; a security definition built that way is omitted with `security.scheme-not-static`
 - In-project `const string` values via `SemanticModel.GetConstantValue`
 
 For every OpenAPI field the tool emits, could emit or never emits — its source in C#, its form in OpenAPI 3.0, 3.1 and 3.2, its warning and its validation rule — see the [OpenAPI Field Catalog](docs/specs/openapi-field-catalog.md).
