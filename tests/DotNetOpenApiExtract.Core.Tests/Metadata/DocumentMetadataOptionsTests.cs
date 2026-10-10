@@ -230,17 +230,21 @@ public class DocumentMetadataOptionsTests(DocumentMetadataFixture fixture) : ICl
         json["$self"]!.GetValue<string>().Should().Be(self);
     }
 
-    [Fact]
-    public void SelfUrl_WithAValidPercentEncoding_IsAccepted()
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2, "$self")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1, "x-oai-$self")]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0, "x-oai-$self")]
+    public void SelfUrl_WithAPercentEncoding_IsWrittenAsGiven(OpenApiSpecVersion version, string field)
     {
-        // Accepted as well formed; how the escape is written is the library's (it writes Uri.ToString()).
-        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        const string self = "https://example.com/a%20b/openapi.json";
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
         {
             AssemblyPath   = TestPaths.ModernApiDll,
-            OpenApiVersion = OpenApiSpecVersion.OpenApi3_2,
-            SelfUrl        = "https://example.com/a%20b/openapi.json",
+            OpenApiVersion = version,
+            SelfUrl        = self,
         });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult())!;
 
-        build.Should().NotThrow();
+        json[field]!.GetValue<string>().Should().Be(self, because: "an unescaped space is not a URI reference");
     }
 }

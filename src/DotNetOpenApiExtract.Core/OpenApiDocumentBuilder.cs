@@ -648,8 +648,9 @@ public sealed class OpenApiDocumentBuilder
             Paths = new OpenApiPaths(),
         };
 
+        // Written verbatim: the serializer writes $self with Uri.ToString(), which unescapes it.
         if (options.SelfUrl != null)
-            document.Self = new Uri(options.SelfUrl, UriKind.RelativeOrAbsolute);
+            document.Self = new VerbatimUri(options.SelfUrl, UriKind.RelativeOrAbsolute);
 
         // jsonSchemaDialect exists from 3.1: a 3.0 document omits an accepted dialect, with a warning.
         if (options.JsonSchemaDialect != null)
