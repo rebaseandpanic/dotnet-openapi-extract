@@ -63,15 +63,24 @@ public sealed class OpenApiDocumentOptions
 
     /// <summary>
     /// Title of the API (used in OpenAPI Info).
-    /// When <see langword="null"/> or whitespace, the builder falls back to
-    /// <c>[AssemblyTitle]</c>, then <c>[AssemblyProduct]</c>, then the DLL file name.
+    /// When <see langword="null"/> or whitespace, the builder falls back to the <c>Title</c> of the
+    /// <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>, then <c>[AssemblyTitle]</c>, then
+    /// <c>[AssemblyProduct]</c>, then the DLL file name.
     /// </summary>
     public string? Title { get; init; }
 
-    /// <summary>Version of the API (used in OpenAPI Info).</summary>
-    public string Version { get; init; } = "v1";
+    /// <summary>
+    /// Version of the API (<c>info.version</c>). When <see langword="null"/> or whitespace, the builder falls
+    /// back to the <c>Version</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>, then
+    /// to <c>"v1"</c>.
+    /// </summary>
+    public string? Version { get; init; }
 
-    /// <summary>Optional description for the API.</summary>
+    /// <summary>
+    /// Optional description for the API. When <see langword="null"/> or whitespace, the builder falls
+    /// back to the <c>Description</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>,
+    /// then <c>[AssemblyDescription]</c>.
+    /// </summary>
     public string? Description { get; init; }
 
     /// <summary>
@@ -111,7 +120,9 @@ public sealed class OpenApiDocumentOptions
 
     /// <summary>
     /// Optional name of the contact person or organisation responsible for the API.
-    /// Maps to <c>info.contact.name</c> in the generated document.
+    /// Maps to <c>info.contact.name</c> in the generated document. When <see langword="null"/> or
+    /// whitespace, the builder falls back to the <c>Contact.Name</c> of the <c>OpenApiInfo</c> in
+    /// <c>SwaggerDoc</c> / <c>AddOpenApi</c>, then <c>[AssemblyCompany]</c>.
     /// </summary>
     public string? ContactName { get; init; }
 
@@ -119,6 +130,8 @@ public sealed class OpenApiDocumentOptions
     /// Optional email address of the contact person or organisation.
     /// Maps to <c>info.contact.email</c> in the generated document.
     /// No format validation is performed — any string is accepted by OpenAPI.
+    /// When <see langword="null"/>, the <c>Contact.Email</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> /
+    /// <c>AddOpenApi</c> is used.
     /// </summary>
     public string? ContactEmail { get; init; }
 
@@ -126,7 +139,8 @@ public sealed class OpenApiDocumentOptions
     /// Optional URL pointing to the contact information page.
     /// Must be a valid absolute URI; if the value cannot be parsed the URL
     /// is silently omitted and a warning is written to <c>stderr</c>.
-    /// Maps to <c>info.contact.url</c> in the generated document.
+    /// Maps to <c>info.contact.url</c> in the generated document. When <see langword="null"/>, the
+    /// <c>Contact.Url</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c> is used.
     /// </summary>
     public string? ContactUrl { get; init; }
 
@@ -151,7 +165,8 @@ public sealed class OpenApiDocumentOptions
     /// Optional URL to the Terms of Service for the API.
     /// Must be a valid absolute URI; if the value cannot be parsed the field
     /// is silently omitted and a warning is written to <c>stderr</c>.
-    /// Maps to <c>info.termsOfService</c>.
+    /// Maps to <c>info.termsOfService</c>. When <see langword="null"/>, the <c>TermsOfService</c> of the
+    /// <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c> is used.
     /// </summary>
     public string? TermsOfService { get; init; }
 
@@ -541,50 +556,66 @@ public sealed class OpenApiDocumentBuilder
         var asmProduct     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyProduct);
         var asmCompany     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyCompany);
 
-        // Precedence chains (IsNullOrWhiteSpace rejects both null and empty/whitespace).
+        // Precedence chains, field by field: the option, then the OpenApiInfo of SwaggerDoc / AddOpenApi in
+        // Program.cs, then the assembly attributes (IsNullOrWhiteSpace rejects both null and empty/whitespace).
+        static string? Given(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+        var programContact = docTagsResult.Contact;
         var resolvedTitle =
-            (!string.IsNullOrWhiteSpace(options.Title)       ? options.Title       : null)
-            ?? (!string.IsNullOrWhiteSpace(asmTitle)         ? asmTitle            : null)
-            ?? (!string.IsNullOrWhiteSpace(asmProduct)       ? asmProduct          : null)
+            Given(options.Title)
+            ?? Given(docTagsResult.InfoTitle)
+            ?? Given(asmTitle)
+            ?? Given(asmProduct)
             ?? loader.Assembly.GetName().Name
             ?? "API";
 
         var resolvedDescription =
-            (!string.IsNullOrWhiteSpace(options.Description) ? options.Description : null)
-            ?? (!string.IsNullOrWhiteSpace(asmDescription)   ? asmDescription      : null);
+            Given(options.Description)
+            ?? Given(docTagsResult.InfoDescription)
+            ?? Given(asmDescription);
 
-        // contact.name: option wins, then [AssemblyCompany] as last resort.
+        var resolvedVersion =
+            Given(options.Version)
+            ?? Given(docTagsResult.InfoVersion)
+            ?? "v1";
+
+        // contact.name: option wins, then Program.cs, then [AssemblyCompany] as last resort.
         var resolvedContactName =
-            (!string.IsNullOrWhiteSpace(options.ContactName) ? options.ContactName : null)
-            ?? (!string.IsNullOrWhiteSpace(asmCompany)       ? asmCompany          : null);
+            Given(options.ContactName)
+            ?? Given(programContact?.Name)
+            ?? Given(asmCompany);
+
+        // contact.email and contact.url have no assembly attribute: the option (an empty email option still
+        // creates the block, as before), then Program.cs.
+        var resolvedContactEmail = options.ContactEmail ?? Given(programContact?.Email);
+        var (contactUrl, contactUrlSource) = options.ContactUrl != null
+            ? (options.ContactUrl, "--contact-url")
+            : (Given(programContact?.Url), "OpenApiContact.Url in Program.cs");
 
         var info = new OpenApiInfo
         {
             Title       = resolvedTitle,
-            Version     = options.Version,
+            Version     = resolvedVersion,
             Description = resolvedDescription,
         };
 
-        // Contact: build the block when any of the three CLI fields is set (preserves existing
-        // behaviour including ContactEmail = "" creating Contact) OR when [AssemblyCompany] resolves.
-        if (!string.IsNullOrWhiteSpace(options.ContactName)
-            || options.ContactEmail != null
-            || options.ContactUrl != null
-            || resolvedContactName != null)
+        // Contact: build the block when any of its fields resolves (preserves existing behaviour including
+        // ContactEmail = "" creating Contact).
+        if (resolvedContactName != null || resolvedContactEmail != null || contactUrl != null)
         {
             Uri? contactUri = null;
-            if (options.ContactUrl != null)
+            if (contactUrl != null)
             {
-                if (Uri.TryCreate(options.ContactUrl, UriKind.Absolute, out var parsed))
+                if (Uri.TryCreate(contactUrl, UriKind.Absolute, out var parsed))
                     contactUri = parsed;
                 else
-                    WarnInvalidInfoUri(diagnostics, "--contact-url", options.ContactUrl, "#/info/contact/url");
+                    WarnInvalidInfoUri(diagnostics, contactUrlSource, contactUrl, "#/info/contact/url");
             }
 
             info.Contact = new OpenApiContact
             {
                 Name  = resolvedContactName,
-                Email = options.ContactEmail,
+                Email = resolvedContactEmail,
                 Url   = contactUri,
             };
         }
@@ -633,13 +664,16 @@ public sealed class OpenApiDocumentBuilder
                 info.Summary = summary;
         }
 
-        // Terms of Service
-        if (options.TermsOfService != null)
+        // Terms of Service: the option, then Program.cs.
+        var (termsOfService, termsOfServiceSource) = options.TermsOfService != null
+            ? (options.TermsOfService, "--terms-of-service")
+            : (Given(docTagsResult.TermsOfService), "OpenApiInfo.TermsOfService in Program.cs");
+        if (termsOfService != null)
         {
-            if (Uri.TryCreate(options.TermsOfService, UriKind.Absolute, out var tosUri))
+            if (Uri.TryCreate(termsOfService, UriKind.Absolute, out var tosUri))
                 info.TermsOfService = tosUri;
             else
-                WarnInvalidInfoUri(diagnostics, "--terms-of-service", options.TermsOfService, "#/info/termsOfService");
+                WarnInvalidInfoUri(diagnostics, termsOfServiceSource, termsOfService, "#/info/termsOfService");
         }
 
         var document = new OpenApiDocument

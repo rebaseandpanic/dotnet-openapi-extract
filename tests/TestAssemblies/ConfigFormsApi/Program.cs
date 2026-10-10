@@ -7,14 +7,15 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new()
     {
-        Title = "Config forms",
-        Version = "v1",
+        Title = "Config " + "forms",
+        Version = $"{Names.Major}.0",
         Summary = "Summary " + "joined",
         Description = """
             A raw
             description
             """,
-        Contact = new() { Name = "Team", Url = new Uri("https://contact.example.com") },
+        Contact = new() { Name = nameof(Names.Team), Email = Names.ContactEmail, Url = new Uri("https://contact.example.com") },
+        TermsOfService = new(Names.TermsUrl),
         License = new() { Name = $"{Names.Product} License", Url = new Uri(Names.LicenseUrl) },
     });
 

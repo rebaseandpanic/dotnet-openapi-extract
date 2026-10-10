@@ -28,6 +28,14 @@ public class UnreadProgramCsConfigTests
     {
         // statement on line 4 → the place named first → the flag that sets the value
         { """c.SwaggerDoc("v1", new() { Title = "T", Summary = settings.Summary });""", "OpenApiInfo.Summary", "--summary" },
+        { """c.SwaggerDoc("v1", new() { Title = settings.Title });""", "OpenApiInfo.Title", "--title" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Description = settings.Description });""", "OpenApiInfo.Description", "--description" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Version = settings.Version });""", "OpenApiInfo.Version", "--version" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", TermsOfService = new Uri(settings.Terms) });""", "OpenApiInfo.TermsOfService", "--terms-of-service" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Contact = settings.Contact });""", "OpenApiInfo.Contact", "--contact-name" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Contact = new() { Name = settings.Team } });""", "OpenApiContact.Name", "--contact-name" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Contact = new() { Name = "Team", Email = settings.Email } });""", "OpenApiContact.Email", "--contact-email" },
+        { """c.SwaggerDoc("v1", new() { Title = "T", Contact = new() { Name = "Team", Url = new Uri(settings.Url) } });""", "OpenApiContact.Url", "--contact-url" },
         { """c.SwaggerDoc("v1", new() { Title = "T", License = new() { Name = settings.License } });""", "OpenApiLicense.Name", "--license-name" },
         { """c.SwaggerDoc("v1", new() { Title = "T", License = new() { Name = "MIT", Url = new Uri(settings.Url) } });""", "OpenApiLicense.Url", "--license-url" },
         { """c.SwaggerDoc("v1", new() { Title = "T", License = new() { Name = "MIT", Identifier = settings.Spdx } });""", "OpenApiLicense.Identifier", "--license-identifier" },

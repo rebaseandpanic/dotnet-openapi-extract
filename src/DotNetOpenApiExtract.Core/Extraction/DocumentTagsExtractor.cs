@@ -37,6 +37,12 @@ public sealed record TagMetadata
 /// <param name="Identifier">The SPDX license identifier (OpenAPI 3.1).</param>
 public sealed record LicenseMetadata(string? Name, string? Url, string? Identifier);
 
+/// <summary>The contact of an <c>OpenApiInfo</c> initializer in <c>Program.cs</c>.</summary>
+/// <param name="Name">The contact name.</param>
+/// <param name="Email">The contact email.</param>
+/// <param name="Url">The contact URL.</param>
+public sealed record ContactMetadata(string? Name, string? Email, string? Url);
+
 /// <summary>
 /// Result of scanning Roslyn source for document-level tag registrations and
 /// root-level <c>externalDocs</c>.
@@ -70,6 +76,27 @@ public sealed class DocumentTagsExtractionResult
     /// declaration that sets one; <see langword="null"/> when none does.
     /// </summary>
     public LicenseMetadata? License { get; init; }
+
+    /// <summary><c>info.title</c> from an <c>OpenApiInfo { Title = … }</c> initializer, the first declaration that sets it.</summary>
+    public string? InfoTitle { get; init; }
+
+    /// <summary><c>info.description</c> from an <c>OpenApiInfo { Description = … }</c> initializer, the first declaration that sets it.</summary>
+    public string? InfoDescription { get; init; }
+
+    /// <summary>
+    /// <c>info.version</c> from an <c>OpenApiInfo { Version = … }</c> initializer, the first declaration that sets
+    /// it — not the document name, the first argument of <c>SwaggerDoc</c>.
+    /// </summary>
+    public string? InfoVersion { get; init; }
+
+    /// <summary>
+    /// The contact of an <c>OpenApiInfo { Contact = new OpenApiContact { … } }</c> initializer, the first
+    /// declaration that sets one; <see langword="null"/> when none does.
+    /// </summary>
+    public ContactMetadata? Contact { get; init; }
+
+    /// <summary><c>info.termsOfService</c> from an <c>OpenApiInfo { TermsOfService = new Uri(…) }</c> initializer, the first declaration that sets it.</summary>
+    public string? TermsOfService { get; init; }
 }
 
 /// <summary>
@@ -116,8 +143,7 @@ public static class DocumentTagsExtractor
         var tagsByName = new Dictionary<string, TagMetadata>(StringComparer.Ordinal);
         string? rootExternalDocsUrl = null;
         string? rootExternalDocsDesc = null;
-        string? infoSummary = null;
-        LicenseMetadata? license = null;
+        InfoMetadata infoMetadata = new();
         var compilation = context.CompilationResult?.Compilation;
 
         // ── 1. AddTag(new OpenApiTag { ... }) ─────────────────────────────────
@@ -153,10 +179,8 @@ public static class DocumentTagsExtractor
                     rootExternalDocsDesc ??= desc;
                 }
 
-                // The other info fields follow the same choice: the first declaration that sets them.
-                var (summary, declaredLicense) = TryExtractInfoMetadata(invocation, compilation);
-                infoSummary ??= summary;
-                license ??= declaredLicense;
+                // The other info fields follow the same choice, field by field: the first declaration that sets them.
+                infoMetadata = infoMetadata.OrElse(TryExtractInfoMetadata(invocation, compilation));
             }
         }
 
@@ -165,31 +189,74 @@ public static class DocumentTagsExtractor
             TagsByName = tagsByName,
             ExternalDocsUrl = rootExternalDocsUrl,
             ExternalDocsDescription = rootExternalDocsDesc,
-            InfoSummary = infoSummary,
-            License = license,
+            InfoSummary = infoMetadata.Summary,
+            License = infoMetadata.License,
+            InfoTitle = infoMetadata.Title,
+            InfoDescription = infoMetadata.Description,
+            InfoVersion = infoMetadata.Version,
+            Contact = infoMetadata.Contact,
+            TermsOfService = infoMetadata.TermsOfService,
         };
     }
 
-    /// <summary>
-    /// <c>Summary</c> and <c>License</c> of the <c>OpenApiInfo</c> initializer in a <c>SwaggerDoc</c> /
-    /// <c>AddOpenApi</c> call, from literals and in-project constants; other values are skipped, never
-    /// evaluated.
-    /// </summary>
-    private static (string? Summary, LicenseMetadata? License) TryExtractInfoMetadata(
-        InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    /// <summary>The fields of the <c>OpenApiInfo</c> initializers read so far; <see langword="null"/> where none sets one.</summary>
+    private sealed record InfoMetadata(
+        string? Title = null, string? Description = null, string? Version = null, string? Summary = null,
+        string? TermsOfService = null, ContactMetadata? Contact = null, LicenseMetadata? License = null)
     {
+        /// <summary>These fields, each one this does not set taken from <paramref name="later"/>.</summary>
+        public InfoMetadata OrElse(InfoMetadata later) => new(
+            Title ?? later.Title, Description ?? later.Description, Version ?? later.Version, Summary ?? later.Summary,
+            TermsOfService ?? later.TermsOfService, Contact ?? later.Contact, License ?? later.License);
+    }
+
+    /// <summary>
+    /// The fields of the <c>OpenApiInfo</c> initializers in a <c>SwaggerDoc</c> / <c>AddOpenApi</c> call —
+    /// <c>Title</c>, <c>Description</c>, <c>Version</c>, <c>Summary</c>, <c>TermsOfService</c>, <c>Contact</c>,
+    /// <c>License</c> — from literals and in-project constants; other values are skipped, never evaluated.
+    /// </summary>
+    private static InfoMetadata TryExtractInfoMetadata(InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    {
+        var result = new InfoMetadata();
         foreach (var objCreation in InfoCreations(invocation))
         {
-            string? summary = null;
+            string? title = null, description = null, version = null, summary = null, termsOfService = null;
+            ContactMetadata? contact = null;
             LicenseMetadata? license = null;
             foreach (var assignment in objCreation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
             {
                 switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
                 {
+                    case "Title":
+                        title = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        break;
+                    case "Description":
+                        description = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        break;
+                    case "Version":
+                        version = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        break;
                     case "Summary":
                         summary = InvocationMatcher.GetStringValue(assignment.Right, compilation);
                         break;
+                    case "TermsOfService":
+                        termsOfService = TryExtractUriLiteral(assignment.Right, compilation);
+                        break;
                     // The same normalization as the diagnostics: parentheses around the creation are read through.
+                    case "Contact" when ObjectCreations.Of(assignment.Right) is { Initializer: { } contactInit }:
+                        string? contactName = null, email = null, contactUrl = null;
+                        foreach (var field in contactInit.Expressions.OfType<AssignmentExpressionSyntax>())
+                        {
+                            switch ((field.Left as IdentifierNameSyntax)?.Identifier.Text)
+                            {
+                                case "Name":  contactName = InvocationMatcher.GetStringValue(field.Right, compilation); break;
+                                case "Email": email = InvocationMatcher.GetStringValue(field.Right, compilation); break;
+                                case "Url":   contactUrl = TryExtractUriLiteral(field.Right, compilation); break;
+                            }
+                        }
+                        if (contactName != null || email != null || contactUrl != null)
+                            contact = new ContactMetadata(contactName, email, contactUrl);
+                        break;
                     case "License" when ObjectCreations.Of(assignment.Right) is { Initializer: { } licenseInit }:
                         string? name = null, url = null, identifier = null;
                         foreach (var field in licenseInit.Expressions.OfType<AssignmentExpressionSyntax>())
@@ -207,11 +274,10 @@ public static class DocumentTagsExtractor
                 }
             }
 
-            if (summary != null || license != null)
-                return (summary, license);
+            result = result.OrElse(new InfoMetadata(title, description, version, summary, termsOfService, contact, license));
         }
 
-        return (null, null);
+        return result;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -465,17 +531,26 @@ public static class DocumentTagsExtractor
     }
 
     /// <summary>CLI flags that set what an <c>OpenApiInfo</c> from Program.cs would give.</summary>
-    private static readonly string[] InfoFlags = ["--summary", "--license-name", "--license-url", "--license-identifier"];
+    private static readonly string[] InfoFlags =
+    [
+        "--title", "--description", "--version", "--summary", "--contact-name", "--contact-email", "--contact-url",
+        "--license-name", "--license-url", "--license-identifier", "--terms-of-service",
+    ];
+
+    /// <summary>CLI flags that set what an <c>OpenApiContact</c> from Program.cs would give.</summary>
+    private static readonly string[] ContactFlags = ["--contact-name", "--contact-email", "--contact-url"];
 
     /// <summary>CLI flags that set what an <c>OpenApiLicense</c> from Program.cs would give.</summary>
     private static readonly string[] LicenseFlags = ["--license-name", "--license-url", "--license-identifier"];
 
     /// <summary>
     /// Warns about document metadata the extractor cannot read, instead of losing it silently: the info
-    /// of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the <c>License</c> / <c>ExternalDocs</c> of
-    /// an info, the argument of <c>AddTag</c> and a tag's <c>ExternalDocs</c> that are not object creations,
-    /// and the values of the info fields that are read (<c>Summary</c>, the license <c>Name</c>,
-    /// <c>Url</c>, <c>Identifier</c>, the external docs <c>Url</c>, <c>Description</c> of an info or a tag)
+    /// of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the <c>Contact</c> / <c>License</c> /
+    /// <c>ExternalDocs</c> of an info, the argument of <c>AddTag</c> and a tag's <c>ExternalDocs</c> that are
+    /// not object creations, and the values of the info fields that are read (<c>Title</c>,
+    /// <c>Description</c>, <c>Version</c>, <c>Summary</c>, <c>TermsOfService</c>, the contact <c>Name</c>,
+    /// <c>Email</c>, <c>Url</c>, the license <c>Name</c>, <c>Url</c>, <c>Identifier</c>, the external docs
+    /// <c>Url</c>, <c>Description</c> of an info or a tag)
     /// that are not literals or constants. <c>null</c> and <c>default</c> are a known absence, not a loss. Each warning carries
     /// the place in the source and, as its last subjects, the CLI flags that set the value instead.
     /// </summary>
@@ -549,14 +624,20 @@ public static class DocumentTagsExtractor
 
             foreach (var creation in InfoCreations(invocation))
             {
-                CheckMembers(creation, "OpenApiInfo", ("License", LicenseFlags), ("ExternalDocs", []));
-                CheckValues(creation, "OpenApiInfo", ("Summary", false, ["--summary"]));
+                CheckMembers(creation, "OpenApiInfo", ("Contact", ContactFlags), ("License", LicenseFlags), ("ExternalDocs", []));
+                CheckValues(creation, "OpenApiInfo",
+                    ("Title", false, ["--title"]), ("Description", false, ["--description"]), ("Version", false, ["--version"]),
+                    ("Summary", false, ["--summary"]), ("TermsOfService", true, ["--terms-of-service"]));
                 foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
                 {
                     if (ObjectCreations.Of(assignment.Right) is not { } nested)
                         continue;
                     switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
                     {
+                        case "Contact":
+                            CheckValues(nested, "OpenApiContact",
+                                ("Name", false, ["--contact-name"]), ("Email", false, ["--contact-email"]), ("Url", true, ["--contact-url"]));
+                            break;
                         case "License":
                             CheckValues(nested, "OpenApiLicense",
                                 ("Name", false, ["--license-name"]), ("Url", true, ["--license-url"]), ("Identifier", false, ["--license-identifier"]));

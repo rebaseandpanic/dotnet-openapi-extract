@@ -35,9 +35,9 @@ This means you can generate OpenAPI specs:
 | `--assembly <path>` | yes | — | Path to the compiled DLL |
 | `--output <path>` | no | `swagger.json` | Output file path |
 | `--format <json\|yaml>` | no | `json` | Output format |
-| `--title <string>` | no | assembly name | API title in the info block |
-| `--version <string>` | no | `v1` | API version in the info block |
-| `--description <string>` | no | — | API description |
+| `--title <string>` | no | `SwaggerDoc` `Title`, then `[AssemblyTitle]`, `[AssemblyProduct]`, assembly name | API title in the info block |
+| `--version <string>` | no | `SwaggerDoc` `Version`, then `v1` | API version in the info block |
+| `--description <string>` | no | `SwaggerDoc` `Description`, then `[AssemblyDescription]` | API description |
 | `--xml <path>` | no | auto-detect | Path to XML documentation file. Repeatable — each `--xml` adds one more source. Sources are merged with first-added winning on key collision. Framework/SDK ref-pack XMLs are also discovered automatically and added last (lowest priority). |
 | `--source <path>` | no | — | Entry-point source file (usually auto-detected) |
 | `--source-root <dir>` | no | auto-detect | Project root for Roslyn analysis of `Program.cs` |
@@ -179,7 +179,7 @@ From `Program.cs` via Roslyn (when sources are available):
 - Global response headers from middleware (`app.Use(...)`, `UseMiddleware<T>`) — `Response.Headers.Append/Add/TryAdd` and indexer assignments
 - Global `[Consumes]` / `[Produces]` from MVC filter registrations
 - Request body media types from `[Consumes]` (action, then controller, then a global filter; default `application/json`); a form body uses its `[Consumes]` media type (e.g. `application/x-www-form-urlencoded`), default `multipart/form-data`
-- Document-level tags with descriptions, `externalDocs` and the OpenAPI 3.2 `summary` / `parent` / `kind` from `c.AddTag(...)`; `info.summary` and the license (`name`, `url`, `identifier`) from the `OpenApiInfo` of `SwaggerDoc(...)` / `AddOpenApi(...)` (options and CLI flags win field by field)
+- Document-level tags with descriptions, `externalDocs` and the OpenAPI 3.2 `summary` / `parent` / `kind` from `c.AddTag(...)`; `info.title`, `description`, `version`, `summary`, `termsOfService`, the contact (`name`, `email`, `url`) and the license (`name`, `url`, `identifier`) from the `OpenApiInfo` of `SwaggerDoc(...)` / `AddOpenApi(...)`. Each field comes from the first source that sets it: the CLI flag (option), then `SwaggerDoc` / `AddOpenApi`, then the assembly attributes (`[AssemblyTitle]` / `[AssemblyProduct]`, `[AssemblyDescription]`, `[AssemblyCompany]` for the contact name), then the assembly file name (title only) or `v1` (version)
 - FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`), and target-typed creations (`c.SwaggerDoc("v1", new() { License = new() { Name = "MIT", Url = new("…") } })`, `AddSecurityDefinition("x", new() { … })`, `Reference = new() { … }`, `[new("x", document)] = []`). Document metadata that is not an object creation (`c.SwaggerDoc("v1", info)`, `License = license`, `AddTag(tag)`) is reported with the warning `document.metadata-not-static`; a security definition built that way is omitted with `security.scheme-not-static`
 - Strings from literals (plain, verbatim, raw `"""…"""`), literal concatenation, in-project `const string` members of any class, `nameof(...)` and interpolation of constants (`SemanticModel.GetConstantValue`)
 - Both Swashbuckle API generations: `Microsoft.OpenApi.Models.*` with `Reference = new OpenApiReference { … }` (Swashbuckle ≤ 9) and `Microsoft.OpenApi.*` with `new OpenApiSecuritySchemeReference("x", document)` as a collection or index initializer key, in an expression or block lambda (Swashbuckle 10)
@@ -222,15 +222,13 @@ the tool recognizes but cannot compute is never dropped silently: it gives a war
 
 | Warning code | When | Result |
 |---|---|---|
-| `document.metadata-not-static` | `SwaggerDoc` info, its `Summary`, `License` (`Name`, `Url`, `Identifier`) or `ExternalDocs` is not a creation / literal / constant | the field is not written; the subjects end with the flags (`--summary`, `--license-name`, `--license-url`, `--license-identifier`) |
+| `document.metadata-not-static` | `SwaggerDoc` info, its `Title`, `Description`, `Version`, `Summary`, `TermsOfService`, `Contact` (`Name`, `Email`, `Url`), `License` (`Name`, `Url`, `Identifier`) or `ExternalDocs` is not a creation / literal / constant | the field is not taken from `SwaggerDoc` (the next source applies); the subjects end with the flags that set it (`--title`, `--description`, `--version`, `--summary`, `--terms-of-service`, `--contact-*`, `--license-*`) |
 | `security.scheme-not-static` | `Type`, `In`, `Name`, `Scheme` of a security scheme, or a value an OAuth2 / OpenID Connect scheme needs | the scheme is omitted, with the requirements that name it |
 | `security.scheme-field-not-static` | `Description` or `BearerFormat` of a security scheme | the scheme is written without the field |
 | `security.requirement-not-static` | `AddSecurityRequirement(requirement)` or a lambda returning something that is not an object creation | the requirement is not written |
 | `security.requirements-may-come-from-filter` | a document / operation filter or transformer is registered and no `AddSecurityRequirement` is read | nothing changes; the filter may set requirements the document lacks |
 
-`Title`, `Version`, `Description`, `Contact` and `TermsOfService` of `SwaggerDoc` are not read from
-`Program.cs` at all; they come from the flags and the assembly attributes. Set document metadata the
-tool cannot see with `--title`, `--version`, `--description`, `--summary`, `--contact-name`,
+A flag always wins over `SwaggerDoc` for its own field. Set document metadata the tool cannot see with `--title`, `--version`, `--description`, `--summary`, `--contact-name`,
 `--contact-email`, `--contact-url`, `--license-name`, `--license-url`, `--license-identifier`,
 `--terms-of-service` and `--server`. If your project relies heavily on runtime-resolved configuration,
 consider a [Swashbuckle CLI tofile](https://github.com/domaindrivendev/Swashbuckle.AspNetCore/blob/master/README.md#swashbuckle-cli-tool-for-net-core)

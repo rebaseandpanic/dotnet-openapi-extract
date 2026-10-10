@@ -127,18 +127,19 @@ var formatOption = new Option<string>("--format")
 
 var titleOption = new Option<string?>("--title")
 {
-    Description = "API title. Defaults to [AssemblyTitle], then [AssemblyProduct], then DLL file name",
+    Description = "API title. Defaults to the Title of SwaggerDoc / AddOpenApi in Program.cs, then [AssemblyTitle], " +
+                  "then [AssemblyProduct], then DLL file name",
 };
 
-var versionOption = new Option<string>("--version")
+var versionOption = new Option<string?>("--version")
 {
-    Description = "Document version",
-    DefaultValueFactory = _ => "v1",
+    Description = "Document version (info.version). Defaults to the Version of SwaggerDoc / AddOpenApi in Program.cs, then v1",
 };
 
 var descriptionOption = new Option<string?>("--description")
 {
-    Description = "API description written to the info block",
+    Description = "API description written to the info block. Defaults to the Description of SwaggerDoc / AddOpenApi " +
+                  "in Program.cs, then [AssemblyDescription]",
 };
 
 var xmlOption = new Option<string[]>("--xml")
@@ -284,7 +285,7 @@ var rootCommand = new RootCommand(
     "values from IConfiguration, appsettings and environment variables, anything computed at startup, and Swashbuckle " +
     "filters (IDocumentFilter, IOperationFilter, ISchemaFilter) or AddOpenApi transformers. A value the tool recognizes " +
     "but cannot compute is reported as a warning with its file:line and, where one exists, the flag that sets it. " +
-    "Title, Version, Description, Contact and TermsOfService of SwaggerDoc are not read from Program.cs. " +
+    "Document metadata is read from the OpenApiInfo of SwaggerDoc / AddOpenApi in Program.cs; a flag overrides it. " +
     "Set document metadata explicitly with --title, --version, --description, --summary, --contact-name, " +
     "--contact-email, --contact-url, --license-name, --license-url, --license-identifier, --terms-of-service and --server.");
 
@@ -341,7 +342,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var output       = parseResult.GetValue(outputOption)!;
     var format       = parseResult.GetValue(formatOption)!;
     var title        = parseResult.GetValue(titleOption);
-    var version      = parseResult.GetValue(versionOption)!;
+    var version      = parseResult.GetValue(versionOption);
     var description  = parseResult.GetValue(descriptionOption);
     var xmlPaths     = parseResult.GetValue(xmlOption);
     var namingPolicy = parseResult.GetValue(namingPolicyOption);

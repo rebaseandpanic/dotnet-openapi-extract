@@ -301,13 +301,17 @@ public static class ExtractionDiagnosticCodes
     /// <summary>
     /// Document metadata in Program.cs is not an object creation the extractor reads (a variable, a
     /// call): the <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / an <c>Info = …</c> assignment, its
-    /// <c>License</c> or <c>ExternalDocs</c>, an <c>AddTag</c> argument or a tag's <c>ExternalDocs</c>.
-    /// The fields it holds (license, summary, externalDocs, tag fields) are not written. Also a value
-    /// of a field that is read — the info <c>Summary</c>, the license <c>Name</c> / <c>Url</c> /
-    /// <c>Identifier</c>, the external docs <c>Url</c> / <c>Description</c> of the info or of a tag — that is not a constant
-    /// string. <see cref="ExtractionDiagnostic.SourceLocation"/>: the value. Subjects: the member or call,
-    /// the expression, then the CLI flags that set the value instead (<c>--summary</c>,
-    /// <c>--license-name</c>, <c>--license-url</c>, <c>--license-identifier</c>), when there are any.
+    /// <c>Contact</c>, <c>License</c> or <c>ExternalDocs</c>, an <c>AddTag</c> argument or a tag's
+    /// <c>ExternalDocs</c>. The fields it holds (title, description, version, summary, terms of service,
+    /// contact, license, externalDocs, tag fields) are not taken from it. Also a value of a field that is
+    /// read — the info <c>Title</c> / <c>Description</c> / <c>Version</c> / <c>Summary</c> /
+    /// <c>TermsOfService</c>, the contact <c>Name</c> / <c>Email</c> / <c>Url</c>, the license <c>Name</c> /
+    /// <c>Url</c> / <c>Identifier</c>, the external docs <c>Url</c> / <c>Description</c> of the info or of a
+    /// tag — that is not a constant string. <see cref="ExtractionDiagnostic.SourceLocation"/>: the value.
+    /// Subjects: the member or call, the expression, then the CLI flags that set the value instead
+    /// (<c>--title</c>, <c>--description</c>, <c>--version</c>, <c>--summary</c>, <c>--contact-name</c>,
+    /// <c>--contact-email</c>, <c>--contact-url</c>, <c>--license-name</c>, <c>--license-url</c>,
+    /// <c>--license-identifier</c>, <c>--terms-of-service</c>), when there are any.
     /// </summary>
     public const string DocumentMetadataNotStatic = "document.metadata-not-static";
 
