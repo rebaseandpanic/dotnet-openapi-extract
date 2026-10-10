@@ -68,6 +68,10 @@ public class GlobalOverTypeConverterModel
     /// <summary>Converter on the property, over the global one.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public StjTint PropertyConverter { get; set; } = StjTint.Crimson;
+
+    /// <summary>No converter of its own: only a global one names it.</summary>
+    [DefaultValue(Tint.Plain)]
+    public Tint NoConverter { get; set; } = Tint.Plain;
 }
 
 /// <summary>Enum members under every converter the extractor knows.</summary>

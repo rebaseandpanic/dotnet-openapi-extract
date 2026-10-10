@@ -349,8 +349,7 @@ public static class JsonOptionsExtractor
             if (arg is ObjectCreationExpressionSyntax objCreation)
             {
                 // Try semantic model first for FQN
-                converterTypeName = TryGetFqnFromSemanticModel(objCreation.Type, context)
-                    ?? GetUnqualifiedTypeName(objCreation.Type);
+                converterTypeName = ConverterTypeName(objCreation.Type, context);
                 if (!string.IsNullOrEmpty(converterTypeName))
                 {
                     converterPolicy = ParseConverterEnumNamingPolicy(objCreation, converterTypeName!, out var unknown);
@@ -694,6 +693,53 @@ public static class JsonOptionsExtractor
     /// Attempts to resolve the fully-qualified type name of a converter using the semantic model.
     /// Returns null when the semantic model is not available or resolution fails.
     /// </summary>
+    /// <summary>
+    /// The converter's type name for <see cref="Schema.JsonConverterRegistry"/>: its full name when the
+    /// semantic model resolves it, else the name as written. A closed generic converter keeps its type
+    /// argument in the CLR form <c>Name`1[[Target]]</c> (the target's full name when it resolves, else
+    /// as written), so a converter for one type is not applied to another:
+    /// <c>JsonStringEnumConverter&lt;Colour&gt;</c> converts <c>Colour</c> only.
+    /// </summary>
+    private static string? ConverterTypeName(TypeSyntax type, SourceAnalysisContext context)
+    {
+        var generic = type switch
+        {
+            GenericNameSyntax g => g,
+            QualifiedNameSyntax { Right: GenericNameSyntax g } => g,
+            AliasQualifiedNameSyntax { Name: GenericNameSyntax g } => g,
+            _ => null,
+        };
+        if (generic is not { TypeArgumentList.Arguments: [var argument] })
+            return TryGetFqnFromSemanticModel(type, context) ?? GetUnqualifiedTypeName(type);
+
+        var definition = ResolvedSymbol(type, context) is { } symbol
+            ? $"{symbol.ContainingNamespace.ToDisplayString()}.{symbol.MetadataName}"
+            : GetUnqualifiedTypeName(type) + "`1";
+        var target = ResolvedSymbol(argument, context) is { } targetSymbol
+            ? targetSymbol.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat
+                .WithGlobalNamespaceStyle(Microsoft.CodeAnalysis.SymbolDisplayGlobalNamespaceStyle.Omitted))
+            : argument.ToString();
+        return $"{definition}[[{target}]]";
+    }
+
+    /// <summary>The named type <paramref name="typeSyntax"/> binds to, or <see langword="null"/> when it does not resolve.</summary>
+    private static Microsoft.CodeAnalysis.INamedTypeSymbol? ResolvedSymbol(TypeSyntax typeSyntax, SourceAnalysisContext context)
+    {
+        if (context.CompilationResult == null)
+            return null;
+        try
+        {
+            var model = context.CompilationResult.Compilation.GetSemanticModel(typeSyntax.SyntaxTree);
+            return model.GetSymbolInfo(typeSyntax).Symbol is Microsoft.CodeAnalysis.INamedTypeSymbol { TypeKind: not Microsoft.CodeAnalysis.TypeKind.Error } symbol
+                ? symbol
+                : null;
+        }
+        catch (ArgumentException)
+        {
+            return null; // the node is not in the compilation
+        }
+    }
+
     private static string? TryGetFqnFromSemanticModel(
         Microsoft.CodeAnalysis.CSharp.Syntax.TypeSyntax typeSyntax,
         SourceAnalysisContext context)

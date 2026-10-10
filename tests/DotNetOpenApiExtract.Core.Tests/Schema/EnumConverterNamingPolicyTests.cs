@@ -330,4 +330,46 @@ public class EnumConverterNamingPolicyTests
         model["typeConverter"]!.GetValue<string>().Should().Be("green", because: "the global converter's policy applies");
         diagnostics.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// A closed <c>JsonStringEnumConverter&lt;TEnum&gt;</c> registered globally converts <c>TEnum</c>
+    /// only: it names <c>Tint</c>, and an enum with a converter of its own (<c>StjTint</c>) keeps that
+    /// converter's names and default. The reference is what System.Text.Json writes with the same options.
+    /// </summary>
+    [Theory]
+    [InlineData("Tint")]
+    [InlineData("ModernApi.Models.Keywords.Tint")]
+    public void GenericGlobalConverter_NamesOnlyItsOwnEnum(string writtenTarget)
+    {
+        var options = JsonOptionsExtractor.Extract(Context(
+            $"o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter<{writtenTarget}>(JsonNamingPolicy.SnakeCaseLower));"), _ => { });
+        var generator = new SchemaGenerator(new SchemaOptions
+        {
+            OpenApiVersion = OpenApiSpecVersion.OpenApi3_1,
+            GlobalConverterTypeNames = options.Mvc.GlobalConverterTypeNames,
+            GlobalConverterEnumNamingPolicies = options.Mvc.GlobalConverterEnumNamingPolicies,
+        });
+        generator.GenerateSchema(typeof(GlobalOverTypeConverterModel));
+        JsonNode Component(string id) =>
+            JsonNode.Parse(generator.Schemas[id].SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
+        JsonNode EnumSchema(JsonNode property) =>
+            (property["$ref"] ?? property["allOf"]?[0]?["$ref"]) is { } reference
+                ? Component(reference.GetValue<string>().Split('/')[^1])
+                : property;
+        string[] Values(JsonNode property) => EnumSchema(property)["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+
+        var wire = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter<Tint>(StjNamingPolicy.SnakeCaseLower) },
+        };
+        string Written<T>(T value) => JsonSerializer.Deserialize<string>(JsonSerializer.Serialize(value, wire))!;
+        var model = JsonNode.Parse(JsonSerializer.Serialize(new GlobalOverTypeConverterModel(), wire))!;
+        var properties = Component(nameof(GlobalOverTypeConverterModel))["properties"]!;
+
+        Values(properties["typeConverter"]!).Should().Equal(Enum.GetValues<StjTint>().Select(Written));
+        properties["typeConverter"]!["default"]!.GetValue<string>().Should().Be(model["typeConverter"]!.GetValue<string>());
+        model["typeConverter"]!.GetValue<string>().Should().Be("Green", because: "the global converter is for another enum");
+        Values(properties["noConverter"]!).Should().Equal(Enum.GetValues<Tint>().Select(Written));
+        properties["noConverter"]!["default"]!.GetValue<string>().Should().Be(model["noConverter"]!.GetValue<string>());
+    }
 }

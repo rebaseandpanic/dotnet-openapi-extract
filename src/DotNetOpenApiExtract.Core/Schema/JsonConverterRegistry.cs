@@ -154,8 +154,8 @@ public static class JsonConverterRegistry
         var bracketIndex = converterFullName.IndexOf('[');
         if (bracketIndex > 0)
         {
-            var openGenericName = converterFullName[..bracketIndex];
-            if (Registry.TryGetValue(openGenericName, out hint))
+            converterFullName = converterFullName[..bracketIndex];
+            if (Registry.TryGetValue(converterFullName, out hint))
                 return hint;
         }
 
@@ -182,6 +182,25 @@ public static class JsonConverterRegistry
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the converter named <paramref name="converterFullName"/> converts <paramref name="type"/>
+    /// as far as its name tells: a closed generic converter (<c>Name`1[[Target, Assembly…]]</c>) only
+    /// its type argument — matched by full name, or by the trailing name when the argument is written
+    /// without its namespace —, any other converter every type its hint allows.
+    /// </summary>
+    public static bool ConvertsGenericTarget(string converterFullName, Type type)
+    {
+        var start = converterFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (start < 0)
+            return true;
+
+        var end = converterFullName.IndexOfAny([',', ']'], start + 2);
+        var target = converterFullName[(start + 2)..(end < 0 ? converterFullName.Length : end)].Trim()
+            .Replace("global::", "", StringComparison.Ordinal).Replace('+', '.');
+        var fullName = (type.FullName ?? type.Name).Replace('+', '.');
+        return fullName == target || fullName.EndsWith("." + target, StringComparison.Ordinal);
     }
 
     /// <summary>

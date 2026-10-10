@@ -609,7 +609,7 @@ public sealed class SchemaGenerator
         var typeHint = GetConverterHintForType(enumType, enumType.GetCustomAttributesData());
 
         EnumWireNaming? naming = null;
-        if (GlobalEnumConverter() is { } global)
+        if (GlobalEnumConverter(enumType) is { } global)
         {
             if (global.Hint.SchemaType == JsonSchemaType.String)
                 naming = global.Hint.EnumNaming with
@@ -760,15 +760,18 @@ public sealed class SchemaGenerator
 
     /// <summary>
     /// The first globally registered converter (from <see cref="SchemaOptions.GlobalConverterTypeNames"/>)
-    /// that applies to enum types, as System.Text.Json picks the first converter that can convert;
-    /// <see langword="null"/> when there is none.
+    /// that converts <paramref name="enumType"/>, as System.Text.Json picks the first converter that
+    /// can convert the type: a converter for any enum, or a closed <c>JsonStringEnumConverter&lt;TEnum&gt;</c>
+    /// whose <c>TEnum</c> is this enum; <see langword="null"/> when there is none.
     /// </summary>
-    private (ConverterSchemaHint Hint, EnumConverterNaming? Naming)? GlobalEnumConverter()
+    private (ConverterSchemaHint Hint, EnumConverterNaming? Naming)? GlobalEnumConverter(Type enumType)
     {
         for (var i = 0; i < _options.GlobalConverterTypeNames.Count; i++)
         {
             var hint = JsonConverterRegistry.TryGet(_options.GlobalConverterTypeNames[i]);
             if (hint == null) continue;
+            // JsonStringEnumConverter<TEnum> converts TEnum only: skip it for any other enum.
+            if (!JsonConverterRegistry.ConvertsGenericTarget(_options.GlobalConverterTypeNames[i], enumType)) continue;
             if (JsonConverterRegistry.AppliesToType(hint, isEnum: true, targetTypeFullName: null))
                 return (hint, i < _options.GlobalConverterEnumNamingPolicies.Count ? _options.GlobalConverterEnumNamingPolicies[i] : null);
         }
