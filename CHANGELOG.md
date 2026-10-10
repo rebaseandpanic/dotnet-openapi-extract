@@ -4,6 +4,69 @@ All notable changes to this project.
 
 ## [Unreleased]
 
+### Changes to OpenAPI 3.0 output
+
+OpenAPI 3.0 stays the default target. A project that uses none of the constructs below gets the same 3.0 document as with 0.16. In particular these do not change: `format: byte` for `byte[]`, the nullable form of 0.16.0, the `allOf` wrapper of reference-typed properties, the `operationId` of single-method actions, server URLs, and the AND/OR structure of security requirements (except where a `mutualTLS` scheme is removed). Each item below is listed in detail further down; the impact on generated SDKs is given for each.
+
+**Operations**
+
+- Actions declared with `[AcceptVerbs]`, or with a subclass of a built-in `[Http*]` attribute, appear; they were silently dropped. *SDK:* new methods.
+- Several actions on one path and method: the document keeps the action chosen by an ordinal key (controller type, method name, parameter types, attribute order) instead of the last one discovered. *SDK:* the method may now describe a different action.
+- The `operationId` of a multi-method action comes from the `Name` of the attribute that produced each operation; previously the first `Name` was used for all of them. *SDK:* method names of such actions may change.
+- QUERY and non-standard methods (`[AcceptVerbs("QUERY")]`) are written under `x-oai-additionalOperations`, with a warning; 3.0 tools do not see them.
+- Operations whose `[Authorize(Roles)]` inherit the document's security requirements get those requirements written on the operation (the role values themselves exist only in 3.1/3.2). *SDK:* no change in the authentication used.
+
+**Responses and bodies**
+
+- `IAsyncEnumerable<T>` responses are `type: array, items: T` (nullable items for `Nullable<T>` and annotated `T?` elements); a declared sequential media type (`application/x-ndjson`, `application/jsonl`, `application/json-seq`) gets its item schema as `x-oai-itemSchema`; `ServerSentEventsResult<T>` is `text/event-stream` with the event schema in `x-oai-itemSchema`. The fake components (`StreamItemIAsyncEnumerable`, `StreamItemServerSentEventsResult`, …) disappear. *SDK:* streaming endpoints return a list (or an untyped stream) instead of a non-existent wrapper class; code that referenced the wrapper must change.
+- Typed results (`Results<…>`, `Ok<T>`, `Created<T>`, `NotFound`, …) give one response per status with its real body; the fake components (`ResultItemOk`, `IResult`, `ResultItemOkAndNotFoundResults`, …) disappear. *SDK:* response types become the payload types; error statuses appear.
+- File content (`FileResult` and derived types, `IFileHttpResult`, `Stream`, `IFormFile`) is `type: string, format: binary` under the declared media type (default `application/octet-stream`); the fake object components disappear. *SDK:* downloads and uploads become binary streams / byte arrays instead of objects.
+- The 200 body type follows `[Produces(typeof(T))]` / `[Produces<T>]`; `[ProducesResponseType<T>]` and `[Produces<T>]` are recognized; a typeless `[ProducesResponseType(200)]` takes the return type; `[ProducesResponseType]`, `[SwaggerResponse]`, `[ProducesDefaultResponseType]` and XML `<response>` on a controller apply to its operations (and an action whose controller declares responses no longer gets the inferred 200). *SDK:* response types and documented statuses change for these actions.
+- `[Consumes]` sets the request body media types; a form body uses its `[Consumes]` media type; `[SwaggerResponse(…, contentTypes)]` sets the response media types. *SDK:* clients send and accept the media types the server really uses.
+- Controller schemas follow only the MVC JSON options (`AddJsonOptions`), not `ConfigureHttpJsonOptions`; `--naming-policy` applies only when Program.cs sets no JSON options at all; when the MVC and HTTP options differ, a type used by both a controller and an HTTP-context body (typed results, event data) gets a second component `{Id}Http`. *SDK:* property names match the wire again; some types get a second model class.
+- JSON options set in an expression-bodied lambda (`AddJsonOptions(o => …)`) are read. *SDK:* naming, number handling and enum converters configured that way now apply.
+
+**Schemas**
+
+- Two closed generic types whose component id collided (`A.Page<Item>` and `B.Page<Item>`) no longer share one component: the second gets a full-name fallback id. *SDK:* a second model class appears where one wrongly served both.
+- Polymorphic bases (`[JsonPolymorphic]` / `[JsonDerivedType]`, or `[SwaggerDiscriminator]` / `[SwaggerSubType]`) become union components under the base's name: `oneOf` (or `anyOf` when some derived types have no discriminator value) of variants `{Derived}As{Base}`, the base branch `{Base}Default` for a concrete base and `{Derived}Direct` for a derived type that is a base of its own; abstract bases and interfaces get `discriminator { propertyName, mapping }`, a concrete base gets no `discriminator` object in 3.0 (with a warning). References to the base keep their target. *SDK:* inheritance hierarchies instead of flattened classes; new variant classes.
+- A `[JsonExtensionData]` property leaves `properties` and the object gets `additionalProperties: {}`. *SDK:* the extension dictionary is no longer a regular property.
+- `object` and `dynamic` properties are `{}` instead of `type: object`. *SDK:* such properties accept any JSON value.
+- camelCase names that start with an acronym follow System.Text.Json (`IOStatus` → `ioStatus`, previously `iOStatus`), for properties and for enum members under a camelCase converter. *SDK:* such properties deserialize again; their generated names may change.
+- Enum values are the names the converter in force writes: `[JsonStringEnumMemberName]` for System.Text.Json, `[EnumMember(Value)]` for Newtonsoft, the naming policy of a global string-enum converter (`new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)`, Newtonsoft naming strategies); a converter on a `Nullable<TEnum>` property makes it a string enum. `x-enum-varnames` keeps the CLR names. *SDK:* enum wire values match the server.
+- Enums backed by `long` / `ulong` keep their values instead of truncating them to `int`, with the `type` / `format` of their underlying type. *SDK:* 64-bit enum values are representable.
+- Number handling follows System.Text.Json: `[JsonNumberHandling]` on a property or type is read, and `AllowReadingFromString` / `WriteAsString` give `anyOf: [number, numeric string]` (`NaN`/`Infinity` names for floating point) instead of a plain number or `{type: string}`; `Half` is a number (`format: float`), `uint` has `format: int64` and `ulong` has no `format`. *SDK:* such properties become union types or wider integer types.
+- `[Range]` is exact: `Range(Type, "min", "max")` gives its real bounds (it wrote the type as the minimum), exclusive sides give `exclusiveMinimum` / `exclusiveMaximum` (`minimum` + `exclusiveMinimum: true` in 3.0), and `[Range]` on a non-numeric schema writes nothing. *SDK:* client-side validation follows the real bounds.
+- `[AllowedValues]` gives `enum` and `[DeniedValues]` gives `not: {enum}`.
+- `[Length]`, `[DataType]` (format), `[Display(Description)]`, `[ReadOnly(true)]` and `[SwaggerSchema]` `ReadOnly` / `WriteOnly` / `Title` / `Format` are read; `[MinLength]` / `[MaxLength]` on a dictionary give `minProperties` / `maxProperties`; several length attributes keep the tighter bound. The format has one winner (`[SwaggerSchema(Format)]` → `[EmailAddress]` / `[Url]` / `[Phone]` → `[DataType]` → the type), so these attributes now replace a type's format; the description has `[SwaggerSchema(Description)]` above `[Description]`. *SDK:* read-only/write-only members and formats (`date`, `email`, …) map to other types or annotations.
+- `[Base64String]` strings get `format: byte`, as `byte[]` already did.
+- XML `<example>` on DTO properties and types is written as `example`; XML `<param example="…">` gives parameter and request body examples. *SDK:* documentation only.
+- `[DefaultValue(typeof(T), "…")]` writes the converted value instead of the type name; enum defaults (also C# defaults of enum parameters) use the enum's wire form.
+
+**Parameters**
+
+- Validation attributes on action parameters (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`, `[Length]`, `[RegularExpression]`, `[AllowedValues]`, `[DeniedValues]`, format attributes) apply to path, query and header parameters, to form fields and to the `[FromBody]` schema; the synthetic form object lists its required fields in `required`. *SDK:* client-side validation of parameters; form fields marked required.
+- `[FromForm(Name = …)]` renames the form field; the XML `<param>` description of a parameter renamed with `[FromQuery/FromHeader/FromRoute(Name = …)]` is kept; `[SwaggerParameter(Required = …)]` sets `required`. *SDK:* form field names match the wire.
+- `[SwaggerTag(description, externalDocsUrl)]` gives the controller's tag `externalDocs`.
+
+**Security**
+
+- OAuth2 and OpenID Connect schemes from `AddSecurityDefinition` are written with their flows, URLs and scopes (the build used to fail on them), and requirement scopes are written instead of `[]`. *SDK:* OAuth2 clients get their flows and scopes.
+- A `mutualTLS` scheme, which OpenAPI 3.0 cannot express, is removed together with its name in every requirement, with a warning listing the changed requirements; it was dropped silently before, now its requirements change. *SDK:* operations that required only mutual TLS show no security requirement in 3.0.
+
+**Document metadata.** New sources and flags of OpenAPI 3.1/3.2 fields (`info.summary`, `license.identifier`, `servers[].name`, `$self`, `jsonSchemaDialect`, tag `summary` / `parent` / `kind`) change a 3.0 document only when they are set: they become `x-oai-*` / `x-oas-*` extensions or are omitted, each with a warning. `$self` (`x-oai-$self` in 3.0) is written exactly as given, percent-encodings included.
+
+### Exit codes
+
+The values are unchanged (0 success, 1 validation errors, 2 errors), but some runs that used to exit with 0 now exit with 2:
+
+- annotations that are provably wrong: a `[Range]` that `RangeAttribute` itself rejects, a `[JsonExtensionData]` shape System.Text.Json rejects, a derived property named like the discriminator, a property both read-only and write-only, a literal OAuth2 / OpenID Connect declaration without the flows or URLs OpenAPI requires (`OpenApiExtractionException`);
+- conflicting configuration: a license identifier together with a URL, a license URL or identifier without a name (the license used to be dropped silently), a number of server names different from the number of servers, an empty or repeated server name, a malformed `$self`, a dialect that is not the base dialect of the target version (`OpenApiConfigurationException`). Library callers also get `OpenApiConfigurationException` for a target version other than 3.0, 3.1 or 3.2 and for a `ValidationContext.OpenApiSpecVersion` that differs from the build version.
+
+With `--validate`, the new validation rules can turn a passing run into exit 1: a 3.1/3.2 license with both an identifier and a URL, a document without `paths` (3.0) or without any of `paths` / `webhooks` / `components` (3.1/3.2), a 3.2 tag with an undeclared parent or a parent cycle, two 3.2 servers with one name, a 3.2 discriminator with an optional property and no `defaultMapping`. In the other direction, a missing response description is only a warning for 3.2, and the response, constraint, format and unused-component rules no longer report the tool's own output.
+
+### All changes
+
 - [FEATURE] The target OpenAPI version is a build option on every public Core surface: `OpenApiDocumentOptions.OpenApiVersion` and `SchemaOptions.OpenApiVersion` (`Microsoft.OpenApi.OpenApiSpecVersion`, default `OpenApi3_0`). A document is built for that version and is supported only when serialized into the same version. The CLI parses `--openapi-version` once and uses the value for the build, the validation and the serialization. Output does not change yet: the option is the carrier for version-dependent forms.
 - [BEHAVIOR] A version other than 3.0, 3.1 or 3.2 (`OpenApi2_0`, or a value outside the enum) makes `OpenApiDocumentBuilder.Build`, `OpenApiDocumentBuilder.BuildWithValidation` and `new SchemaGenerator(...)` throw the new public `OpenApiConfigurationException` (derived from `InvalidOperationException`) before the assembly is loaded. `BuildWithValidation` takes the validation version from the build options when `ValidationContext.OpenApiSpecVersion` is `null`; an explicit value that differs from `OpenApiDocumentOptions.OpenApiVersion` now throws `OpenApiConfigurationException`. Library callers that set `ValidationContext.OpenApiSpecVersion` to 3.1 or 3.2 must set the same `OpenApiVersion` in the build options. The CLI exit code for an unknown `--openapi-version` stays 2.
 

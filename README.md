@@ -193,6 +193,8 @@ For every OpenAPI field the tool emits, could emit or never emits — its source
 | Unknown `[JsonConverter]` types | Arbitrary runtime code — falls back to default schema. Well-known converters are recognized via built-in registry |
 | `[ModelBinder]` custom binding | Runtime behavior, not interpretable statically |
 | Runtime Swashbuckle filters | Any filter that modifies the document at runtime is invisible to static analysis |
+| Range of a number read from a string | With `[JsonNumberHandling]` / `NumberHandling` a number is `anyOf: [number, numeric string]`; `[Range]`, `[AllowedValues]` and the format constrain the numeric branch only. The string branch keeps the grammar System.Text.Json reads (`"+1"`, `"01"`, `"1.5e3"`), which a pattern cannot bound by value, so an out-of-range number sent as a string passes the schema and is rejected by the server |
+| Dictionary keys (`propertyNames`, OpenAPI 3.1/3.2) | An approximation that is never narrower than System.Text.Json: integer keys are a digit pattern without the type's range (`"300"` passes for a `byte` key), unsigned keys also accept a leading `+` that System.Text.Json 10 rejects, and string and enum keys are not constrained. OpenAPI 3.0 has no `propertyNames` and leaves keys unconstrained |
 | Serializing a library-built document into another OpenAPI version | The document is built for `OpenApiDocumentOptions.OpenApiVersion` (default 3.0) and is serialized only into that version; the CLI always builds, validates and serializes for one version |
 
 ### Runtime-only Program.cs patterns
