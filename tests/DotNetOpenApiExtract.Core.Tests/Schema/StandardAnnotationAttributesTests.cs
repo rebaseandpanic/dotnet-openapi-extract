@@ -222,6 +222,33 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
     public void PropertyDescription_XmlSummaryFirst_ThenSwaggerSchema_Description_Display(OpenApiSpecVersion version, string property, string winner) =>
         Text(Property(version, "DescriptionPriorityModel", property), "description").Should().Be(winner);
 
+    public static TheoryData<OpenApiSpecVersion, string> EnumProperties()
+    {
+        var data = new TheoryData<OpenApiSpecVersion, string>();
+        foreach (var version in VersionedDocumentHarness.Versions)
+        {
+            data.Add(version, "plainKind");
+            data.Add(version, "kindWithAttribute");
+        }
+        return data;
+    }
+
+    /// <summary>
+    /// An enum property is described by its enum type with the list of values, as in 0.16 and as
+    /// Swashbuckle serves it (a reference to the type, no description of its own): neither its XML
+    /// summary nor a <c>[SwaggerSchema]</c> on it changes that.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EnumProperties))]
+    public void EnumProperty_IsDescribedByItsType_WithTheValues_WithOrWithoutAnAttribute(OpenApiSpecVersion version, string property)
+    {
+        var description = Text(Property(version, "DescriptionPriorityModel", property), "description");
+
+        description.Should().StartWith("Type-level summary of DescribedKind.");
+        description.Should().Contain("`One`").And.Contain("First.").And.Contain("`Two`").And.Contain("Second.");
+        description.Should().NotContain("Property summary").And.NotContain("Attribute text");
+    }
+
     [Theory]
     [MemberData(nameof(AllVersions))]
     public void XmlSummary_OnAReference_WinsOverTheAttribute_OnTheWrapper(OpenApiSpecVersion version)

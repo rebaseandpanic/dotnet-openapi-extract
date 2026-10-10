@@ -239,6 +239,24 @@ public class DescriptionPriorityModel
     /// <summary>Xml summary.</summary>
     [Display(Description = "From Display")]
     public int? XmlOverDisplayOnNullableNumber { get; set; }
+
+    /// <summary>Property summary of PlainKind.</summary>
+    public DescribedKind PlainKind { get; set; }
+
+    /// <summary>Property summary of KindWithAttribute.</summary>
+    [SwaggerSchema("Attribute text of KindWithAttribute")]
+    public DescribedKind? KindWithAttribute { get; set; }
+}
+
+/// <summary>Type-level summary of DescribedKind.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DescribedKind
+{
+    /// <summary>First.</summary>
+    One = 0,
+
+    /// <summary>Second.</summary>
+    Two = 1,
 }
 
 /// <summary>readOnly, writeOnly and title sources.</summary>

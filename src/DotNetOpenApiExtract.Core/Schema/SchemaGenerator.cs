@@ -1439,8 +1439,11 @@ public sealed class SchemaGenerator
         // [SwaggerSchema(Description)] → [Description] → [Display(Description)]: always wins over a
         // default set by a converter hint or the BCL registry, because a property-level annotation is
         // a direct user statement. The XML <summary>, applied with the components, replaces it.
+        // An enum property keeps the description of its enum type with the list of values, as in 0.16
+        // and as Swashbuckle serves a reference to the type: the attributes (and so the XML summary that
+        // replaces their text) describe it only when the type gives no description.
         var description = DocumentationResolver.AttributeDescription(attrData);
-        if (description != null)
+        if (description != null && (!IsEnumProperty(property.PropertyType) || string.IsNullOrEmpty(schema.Description)))
             schema.Description = description;
 
         ApplyAccessAndTitle(schema, attrData, property, componentId);
@@ -2729,6 +2732,13 @@ public sealed class SchemaGenerator
         return type.IsGenericType
             && type.GetGenericTypeDefinition().FullName == NullableGenericFullName;
     }
+
+    /// <summary>
+    /// Whether a property of type <paramref name="type"/> is an enum property (<c>T</c> or <c>T?</c> of an
+    /// enum <c>T</c>): it is described by its enum type when the type gives a description.
+    /// </summary>
+    internal static bool IsEnumProperty(Type type) =>
+        type.IsEnum || (IsNullableValueType(type) && type.GetGenericArguments()[0].IsEnum);
 
     /// <summary>The OpenAPI version this generator builds schemas for.</summary>
     internal OpenApiSpecVersion OpenApiVersion => _options.OpenApiVersion;

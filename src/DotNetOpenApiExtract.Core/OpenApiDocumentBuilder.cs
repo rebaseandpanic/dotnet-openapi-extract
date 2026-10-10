@@ -867,7 +867,8 @@ public sealed class OpenApiDocumentBuilder
                             {
                                 // An empty description, or the one the attributes gave: the XML
                                 // <summary> replaces it (ResolveProperty puts XML first). A default
-                                // of a converter hint or an enum stays when there is no attribute.
+                                // of a converter hint stays when there is no attribute; the description
+                                // of an enum type stays always (the attributes do not replace it either).
                                 inlineProp.Description = propDoc.Description;
                             }
                         }
