@@ -14,7 +14,13 @@ public sealed class DefaultValuesFixture
     public DefaultValuesFixture()
     {
         foreach (var version in VersionedDocumentHarness.Versions)
-            Builds[version] = Build(version);
+        {
+            var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => Options(version, onDiagnostic));
+            var text = document.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult();
+            Builds[version] = (text, JsonNode.Parse(text)!, diagnostics);
+            Yaml[version] = VersionedDocumentHarness.SerializeAsync(document, version, DocumentFormat.Yaml, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
 
         var previous = CultureInfo.CurrentCulture;
         try
@@ -30,17 +36,22 @@ public sealed class DefaultValuesFixture
 
     public Dictionary<OpenApiSpecVersion, (string Text, JsonNode Document, IReadOnlyList<ExtractionDiagnostic> Diagnostics)> Builds { get; } = [];
 
+    /// <summary>The same documents written as YAML and read back with the YAML reader stack of <c>validate</c>.</summary>
+    public Dictionary<OpenApiSpecVersion, JsonNode> Yaml { get; } = [];
+
     public (string Text, JsonNode Document, IReadOnlyList<ExtractionDiagnostic> Diagnostics) German { get; }
+
+    private static OpenApiDocumentOptions Options(OpenApiSpecVersion version, Action<ExtractionDiagnostic> onDiagnostic) => new()
+    {
+        AssemblyPath   = TestPaths.ModernApiDll,
+        XmlPath        = TestPaths.ModernApiXml,
+        OpenApiVersion = version,
+        OnDiagnostic   = onDiagnostic,
+    };
 
     private static (string, JsonNode, IReadOnlyList<ExtractionDiagnostic>) Build(OpenApiSpecVersion version)
     {
-        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
-        {
-            AssemblyPath   = TestPaths.ModernApiDll,
-            XmlPath        = TestPaths.ModernApiXml,
-            OpenApiVersion = version,
-            OnDiagnostic   = onDiagnostic,
-        });
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => Options(version, onDiagnostic));
         var text = document.SerializeAsJsonAsync(version, CancellationToken.None).GetAwaiter().GetResult();
         return (text, JsonNode.Parse(text)!, diagnostics);
     }
@@ -163,5 +174,50 @@ public class DefaultValueConversionTests(DefaultValuesFixture fixture) : IClassF
             .Should().Be("\"Courier\"", because: "a C# default of a string enum is its name");
         parameters.Single(p => p!["name"]!.GetValue<string>() == "speed")!["schema"]!["default"]!.ToJsonString()
             .Should().Be("2", because: "a C# default of a numeric enum stays its number");
+    }
+
+    /// <summary>
+    /// Every integer width other than <c>int</c> / <c>long</c>, in each form a default is declared:
+    /// the literal attribute and the <c>(Type, string)</c> attribute on a property, the C# default and
+    /// the <c>(Type, string)</c> attribute on a parameter. The values are the C# values themselves.
+    /// </summary>
+    public static TheoryData<OpenApiSpecVersion, DocumentFormat, string, string> NarrowIntegers
+    {
+        get
+        {
+            var data = new TheoryData<OpenApiSpecVersion, DocumentFormat, string, string>();
+            foreach (var version in VersionedDocumentHarness.Versions)
+            foreach (var format in new[] { DocumentFormat.Json, DocumentFormat.Yaml })
+            foreach (var form in new[] { "Literal", "Text" })
+            {
+                data.Add(version, format, "byte" + form, "200");
+                data.Add(version, format, "sByte" + form, "-5");
+                data.Add(version, format, "short" + form, "-300");
+                data.Add(version, format, "uShort" + form, "60000");
+                data.Add(version, format, "uInt" + form, "4000000000");
+                data.Add(version, format, "uLong" + form, "18446744073709551615");
+            }
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NarrowIntegers))]
+    public void NarrowIntegerDefault_IsWrittenAsANumber(OpenApiSpecVersion version, DocumentFormat format, string name, string expected)
+    {
+        var document = format == DocumentFormat.Json
+            ? JsonNode.Parse(fixture.Builds[version].Text)!
+            : fixture.Yaml[version];
+
+        var property = document["components"]!["schemas"]!["NarrowIntegerDefaultsModel"]!["properties"]![name]!["default"];
+        var parameter = document["paths"]!["/keywords/narrow-integer-parameter-defaults"]!["get"]!["parameters"]!.AsArray()
+            .Single(p => p!["name"]!.GetValue<string>() == name)!["schema"]!["default"];
+
+        foreach (var (place, value) in new[] { ("property", property), ("parameter", parameter) })
+        {
+            value.Should().NotBeNull(because: $"{place} {name}");
+            value!.GetValueKind().Should().Be(System.Text.Json.JsonValueKind.Number, because: $"{place} {name}");
+            value.ToJsonString().Should().Be(expected, because: $"{place} {name}");
+        }
     }
 }

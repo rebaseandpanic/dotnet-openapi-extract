@@ -366,6 +366,58 @@ public class DefaultValuesModel
     public Uri? Home { get; set; }
 }
 
+/// <summary>Defaults of every integer width other than int and long, as literals and as text.</summary>
+public class NarrowIntegerDefaultsModel
+{
+    /// <summary>A byte literal default.</summary>
+    [System.ComponentModel.DefaultValue((byte)200)]
+    public byte ByteLiteral { get; set; } = 200;
+
+    /// <summary>An sbyte literal default.</summary>
+    [System.ComponentModel.DefaultValue((sbyte)-5)]
+    public sbyte SByteLiteral { get; set; } = -5;
+
+    /// <summary>A short literal default.</summary>
+    [System.ComponentModel.DefaultValue((short)-300)]
+    public short ShortLiteral { get; set; } = -300;
+
+    /// <summary>A ushort literal default.</summary>
+    [System.ComponentModel.DefaultValue((ushort)60000)]
+    public ushort UShortLiteral { get; set; } = 60000;
+
+    /// <summary>A uint literal default above int.MaxValue.</summary>
+    [System.ComponentModel.DefaultValue(4000000000u)]
+    public uint UIntLiteral { get; set; } = 4000000000u;
+
+    /// <summary>A ulong literal default above long.MaxValue.</summary>
+    [System.ComponentModel.DefaultValue(18446744073709551615UL)]
+    public ulong ULongLiteral { get; set; } = 18446744073709551615UL;
+
+    /// <summary>A byte default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(byte), "200")]
+    public byte ByteText { get; set; } = 200;
+
+    /// <summary>An sbyte default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(sbyte), "-5")]
+    public sbyte SByteText { get; set; } = -5;
+
+    /// <summary>A short default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(short), "-300")]
+    public short ShortText { get; set; } = -300;
+
+    /// <summary>A ushort default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(ushort), "60000")]
+    public ushort UShortText { get; set; } = 60000;
+
+    /// <summary>A uint default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(uint), "4000000000")]
+    public uint UIntText { get; set; } = 4000000000u;
+
+    /// <summary>A ulong default as text.</summary>
+    [System.ComponentModel.DefaultValue(typeof(ulong), "18446744073709551615")]
+    public ulong ULongText { get; set; } = 18446744073709551615UL;
+}
+
 /// <summary>Allowed and denied values on members of an enum over ulong.</summary>
 public class HugeCodeValuesModel
 {

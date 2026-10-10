@@ -78,6 +78,26 @@ public class SchemaKeywordsController : ControllerBase
         [FromQuery, System.ComponentModel.DefaultValue(typeof(Uri), "https://example.com")] Uri? home,
         [FromQuery] int page = 1) => Ok();
 
+    /// <summary>Defaults of every integer width other than int and long, on a DTO.</summary>
+    [HttpGet("narrow-integer-defaults")]
+    public ActionResult<NarrowIntegerDefaultsModel> NarrowIntegerDefaults() => new NarrowIntegerDefaultsModel();
+
+    /// <summary>C# defaults of every integer width other than int and long, on action parameters.</summary>
+    [HttpGet("narrow-integer-parameter-defaults")]
+    public IActionResult NarrowIntegerParameterDefaults(
+        [FromQuery] byte byteLiteral = 200,
+        [FromQuery] sbyte sByteLiteral = -5,
+        [FromQuery] short shortLiteral = -300,
+        [FromQuery] ushort uShortLiteral = 60000,
+        [FromQuery] uint uIntLiteral = 4000000000u,
+        [FromQuery] ulong uLongLiteral = 18446744073709551615UL,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(byte), "200")] byte byteText = 0,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(sbyte), "-5")] sbyte sByteText = 0,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(short), "-300")] short shortText = 0,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(ushort), "60000")] ushort uShortText = 0,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(uint), "4000000000")] uint uIntText = 0,
+        [FromQuery, System.ComponentModel.DefaultValue(typeof(ulong), "18446744073709551615")] ulong uLongText = 0) => Ok();
+
     /// <summary>Allowed and denied ulong enum members.</summary>
     [HttpGet("huge-code-values")]
     public ActionResult<HugeCodeValuesModel> HugeCodeValues() => new HugeCodeValuesModel();

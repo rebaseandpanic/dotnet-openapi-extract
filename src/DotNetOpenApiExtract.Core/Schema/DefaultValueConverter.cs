@@ -75,22 +75,18 @@ internal static class DefaultValueConverter
 
     /// <summary>
     /// The JSON value of a literal: numbers stay numbers, <c>bool</c> a boolean, everything else
-    /// its string form.
+    /// its string form. Integers of every width go through <see cref="SchemaGenerator.IntegralValue"/>:
+    /// Microsoft.OpenApi writes a JSON value held as <c>byte</c>, <c>sbyte</c>, <c>short</c>,
+    /// <c>ushort</c>, <c>uint</c> or <c>ulong</c> as nothing at all (<c>"default": </c>), so they are
+    /// widened to <c>int</c> / <c>long</c> (a <c>ulong</c> above <c>long.MaxValue</c> to <c>decimal</c>).
     /// </summary>
     public static JsonNode? FromLiteral(object literal) => literal switch
     {
         bool b      => JsonValue.Create(b),
-        int i       => JsonValue.Create(i),
-        long l      => JsonValue.Create(l),
         float f     => JsonValue.Create(f),
         double d    => JsonValue.Create(d),
         decimal dec => JsonValue.Create(dec),
-        uint ui     => JsonValue.Create(ui),
-        short s16   => JsonValue.Create(s16),
-        ushort u16  => JsonValue.Create(u16),
-        ulong u64   => JsonValue.Create((decimal)u64), // Microsoft.OpenApi writes no ulong value
-        sbyte sb    => JsonValue.Create(sb),
-        byte b8     => JsonValue.Create(b8),
+        int or long or uint or short or ushort or ulong or sbyte or byte => SchemaGenerator.IntegralValue(literal),
         string s    => JsonValue.Create(s),
         _           => JsonValue.Create(Convert.ToString(literal, CultureInfo.InvariantCulture)),
     };
@@ -122,14 +118,14 @@ internal static class DefaultValueConverter
             "System.Decimal" => decimal.TryParse(text, NumberStyles.Number, culture, out var dec) ? JsonValue.Create(dec) : null,
             "System.Double"  => double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var d) && double.IsFinite(d) ? JsonValue.Create(d) : null,
             "System.Single"  => float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var f) && float.IsFinite(f) ? JsonValue.Create(f) : null,
-            "System.Int32"   => int.TryParse(text, NumberStyles.Integer, culture, out var i) ? JsonValue.Create(i) : null,
-            "System.Int64"   => long.TryParse(text, NumberStyles.Integer, culture, out var l) ? JsonValue.Create(l) : null,
-            "System.Int16"   => short.TryParse(text, NumberStyles.Integer, culture, out var s) ? JsonValue.Create(s) : null,
-            "System.Byte"    => byte.TryParse(text, NumberStyles.Integer, culture, out var b8) ? JsonValue.Create(b8) : null,
-            "System.SByte"   => sbyte.TryParse(text, NumberStyles.Integer, culture, out var sb) ? JsonValue.Create(sb) : null,
-            "System.UInt16"  => ushort.TryParse(text, NumberStyles.Integer, culture, out var u16) ? JsonValue.Create(u16) : null,
-            "System.UInt32"  => uint.TryParse(text, NumberStyles.Integer, culture, out var u32) ? JsonValue.Create(u32) : null,
-            "System.UInt64"  => ulong.TryParse(text, NumberStyles.Integer, culture, out var u64) ? JsonValue.Create((decimal)u64) : null,
+            "System.Int32"   => int.TryParse(text, NumberStyles.Integer, culture, out var i) ? SchemaGenerator.IntegralValue(i) : null,
+            "System.Int64"   => long.TryParse(text, NumberStyles.Integer, culture, out var l) ? SchemaGenerator.IntegralValue(l) : null,
+            "System.Int16"   => short.TryParse(text, NumberStyles.Integer, culture, out var s) ? SchemaGenerator.IntegralValue(s) : null,
+            "System.Byte"    => byte.TryParse(text, NumberStyles.Integer, culture, out var b8) ? SchemaGenerator.IntegralValue(b8) : null,
+            "System.SByte"   => sbyte.TryParse(text, NumberStyles.Integer, culture, out var sb) ? SchemaGenerator.IntegralValue(sb) : null,
+            "System.UInt16"  => ushort.TryParse(text, NumberStyles.Integer, culture, out var u16) ? SchemaGenerator.IntegralValue(u16) : null,
+            "System.UInt32"  => uint.TryParse(text, NumberStyles.Integer, culture, out var u32) ? SchemaGenerator.IntegralValue(u32) : null,
+            "System.UInt64"  => ulong.TryParse(text, NumberStyles.Integer, culture, out var u64) ? SchemaGenerator.IntegralValue(u64) : null,
             "System.Boolean" => bool.TryParse(text, out var flag) ? JsonValue.Create(flag) : null,
             "System.String"  => JsonValue.Create(text),
             "System.Guid"    => Guid.TryParse(text, out var guid) ? JsonValue.Create(guid.ToString("D")) : null,
