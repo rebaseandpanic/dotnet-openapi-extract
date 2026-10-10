@@ -37,10 +37,9 @@ internal static class DocumentMetadata
 
         ValidateServerNames(options.Servers, options.ServerNames);
 
+        // $self: a well-formed URI reference (absolute or relative), without a fragment.
         if (options.SelfUrl != null
-            && (options.SelfUrl.Contains('#', StringComparison.Ordinal)
-                || !Uri.TryCreate(options.SelfUrl, UriKind.RelativeOrAbsolute, out _)
-                || string.IsNullOrWhiteSpace(options.SelfUrl)))
+            && (options.SelfUrl.Contains('#', StringComparison.Ordinal) || !IsUriReference(options.SelfUrl)))
             throw new OpenApiConfigurationException(
                 $"SelfUrl '{options.SelfUrl}' must be a URI reference without a fragment ($self).");
 

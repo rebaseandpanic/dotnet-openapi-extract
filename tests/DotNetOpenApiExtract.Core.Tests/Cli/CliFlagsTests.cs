@@ -16,7 +16,11 @@ public class CliFlagsTests
     private const string Dialect31 = "https://spec.openapis.org/oas/3.1/dialect/base";
     private const string Dialect32 = "https://spec.openapis.org/oas/3.2/dialect/2025-09-17";
 
-    /// <summary>Every rule the ModernApi fixture breaks, so that a validation run of it is clean.</summary>
+    /// <summary>
+    /// Every rule the ModernApi fixture already breaks, so that a validation run of it is clean. This
+    /// isolates the fixture's existing violations for the exit-code test; it is not a list of rules a
+    /// change may switch off — a new violation of the fixture must be fixed, not added here.
+    /// </summary>
     private static readonly string[] RulesModernApiBreaks =
     [
         "operation.description", "operation.has-error-response", "operation.operation-id", "operation.operation-id-unique",

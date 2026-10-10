@@ -168,6 +168,8 @@ public class DocumentMetadataOptionsTests(DocumentMetadataFixture fixture) : ICl
         { "repeated name", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, Servers = ["https://a.example.com", "https://b.example.com"], ServerNames = ["a", "a"] } },
         { "self with a fragment", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, SelfUrl = "https://example.com/openapi.json#top" } },
         { "self not a URI reference", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, SelfUrl = "http://[bad" } },
+        { "self with raw spaces", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, SelfUrl = "not a uri" } },
+        { "self with a bad escape", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, SelfUrl = "https://example.com/a%zz" } },
         { "unsupported dialect", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, JsonSchemaDialect = "https://json-schema.org/draft/2020-12/schema" } },
         { "3.2 dialect for 3.1", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_1, JsonSchemaDialect = DocumentMetadataFixture.Dialect32 } },
         { "3.1 dialect for 3.2", new OpenApiDocumentOptions { AssemblyPath = TestPaths.ModernApiDll, OpenApiVersion = OpenApiSpecVersion.OpenApi3_2, JsonSchemaDialect = DocumentMetadataFixture.Dialect31 } },
@@ -209,5 +211,36 @@ public class DocumentMetadataOptionsTests(DocumentMetadataFixture fixture) : ICl
         var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
 
         json.AsObject().ContainsKey("jsonSchemaDialect").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("openapi.json")]
+    [InlineData("/specs/openapi.json")]
+    [InlineData("https://example.com/specs/openapi.json?v=2")]
+    public void SelfUrl_RelativeOrAbsolute_IsAccepted(string self)
+    {
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath   = TestPaths.ModernApiDll,
+            OpenApiVersion = OpenApiSpecVersion.OpenApi3_2,
+            SelfUrl        = self,
+        });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_2, CancellationToken.None).GetAwaiter().GetResult())!;
+
+        json["$self"]!.GetValue<string>().Should().Be(self);
+    }
+
+    [Fact]
+    public void SelfUrl_WithAValidPercentEncoding_IsAccepted()
+    {
+        // Accepted as well formed; how the escape is written is the library's (it writes Uri.ToString()).
+        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath   = TestPaths.ModernApiDll,
+            OpenApiVersion = OpenApiSpecVersion.OpenApi3_2,
+            SelfUrl        = "https://example.com/a%20b/openapi.json",
+        });
+
+        build.Should().NotThrow();
     }
 }
