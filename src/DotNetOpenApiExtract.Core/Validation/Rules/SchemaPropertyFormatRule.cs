@@ -8,7 +8,8 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// the generator applies: <c>[SwaggerSchema(Format)]</c>, then <c>[EmailAddress]</c> (<c>email</c>) /
 /// <c>[Url]</c> (<c>uri</c>) / <c>[Phone]</c> (<c>phone</c>), then <c>[DataType]</c> by its table
 /// (<c>DateTime</c> → <c>date-time</c>, <c>Date</c> → <c>date</c>, <c>Time</c> → <c>time</c>,
-/// <c>Duration</c> → <c>duration</c>, <c>EmailAddress</c> → <c>email</c>, <c>Password</c> →
+/// <c>Duration</c> → <c>duration</c> (none on a <c>TimeSpan</c>, which System.Text.Json does not
+/// write as ISO 8601), <c>EmailAddress</c> → <c>email</c>, <c>Password</c> →
 /// <c>password</c>, <c>Url</c> / <c>ImageUrl</c> → <c>uri</c>, <c>PhoneNumber</c> → <c>phone</c>,
 /// <c>Upload</c> → <c>binary</c>), and only when none of them declares a format, the CLR type
 /// (<c>Guid</c> → <c>uuid</c>, <c>DateTime</c> / <c>DateTimeOffset</c> → <c>date-time</c>,
@@ -65,7 +66,7 @@ public sealed class SchemaPropertyFormatRule : IValidationRule
                     propType = propType.GetGenericArguments().FirstOrDefault() ?? propType;
 
                 // The declared format wins; the type's format only stands when nothing declares one.
-                var expectedFormat = Schema.SchemaGenerator.DeclaredFormat(clrProp.GetCustomAttributesData());
+                var expectedFormat = Schema.SchemaGenerator.DeclaredFormat(clrProp.GetCustomAttributesData(), clrProp.PropertyType);
                 if (expectedFormat == null && propType.FullName != null && ClrToFormat.TryGetValue(propType.FullName, out var fmtFromClr))
                     expectedFormat = fmtFromClr;
 

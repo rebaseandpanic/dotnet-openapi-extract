@@ -76,7 +76,9 @@ public sealed class SchemaGenerator
             ["System.DateTimeOffset"]= (JsonSchemaType.String, "date-time"),
             ["System.DateOnly"]      = (JsonSchemaType.String, "date"),
             ["System.TimeOnly"]      = (JsonSchemaType.String, "time"),
-            ["System.TimeSpan"]      = (JsonSchemaType.String, "duration"),
+            // Not format: duration (ISO 8601, "P0DT0H0M5S"): System.Text.Json writes "00:00:05".
+            // The schema is a string with TimeSpanPattern, added where primitives are built.
+            ["System.TimeSpan"]      = (JsonSchemaType.String, null),
 
             // Well-known string types
             ["System.Guid"]          = (JsonSchemaType.String, "uuid"),
@@ -88,6 +90,16 @@ public sealed class SchemaGenerator
 
     // FullName prefix for Nullable<T>
     private const string NullableGenericFullName = "System.Nullable`1";
+
+    private const string TimeSpanFullName = "System.TimeSpan";
+
+    /// <summary>
+    /// The text System.Text.Json writes for a <c>TimeSpan</c>, the constant format <c>"c"</c>:
+    /// <c>[-][d.]hh:mm:ss[.fffffff]</c> — <c>00:00:05</c>, <c>-3.04:05:06</c>, <c>00:00:01.5000000</c>,
+    /// from <c>-10675199.02:48:05.4775808</c> to <c>10675199.02:48:05.4775807</c>. Not ISO 8601
+    /// (<c>format: duration</c>), which a strict client would reject.
+    /// </summary>
+    internal const string TimeSpanPattern = @"^-?(\d{1,8}\.)?([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,7})?$";
 
     // FullName for byte[]
     private const string ByteArrayFullName = "System.Byte[]";
@@ -301,6 +313,8 @@ public sealed class SchemaGenerator
             var schema = new OpenApiSchema { Type = primitive.SchemaType };
             if (primitive.Format != null)
                 schema.Format = primitive.Format;
+            if (fullName == TimeSpanFullName)
+                schema.Pattern = TimeSpanPattern;
 
             // Number handling (property > type > global) applies to numeric types only
             if (primitive.SchemaType == JsonSchemaType.Integer
@@ -1413,7 +1427,7 @@ public sealed class SchemaGenerator
     private static void ApplyValidationAttributes(
         OpenApiSchema schema, IList<CustomAttributeData> attrData, PropertyInfo property, string componentId)
     {
-        ApplyConstraintAttributes(schema, attrData);
+        ApplyConstraintAttributes(schema, attrData, property.PropertyType);
 
         // [Obsolete] → deprecated: true
         if (AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Obsolete))
@@ -1434,7 +1448,7 @@ public sealed class SchemaGenerator
     /// <c>[MinLength]</c>, <c>[MaxLength]</c>, <c>[Length]</c>), <c>[RegularExpression]</c> and the
     /// format by its priority. <c>[Range]</c> is applied by <see cref="ApplyRange"/>.
     /// </summary>
-    private static void ApplyConstraintAttributes(OpenApiSchema schema, IList<CustomAttributeData> attrData)
+    private static void ApplyConstraintAttributes(OpenApiSchema schema, IList<CustomAttributeData> attrData, Type memberType)
     {
         // [StringLength(maxLength, MinimumLength = minLength)]
         var stringLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.StringLength);
@@ -1487,7 +1501,7 @@ public sealed class SchemaGenerator
         // format: one winner — [SwaggerSchema(Format)], else a profile attribute, else [DataType],
         // else the format derived from the type, which a source without a format leaves in place.
         // With number handling the format belongs to the numeric branch, where the type's format is.
-        var format = DeclaredFormat(attrData);
+        var format = DeclaredFormat(attrData, memberType);
         if (format != null)
             (NumberUnionBranches(schema)?.Number ?? schema).Format = format;
     }
@@ -1514,12 +1528,12 @@ public sealed class SchemaGenerator
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.Range)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.AllowedValues)
             || AttributeHelper.HasAttribute(attrData, AttributeHelper.Names.DeniedValues)
-            || DeclaredFormat(attrData) != null;
+            || DeclaredFormat(attrData, parameterType) != null;
         if (!constrains)
             return schema;
 
         var mutable = EnsureMutableSchema(schema);
-        ApplyConstraintAttributes(mutable, attrData);
+        ApplyConstraintAttributes(mutable, attrData, parameterType);
         ApplyRange(mutable, attrData, typeName, memberName, anchor);
 
         // A bound parameter is read by member name (model binding); a JSON body by the serializer's names.
@@ -1562,9 +1576,11 @@ public sealed class SchemaGenerator
     /// The format the attributes of a property declare, by priority: <c>[SwaggerSchema(Format)]</c>,
     /// then <c>[EmailAddress]</c> / <c>[Url]</c> / <c>[Phone]</c>, then <c>[DataType]</c> by
     /// <see cref="DataTypeFormat"/>; <see langword="null"/> when none of them sets a format, so the
-    /// format derived from the type stays.
+    /// format derived from the type stays. <c>[DataType(Duration)]</c> on a <c>TimeSpan</c> (or
+    /// <c>TimeSpan?</c>) <paramref name="memberType"/> declares none: System.Text.Json writes such a
+    /// value as <c>00:00:05</c>, not as the ISO 8601 duration the format names.
     /// </summary>
-    internal static string? DeclaredFormat(IList<CustomAttributeData> attrData)
+    internal static string? DeclaredFormat(IList<CustomAttributeData> attrData, Type? memberType = null)
     {
         var swaggerSchema = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.SwaggerSchema);
         if (swaggerSchema != null
@@ -1579,8 +1595,15 @@ public sealed class SchemaGenerator
             return "phone";
 
         var dataType = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.DataType);
-        return dataType != null ? DataTypeFormat(dataType) : null;
+        var format = dataType != null ? DataTypeFormat(dataType) : null;
+        return format == "duration" && IsTimeSpan(memberType) ? null : format;
     }
+
+    /// <summary>Whether <paramref name="type"/> is <c>TimeSpan</c> or <c>TimeSpan?</c>.</summary>
+    private static bool IsTimeSpan(Type? type) =>
+        type != null
+        && (type.FullName == TimeSpanFullName
+            || (IsNullableValueType(type) && type.GetGenericArguments()[0].FullName == TimeSpanFullName));
 
     /// <summary>
     /// The format of <c>[DataType(member)]</c>: <c>DateTime</c> → <c>date-time</c>, <c>Date</c> →

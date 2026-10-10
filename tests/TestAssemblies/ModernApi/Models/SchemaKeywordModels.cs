@@ -418,6 +418,24 @@ public class NarrowIntegerDefaultsModel
     public ulong ULongText { get; set; } = 18446744073709551615UL;
 }
 
+/// <summary>Time spans, which System.Text.Json writes as [-][d.]hh:mm:ss[.fffffff].</summary>
+public class TimeSpanModel
+{
+    /// <summary>A time span.</summary>
+    public TimeSpan Plain { get; set; }
+
+    /// <summary>A nullable time span.</summary>
+    public TimeSpan? Optional { get; set; }
+
+    /// <summary>A time span annotated as a duration.</summary>
+    [System.ComponentModel.DataAnnotations.DataType(System.ComponentModel.DataAnnotations.DataType.Duration)]
+    public TimeSpan Annotated { get; set; }
+
+    /// <summary>A string annotated as a duration keeps the format.</summary>
+    [System.ComponentModel.DataAnnotations.DataType(System.ComponentModel.DataAnnotations.DataType.Duration)]
+    public string IsoText { get; set; } = "PT5S";
+}
+
 /// <summary>Allowed and denied values on members of an enum over ulong.</summary>
 public class HugeCodeValuesModel
 {

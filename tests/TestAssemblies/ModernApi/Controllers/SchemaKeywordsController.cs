@@ -98,6 +98,13 @@ public class SchemaKeywordsController : ControllerBase
         [FromQuery, System.ComponentModel.DefaultValue(typeof(uint), "4000000000")] uint uIntText = 0,
         [FromQuery, System.ComponentModel.DefaultValue(typeof(ulong), "18446744073709551615")] ulong uLongText = 0) => Ok();
 
+    /// <summary>Time spans in a body and as query parameters.</summary>
+    [HttpPost("time-spans")]
+    public ActionResult<TimeSpanModel> TimeSpans(
+        [FromBody] TimeSpanModel body,
+        [FromQuery] TimeSpan wait,
+        [FromQuery, System.ComponentModel.DataAnnotations.DataType(System.ComponentModel.DataAnnotations.DataType.Duration)] TimeSpan? timeout) => body;
+
     /// <summary>Allowed and denied ulong enum members.</summary>
     [HttpGet("huge-code-values")]
     public ActionResult<HugeCodeValuesModel> HugeCodeValues() => new HugeCodeValuesModel();
