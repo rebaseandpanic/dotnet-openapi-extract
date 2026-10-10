@@ -81,6 +81,46 @@ public class CompiledSourceSelectionTests
         diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SourceEntryPointAmbiguous);
     }
 
+    private static string RealProgram => File.ReadAllText(Path.Combine(FixtureDirectory, "Program.cs"));
+
+    /// <summary>
+    /// A source root above the project, holding the project's Program.cs one level down and a copy at its
+    /// root: the PDB document <c>…/StrayEntryApi/Program.cs</c> matches both equally by path, and its
+    /// checksum picks the compiled one.
+    /// </summary>
+    [Fact]
+    public void PathTieInThePdb_IsDecidedByTheChecksum()
+    {
+        using var sourceRoot = new TempDirectory();
+        Directory.CreateDirectory(Path.Combine(sourceRoot.Path, "StrayEntryApi"));
+        File.Copy(Path.Combine(FixtureDirectory, "Program.cs"), Path.Combine(sourceRoot.Path, "StrayEntryApi", "Program.cs"));
+        File.WriteAllText(Path.Combine(sourceRoot.Path, "Program.cs"), StrayProgram);
+
+        var (document, diagnostics) = Build(TestPaths.StrayEntryApiDll, sourceRoot.Path);
+
+        SchemeNames(document).Should().Equal("Real");
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SourceCompiledFilesAmbiguous);
+    }
+
+    /// <summary>
+    /// The same tie with the project's Program.cs edited after the build: no content matches the PDB, so
+    /// neither file is read, with a warning naming both.
+    /// </summary>
+    [Fact]
+    public void PathTieInThePdb_NotDecidedByTheChecksum_NothingIsRead_WithAWarning()
+    {
+        using var sourceRoot = new TempDirectory();
+        Directory.CreateDirectory(Path.Combine(sourceRoot.Path, "StrayEntryApi"));
+        File.WriteAllText(Path.Combine(sourceRoot.Path, "StrayEntryApi", "Program.cs"), RealProgram + "\n// edited after the build\n");
+        File.WriteAllText(Path.Combine(sourceRoot.Path, "Program.cs"), StrayProgram);
+
+        var (document, diagnostics) = Build(TestPaths.StrayEntryApiDll, sourceRoot.Path);
+
+        SchemeNames(document).Should().BeEmpty();
+        diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SourceCompiledFilesAmbiguous)
+            .Which.Subjects.Should().Equal("Program.cs", "StrayEntryApi/Program.cs");
+    }
+
     /// <summary>
     /// Without a PDB the compiled files are unknown: of several entry-point files the nearest Program.cs is
     /// read, with a warning naming the candidates.

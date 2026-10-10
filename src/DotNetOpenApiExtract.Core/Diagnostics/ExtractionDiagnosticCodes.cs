@@ -14,6 +14,15 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SourceEntryPointAmbiguous = "source.entry-point-ambiguous";
 
+    /// <summary>
+    /// The portable PDB of the assembly matches several sets of files under the source root equally well
+    /// — a document <c>…/Api/Program.cs</c> matches both <c>Api/Program.cs</c> and a root
+    /// <c>Program.cs</c> — and the checksums it records do not single out one of them. Program.cs is not
+    /// read: its configuration is missing from the document. Subjects: the files of the matches, relative
+    /// to the source root.
+    /// </summary>
+    public const string SourceCompiledFilesAmbiguous = "source.compiled-files-ambiguous";
+
     /// <summary>A security scheme name is registered more than once; the first registration wins. Subjects: the scheme name.</summary>
     public const string SecurityDuplicateScheme = "security.duplicate-scheme";
 

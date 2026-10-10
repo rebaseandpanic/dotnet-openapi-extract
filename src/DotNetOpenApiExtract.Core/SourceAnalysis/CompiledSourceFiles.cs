@@ -17,21 +17,34 @@ namespace DotNetOpenApiExtract.Core.SourceAnalysis;
 /// root by their tail: a document <c>D</c> matches the file at relative path <c>R</c> when <c>D</c> is
 /// <c>P + R</c> for some prefix <c>P</c>, the build-side location of the source root. The prefix shared
 /// by the most files is taken, so a file that matches only under another prefix (a project of the same
-/// name elsewhere in the tree) is not counted in.
+/// name elsewhere in the tree) is not counted in; a tie is decided by the checksums of the content, or
+/// left undecided.
 /// </para>
 /// </remarks>
 internal static class CompiledSourceFiles
 {
+    private static readonly Guid Sha1 = new("ff1816ec-aa5e-4d10-87f7-6f4963833460");
+    private static readonly Guid Sha256 = new("8829d00f-11b8-4213-878b-770e8597ac16");
+
+    /// <summary>A source document of the PDB: its path with <c>/</c> separators and the checksum of its content.</summary>
+    private sealed record PdbDocument(string Name, Guid HashAlgorithm, byte[] Hash);
+
     /// <summary>
-    /// The full paths of the <paramref name="candidates"/> (files under <paramref name="sourceRoot"/>)
-    /// that the PDB of <paramref name="assemblyPath"/> names as documents; <see langword="null"/> when the
-    /// assembly has no portable PDB or none of its documents matches a candidate.
+    /// The files compiled into <paramref name="assemblyPath"/> among <paramref name="candidates"/> (files
+    /// under <paramref name="sourceRoot"/>), as its PDB names them.
     /// </summary>
-    public static IReadOnlyList<string>? TryFind(string assemblyPath, string sourceRoot, IEnumerable<string> candidates)
+    /// <remarks>
+    /// Several prefixes can explain the same number of files: a document <c>…/Api/Program.cs</c> matches
+    /// both <c>Api/Program.cs</c> and a <c>Program.cs</c> at the root. The checksums the PDB records
+    /// decide between them — the prefix whose files have the content that was compiled. When they do not
+    /// decide, the result is <see cref="CompiledSourceLookup.Ambiguous"/>: any choice could be a copy the
+    /// assembly does not contain.
+    /// </remarks>
+    public static CompiledSourceLookup Find(string assemblyPath, string sourceRoot, IEnumerable<string> candidates)
     {
         var documents = TryReadDocuments(assemblyPath);
         if (documents == null || documents.Count == 0)
-            return null;
+            return CompiledSourceLookup.Unavailable;
 
         // Relative path (with '/') → full path of each candidate, grouped by file name for the matching.
         var byFileName = candidates
@@ -39,40 +52,61 @@ internal static class CompiledSourceFiles
             .ToLookup(f => FileName(f.Relative), StringComparer.Ordinal);
 
         // Each match of a document to a candidate votes for the prefix it implies.
-        var matchesByPrefix = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var matchesByPrefix = new Dictionary<string, List<(string Full, PdbDocument Document)>>(StringComparer.Ordinal);
         foreach (var document in documents)
         {
-            foreach (var (full, relative) in byFileName[FileName(document)])
+            foreach (var (full, relative) in byFileName[FileName(document.Name)])
             {
-                if (!document.EndsWith(relative, StringComparison.Ordinal))
+                if (!document.Name.EndsWith(relative, StringComparison.Ordinal))
                     continue;
-                var prefix = document[..^relative.Length];
+                var prefix = document.Name[..^relative.Length];
                 if (prefix.Length > 0 && !prefix.EndsWith('/'))
                     continue;
                 if (!matchesByPrefix.TryGetValue(prefix, out var files))
                     matchesByPrefix[prefix] = files = [];
-                files.Add(full);
+                files.Add((full, document));
             }
         }
 
         if (matchesByPrefix.Count == 0)
-            return null;
+            return CompiledSourceLookup.Unavailable;
 
-        // The most files; on a tie the longest prefix, then ordinal: the result does not depend on the order of the table.
-        return matchesByPrefix
-            .OrderByDescending(p => p.Value.Count)
-            .ThenByDescending(p => p.Key.Length)
-            .ThenBy(p => p.Key, StringComparer.Ordinal)
-            .First().Value
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        var most = matchesByPrefix.Values.Max(f => f.Count);
+        var tied = matchesByPrefix.Values.Where(f => f.Count == most).ToList();
+        if (tied.Count > 1)
+        {
+            var scored = tied.Select(files => (Files: files, Same: files.Count(f => HasCompiledContent(f.Full, f.Document)))).ToList();
+            var best = scored.Max(s => s.Same);
+            tied = scored.Where(s => s.Same == best).Select(s => s.Files).ToList();
+        }
+
+        if (tied.Count > 1)
+            return CompiledSourceLookup.Ambiguous(tied.SelectMany(f => f).Select(f => f.Full).Distinct(StringComparer.Ordinal).ToList());
+
+        return CompiledSourceLookup.Found(tied[0].Select(f => f.Full).Distinct(StringComparer.Ordinal).ToList());
+    }
+
+    /// <summary>Whether the content of <paramref name="path"/> has the checksum the PDB records for <paramref name="document"/>.</summary>
+    private static bool HasCompiledContent(string path, PdbDocument document)
+    {
+        try
+        {
+            byte[]? hash = document.HashAlgorithm == Sha256 ? System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))
+                : document.HashAlgorithm == Sha1 ? System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(path))
+                : null;
+            return hash != null && hash.AsSpan().SequenceEqual(document.Hash);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
-    /// The <c>.cs</c> document names of the portable PDB of <paramref name="assemblyPath"/>, with <c>/</c>
+    /// The <c>.cs</c> documents of the portable PDB of <paramref name="assemblyPath"/>, with <c>/</c>
     /// separators; <see langword="null"/> when there is no readable portable PDB.
     /// </summary>
-    private static List<string>? TryReadDocuments(string assemblyPath)
+    private static List<PdbDocument>? TryReadDocuments(string assemblyPath)
     {
         try
         {
@@ -89,12 +123,17 @@ internal static class CompiledSourceFiles
             using (provider)
             {
                 var reader = provider.GetMetadataReader();
-                var documents = new List<string>();
+                var documents = new List<PdbDocument>();
                 foreach (var handle in reader.Documents)
                 {
-                    var name = reader.GetString(reader.GetDocument(handle).Name).Replace('\\', '/');
-                    if (name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-                        documents.Add(name);
+                    var document = reader.GetDocument(handle);
+                    var name = reader.GetString(document.Name).Replace('\\', '/');
+                    if (!name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    documents.Add(new PdbDocument(
+                        name,
+                        document.HashAlgorithm.IsNil ? Guid.Empty : reader.GetGuid(document.HashAlgorithm),
+                        document.Hash.IsNil ? [] : reader.GetBlobBytes(document.Hash)));
                 }
 
                 return documents;
@@ -108,4 +147,26 @@ internal static class CompiledSourceFiles
     }
 
     private static string FileName(string path) => path[(path.LastIndexOf('/') + 1)..];
+}
+
+/// <summary>What the PDB of an assembly says about the source files under a source root.</summary>
+internal sealed class CompiledSourceLookup
+{
+    private CompiledSourceLookup(IReadOnlyList<string>? files, IReadOnlyList<string>? ambiguousFiles) =>
+        (Files, AmbiguousFiles) = (files, ambiguousFiles);
+
+    /// <summary>No portable PDB, or none of its documents is under the source root.</summary>
+    public static CompiledSourceLookup Unavailable { get; } = new(null, null);
+
+    /// <summary>The files compiled into the assembly.</summary>
+    public static CompiledSourceLookup Found(IReadOnlyList<string> files) => new(files, null);
+
+    /// <summary>The PDB matches several sets of files equally well; <paramref name="files"/> are all of them.</summary>
+    public static CompiledSourceLookup Ambiguous(IReadOnlyList<string> files) => new(null, files);
+
+    /// <summary>Full paths of the compiled files when they are known.</summary>
+    public IReadOnlyList<string>? Files { get; }
+
+    /// <summary>Full paths of the files of the equally good matches when the PDB does not decide.</summary>
+    public IReadOnlyList<string>? AmbiguousFiles { get; }
 }

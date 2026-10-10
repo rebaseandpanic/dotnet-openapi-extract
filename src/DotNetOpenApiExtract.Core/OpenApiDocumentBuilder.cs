@@ -2512,10 +2512,29 @@ public sealed class OpenApiDocumentBuilder
 
             // 2. Compile via Roslyn the files compiled into the assembly, as its PDB names them; without a
             //    PDB that matches the source root, every file under it.
-            var compiledFiles = CompiledSourceFiles.TryFind(options.AssemblyPath, sourceRoot, SourceCompiler.EnumerateCsFiles(sourceRoot));
-            var compilationResult = compiledFiles != null
-                ? SourceCompiler.Compile(sourceRoot, compiledFiles)
+            var compiled = CompiledSourceFiles.Find(options.AssemblyPath, sourceRoot, SourceCompiler.EnumerateCsFiles(sourceRoot));
+            var compilationResult = compiled.Files != null
+                ? SourceCompiler.Compile(sourceRoot, compiled.Files)
                 : SourceCompiler.Compile(sourceRoot);
+
+            // The PDB matches several sets of files equally well and their content does not decide: any
+            // entry point could be a copy the assembly does not contain, so none is read.
+            if (compiled.AmbiguousFiles is { } ambiguous)
+            {
+                var names = ambiguous
+                    .Select(f => Path.GetRelativePath(sourceRoot, f).Replace('\\', '/'))
+                    .Order(StringComparer.Ordinal)
+                    .ToList();
+                diagnostics.Report(new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.SourceCompiledFilesAmbiguous,
+                    Message  = $"The PDB of the assembly matches several sets of files under the source root equally well ({string.Join(", ", names)}) " +
+                               "and their content does not tell which were compiled: Program.cs is not read, its configuration is missing " +
+                               "from the document. Pass --source-root as the project directory the assembly was built from.",
+                    Subjects = [.. names],
+                });
+                return new SourceAnalysisContext(compilationResult, entryPointNode: null);
+            }
 
             // 3. Locate entry-point syntax node.
             var candidates = EntryPointFinder.FindAll(loader.Assembly.EntryPoint, compilationResult.Compilation);

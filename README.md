@@ -174,7 +174,10 @@ From `Program.cs` via Roslyn (when sources are available):
 
 Only the source files compiled into the assembly are read. Their list comes from the portable PDB
 (`<assembly>.pdb` next to the DLL, or embedded), matched to the source root by path tail, so absolute
-paths of another machine and `PathMap` paths (`/_/…`) work. A file under the source root that is not
+paths of another machine and `PathMap` paths (`/_/…`) work. When two locations under the source root
+match the PDB equally well (a root `Program.cs` next to `Api/Program.cs`), the checksums the PDB records
+decide; if they do not, Program.cs is not read and the warning `source.compiled-files-ambiguous` names
+the files. A file under the source root that is not
 in the assembly — `Program.Old.cs`, a file excluded with `<Compile Remove>`, a file added after the
 build — is ignored. Without a PDB that matches the source root, every `.cs` file under it is read; if
 several of them can be the entry point (top-level statements, or `Main` of the entry-point type), the
