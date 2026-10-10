@@ -169,6 +169,115 @@ public sealed class DiscriminatorDefaultMappingRuleTests
     }
 }
 
+/// <summary>
+/// Every place of the document where a schema can stand is walked: an optional discriminator is
+/// reported at its exact pointer wherever it is.
+/// </summary>
+public sealed class DiscriminatorDefaultMappingPlacesTests
+{
+    private const string RuleId = "discriminator.default-mapping-when-optional";
+
+    /// <summary>A union whose discriminator property no alternative requires, with no defaultMapping.</summary>
+    private static OpenApiSchema OptionalUnion() => new()
+    {
+        OneOf =
+        [
+            new OpenApiSchema { Type = JsonSchemaType.Object, Properties = new Dictionary<string, IOpenApiSchema> { ["kind"] = new OpenApiSchema { Type = JsonSchemaType.String } } },
+            new OpenApiSchema { Type = JsonSchemaType.Object, Properties = new Dictionary<string, IOpenApiSchema> { ["kind"] = new OpenApiSchema { Type = JsonSchemaType.String } } },
+        ],
+        Discriminator = new OpenApiDiscriminator { PropertyName = "kind" },
+    };
+
+    private static OpenApiOperation Operation(Action<OpenApiOperation>? configure = null)
+    {
+        var operation = new OpenApiOperation
+        {
+            Responses = new OpenApiResponses { ["204"] = new OpenApiResponse { Description = "Done" } },
+        };
+        configure?.Invoke(operation);
+        return operation;
+    }
+
+    private static OpenApiPathItem PathItem(OpenApiOperation operation, IList<IOpenApiParameter>? parameters = null) => new()
+    {
+        Parameters = parameters,
+        Operations = new Dictionary<HttpMethod, OpenApiOperation> { [HttpMethod.Post] = operation },
+    };
+
+    private static OpenApiParameter QueryParameter(OpenApiSchema schema) => new() { Name = "filter", In = ParameterLocation.Query, Schema = schema };
+
+    private static Dictionary<string, IOpenApiMediaType> Json(OpenApiSchema schema) =>
+        new() { ["application/json"] = new OpenApiMediaType { Schema = schema } };
+
+    public static TheoryData<string, Action<OpenApiDocument>, string> Places => new()
+    {
+        { "contentSchema", d => d.Components!.Schemas!["Data"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.String, ContentMediaType = "application/json", ContentSchema = OptionalUnion(),
+            }, "#/components/schemas/Data/contentSchema/discriminator" },
+        { "not", d => d.Components!.Schemas!["Data"] = new OpenApiSchema { Not = OptionalUnion() }, "#/components/schemas/Data/not/discriminator" },
+        { "propertyNames", d => d.Components!.Schemas!["Data"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Object, AdditionalProperties = new OpenApiSchema(), PropertyNames = OptionalUnion(),
+            }, "#/components/schemas/Data/propertyNames/discriminator" },
+        { "patternProperties", d => d.Components!.Schemas!["Data"] = new OpenApiSchema
+            {
+                PatternProperties = new Dictionary<string, IOpenApiSchema> { ["^a/b$"] = OptionalUnion() },
+            }, "#/components/schemas/Data/patternProperties/^a~1b$/discriminator" },
+        { "if", d => d.Components!.Schemas!["Data"] = new OpenApiSchema { If = OptionalUnion() }, "#/components/schemas/Data/if/discriminator" },
+        { "path-item parameter", d => d.Paths["/pets/{id}"] = PathItem(Operation(), [QueryParameter(OptionalUnion())]),
+            "#/paths/~1pets~1{id}/parameters/0/schema/discriminator" },
+        { "webhook path-item parameter", d => d.Webhooks = new Dictionary<string, IOpenApiPathItem>
+            {
+                ["created"] = PathItem(Operation(), [QueryParameter(OptionalUnion())]),
+            }, "#/webhooks/created/parameters/0/schema/discriminator" },
+        { "parameter content", d => d.Paths["/pets"] = PathItem(Operation(o => o.Parameters =
+            [
+                new OpenApiParameter { Name = "q", In = ParameterLocation.Query, Content = Json(OptionalUnion()) },
+            ])), "#/paths/~1pets/post/parameters/0/content/application~1json/schema/discriminator" },
+        { "response header", d => d.Paths["/pets"] = PathItem(Operation(o => o.Responses!["204"] = new OpenApiResponse
+            {
+                Description = "Done",
+                Headers = new Dictionary<string, IOpenApiHeader> { ["X-Kind"] = new OpenApiHeader { Schema = OptionalUnion() } },
+            })), "#/paths/~1pets/post/responses/204/headers/X-Kind/schema/discriminator" },
+        { "component response", d => d.Components!.Responses = new Dictionary<string, IOpenApiResponse>
+            {
+                ["Pet"] = new OpenApiResponse { Description = "Pet", Content = Json(OptionalUnion()) },
+            }, "#/components/responses/Pet/content/application~1json/schema/discriminator" },
+        { "component parameter", d => d.Components!.Parameters = new Dictionary<string, IOpenApiParameter>
+            {
+                ["Filter"] = QueryParameter(OptionalUnion()),
+            }, "#/components/parameters/Filter/schema/discriminator" },
+        { "component request body", d => d.Components!.RequestBodies = new Dictionary<string, IOpenApiRequestBody>
+            {
+                ["Pet"] = new OpenApiRequestBody { Content = Json(OptionalUnion()) },
+            }, "#/components/requestBodies/Pet/content/application~1json/schema/discriminator" },
+        { "component header", d => d.Components!.Headers = new Dictionary<string, IOpenApiHeader>
+            {
+                ["X-Kind"] = new OpenApiHeader { Schema = OptionalUnion() },
+            }, "#/components/headers/X-Kind/schema/discriminator" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Places))]
+    public void OptionalDiscriminator_IsReportedWhereverItStands(string place, Action<OpenApiDocument> configure, string pointer)
+    {
+        _ = place;
+        var document = new OpenApiDocument
+        {
+            Info       = new OpenApiInfo { Title = "T", Version = "1" },
+            Paths      = new OpenApiPaths(),
+            Components = new OpenApiComponents { Schemas = new Dictionary<string, IOpenApiSchema>() },
+        };
+        configure(document);
+
+        var result = CoreValidator.Validate(document, new ValidationContext { OpenApiSpecVersion = OpenApiSpecVersion.OpenApi3_2 });
+
+        result.SkippedRules.Should().NotContain(RuleId);
+        result.Violations.Where(v => v.RuleId == RuleId).Select(v => v.JsonPointer).Should().Equal(pointer);
+    }
+}
+
 /// <summary>Builds ModernApi for OpenAPI 3.2 with validation once.</summary>
 public sealed class ModernApiV32ValidationFixture
 {
