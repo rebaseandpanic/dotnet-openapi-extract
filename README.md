@@ -126,6 +126,12 @@ Rules for the document structure of newer versions: `spec.license-identifier-or-
 
 `schema.property-constraints` checks the schema against the validation attributes the way the generator applies them: lengths by shape (string, array, dictionary) and at least as tight as the attribute, `[Range]` for every constructor with inclusive and exclusive bounds on their own keywords (on the numeric branch when number handling makes the property an `anyOf`). `component.no-unused` (off by default) counts references through `itemSchema`, `contentSchema`, `propertyNames`, compositions and discriminator mappings.
 
+`schema.property-format` asks for the format the generator writes, by the same priority: `[SwaggerSchema(Format)]`, then `[EmailAddress]` / `[Url]` / `[Phone]`, then `[DataType]` (`DateTime` → `date-time`, `Date` → `date`, `Time` → `time`, `Duration` → `duration`, `EmailAddress` → `email`, `Password` → `password`, `Url` / `ImageUrl` → `uri`, `PhoneNumber` → `phone`, `Upload` → `binary`; other members give no format), then the CLR type (`Guid` → `uuid`, `DateTime` / `DateTimeOffset` → `date-time`, `DateOnly` → `date`, `TimeOnly` → `time`). A source without a format requires none.
+
+`schema.array-items` (an array schema without `items`) is a code-generation policy, not an OpenAPI requirement: JSON Schema 2020-12, used by OpenAPI 3.1 and 3.2, allows an array without `items`. It stays an error by default because SDK generators turn such an array into a list of untyped values; skip it with `--skip-rule schema.array-items` when that is intended.
+
+Standalone `validate` takes the version from the file's `openapi:` field and walks operations under `paths` and `webhooks`; a 3.1/3.2 file with only `components` or only `webhooks` is a valid document.
+
 All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
 
 ## What It Extracts

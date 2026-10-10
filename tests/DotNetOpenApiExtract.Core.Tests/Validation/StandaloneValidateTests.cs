@@ -6,6 +6,8 @@ using Microsoft.OpenApi;
 using Microsoft.OpenApi.Reader;
 using Microsoft.OpenApi.YamlReader;
 using Xunit;
+using DotNetOpenApiExtract.Core.Tests.Harness;
+using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using CoreValidator = DotNetOpenApiExtract.Core.Validation.OpenApiValidator;
 
 namespace DotNetOpenApiExtract.Core.Tests.Validation;
@@ -244,5 +246,75 @@ public sealed class StandaloneValidateTests
     {
         if (result.Count == 0) return "(none)";
         return string.Join("; ", result.Violations.Select(v => $"{v.RuleId}: {v.Message}"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The CLI validate command: the version comes from the file's openapi field
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Runs <c>validate --spec</c> on <paramref name="content"/> and returns the parsed report.</summary>
+    private static async Task<JsonNode> ValidateFileAsync(string content)
+    {
+        using var directory = new TempDirectory();
+        var spec = Path.Combine(directory.Path, "openapi.json");
+        await File.WriteAllTextAsync(spec, content, TestContext.Current.CancellationToken);
+
+        var result = await CliRunner.RunAsync(["validate", "--spec", spec], directory.Path, TestContext.Current.CancellationToken);
+
+        result.ExitCode.Should().NotBe(2, result.StdErr);
+        return JsonNode.Parse(result.StdOut)!;
+    }
+
+    private static List<JsonNode> ViolationsOf(JsonNode report, string rule) =>
+        report["violations"]!.AsArray().Where(v => (string?)v!["rule"] == rule).Select(v => v!).ToList();
+
+    private static List<string> SkippedRulesOf(JsonNode report) =>
+        report["summary"]!["skippedRules"]!.AsArray().Select(r => r!.GetValue<string>()).ToList();
+
+    [Theory]
+    [InlineData("3.1.2", 1)]
+    [InlineData("3.2.0", 1)]
+    [InlineData("3.0.4", 0)]
+    public async Task Cli_LicenseRule_FollowsTheDocumentVersion(string openapi, int expected)
+    {
+        var report = await ValidateFileAsync($$"""
+            {
+              "openapi": "{{openapi}}",
+              "info": { "title": "T", "version": "1", "description": "A document",
+                        "license": { "name": "MIT", "identifier": "MIT", "url": "https://opensource.org/licenses/MIT" } },
+              "paths": { }
+            }
+            """);
+
+        SkippedRulesOf(report).Should().NotContain("spec.license-identifier-or-url");
+        ViolationsOf(report, "spec.license-identifier-or-url").Should().HaveCount(expected);
+    }
+
+    [Theory]
+    [InlineData("""{ "openapi": "3.1.2", "info": { "title": "T", "version": "1" }, "components": { "schemas": { "Item": { "type": "object" } } } }""")]
+    [InlineData("""{ "openapi": "3.1.2", "info": { "title": "T", "version": "1" }, "webhooks": { "created": { "post": { "summary": "Created", "responses": { "200": { "description": "OK" } } } } } }""")]
+    public async Task Cli_OnlyComponentsOrOnlyWebhooks_V31_IsAValidStructure(string content)
+    {
+        var report = await ValidateFileAsync(content);
+
+        SkippedRulesOf(report).Should().NotContain("spec.paths-or-webhooks-or-components");
+        ViolationsOf(report, "spec.paths-or-webhooks-or-components").Should().BeEmpty();
+    }
+
+    /// <summary>Operation rules walk webhooks in a foreign file: the pointer names the webhook.</summary>
+    [Fact]
+    public async Task Cli_OnlyWebhooks_OperationRuleReportsTheWebhook()
+    {
+        var report = await ValidateFileAsync("""
+            {
+              "openapi": "3.1.2",
+              "info": { "title": "T", "version": "1" },
+              "webhooks": { "order/created": { "post": { "operationId": "OrderCreated", "responses": { "200": { "description": "OK" } } } } }
+            }
+            """);
+
+        SkippedRulesOf(report).Should().NotContain("operation.summary");
+        ViolationsOf(report, "operation.summary").Select(v => v["jsonPointer"]!.GetValue<string>())
+            .Should().Equal("#/webhooks/order~1created/post");
     }
 }

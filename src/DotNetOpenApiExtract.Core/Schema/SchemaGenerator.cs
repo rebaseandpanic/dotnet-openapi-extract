@@ -1551,7 +1551,7 @@ public sealed class SchemaGenerator
     /// <see cref="DataTypeFormat"/>; <see langword="null"/> when none of them sets a format, so the
     /// format derived from the type stays.
     /// </summary>
-    private static string? DeclaredFormat(IList<CustomAttributeData> attrData)
+    internal static string? DeclaredFormat(IList<CustomAttributeData> attrData)
     {
         var swaggerSchema = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.SwaggerSchema);
         if (swaggerSchema != null
