@@ -8,10 +8,10 @@ using Xunit;
 namespace DotNetOpenApiExtract.Core.Tests.Metadata;
 
 /// <summary>
-/// Every <c>info</c> field comes from its first source, field by field: the option (CLI flag), then the
-/// <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / <c>AddOpenApi</c> in Program.cs, then the assembly attributes,
-/// then the file name (title only). The values of the ConfigFormsApi Program.cs are those of
-/// <see cref="ProgramCsConfigFormsTests"/>.
+/// Every <c>info</c> field comes from its first source, field by field: the option (CLI flag) first, then
+/// the <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / <c>AddOpenApi</c> in Program.cs where no assembly attribute
+/// set by the project gives the field (ConfigFormsApi has only the MSBuild defaults). The values of the
+/// ConfigFormsApi Program.cs are those of <see cref="ProgramCsConfigFormsTests"/>.
 /// </summary>
 public class InfoSourcePrecedenceTests
 {
@@ -44,7 +44,7 @@ public class InfoSourcePrecedenceTests
     public static TheoryData<string, string, string, string, string> OptionOverSwaggerDoc => new()
     {
         // option → its value → where it lands; another field of the same SwaggerDoc → the value it keeps
-        { "Title", "Flag title", "/info/title", "/info/description", "A raw\ndescription" },
+        { "Title", "Flag title", "/info/title", "/info/version", "2.0" },
         { "Description", "Flag description", "/info/description", "/info/title", "Config forms" },
         { "Version", "9.9", "/info/version", "/info/title", "Config forms" },
         { "ContactName", "Flag team", "/info/contact/name", "/info/contact/email", "team@example.com" },

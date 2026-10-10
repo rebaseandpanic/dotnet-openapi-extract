@@ -97,6 +97,13 @@ public sealed class DocumentTagsExtractionResult
 
     /// <summary><c>info.termsOfService</c> from an <c>OpenApiInfo { TermsOfService = new Uri(…) }</c> initializer, the first declaration that sets it.</summary>
     public string? TermsOfService { get; init; }
+
+    /// <summary>
+    /// <c>file:line</c> of the values of <see cref="InfoTitle"/>, <see cref="InfoDescription"/> and the
+    /// contact name, keyed by <see cref="DocumentTagsExtractor.InfoFieldTitle"/>,
+    /// <see cref="DocumentTagsExtractor.InfoFieldDescription"/>, <see cref="DocumentTagsExtractor.InfoFieldContactName"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> InfoSourceLocations { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -112,6 +119,15 @@ public sealed class DocumentTagsExtractionResult
 /// </remarks>
 public static class DocumentTagsExtractor
 {
+    /// <summary>Key of <see cref="DocumentTagsExtractionResult.InfoSourceLocations"/> for <c>Title</c>.</summary>
+    public const string InfoFieldTitle = "Title";
+
+    /// <summary>Key of <see cref="DocumentTagsExtractionResult.InfoSourceLocations"/> for <c>Description</c>.</summary>
+    public const string InfoFieldDescription = "Description";
+
+    /// <summary>Key of <see cref="DocumentTagsExtractionResult.InfoSourceLocations"/> for <c>Contact.Name</c>.</summary>
+    public const string InfoFieldContactName = "Contact.Name";
+
     private static readonly string[] SwaggerDocMethodNames = { "SwaggerDoc", "AddOpenApi" };
 
     /// <summary>
@@ -180,7 +196,7 @@ public static class DocumentTagsExtractor
                 }
 
                 // The other info fields follow the same choice, field by field: the first declaration that sets them.
-                infoMetadata = infoMetadata.OrElse(TryExtractInfoMetadata(invocation, compilation));
+                infoMetadata = infoMetadata.OrElse(TryExtractInfoMetadata(invocation, compilation, context.CompilationResult?.SourceRoot));
             }
         }
 
@@ -196,13 +212,15 @@ public static class DocumentTagsExtractor
             InfoVersion = infoMetadata.Version,
             Contact = infoMetadata.Contact,
             TermsOfService = infoMetadata.TermsOfService,
+            InfoSourceLocations = infoMetadata.Locations ?? new Dictionary<string, string>(StringComparer.Ordinal),
         };
     }
 
     /// <summary>The fields of the <c>OpenApiInfo</c> initializers read so far; <see langword="null"/> where none sets one.</summary>
     private sealed record InfoMetadata(
         string? Title = null, string? Description = null, string? Version = null, string? Summary = null,
-        string? TermsOfService = null, ContactMetadata? Contact = null, LicenseMetadata? License = null)
+        string? TermsOfService = null, ContactMetadata? Contact = null, LicenseMetadata? License = null,
+        IReadOnlyDictionary<string, string>? Locations = null)
     {
         /// <summary>
         /// These fields, each one this does not set taken from <paramref name="later"/>; the contact field by
@@ -211,7 +229,20 @@ public static class DocumentTagsExtractor
         /// </summary>
         public InfoMetadata OrElse(InfoMetadata later) => new(
             Title ?? later.Title, Description ?? later.Description, Version ?? later.Version, Summary ?? later.Summary,
-            TermsOfService ?? later.TermsOfService, MergeContact(Contact, later.Contact), License ?? later.License);
+            TermsOfService ?? later.TermsOfService, MergeContact(Contact, later.Contact), License ?? later.License,
+            MergeLocations(Locations, later.Locations));
+
+        // A location is recorded only with a value, so the first one of each field is the one of its value.
+        private static IReadOnlyDictionary<string, string>? MergeLocations(
+            IReadOnlyDictionary<string, string>? first, IReadOnlyDictionary<string, string>? later)
+        {
+            if (first == null || later == null)
+                return first ?? later;
+            var merged = new Dictionary<string, string>(first, StringComparer.Ordinal);
+            foreach (var (field, location) in later)
+                merged.TryAdd(field, location);
+            return merged;
+        }
 
         private static ContactMetadata? MergeContact(ContactMetadata? first, ContactMetadata? later) =>
             first == null ? later
@@ -224,7 +255,7 @@ public static class DocumentTagsExtractor
     /// <c>Title</c>, <c>Description</c>, <c>Version</c>, <c>Summary</c>, <c>TermsOfService</c>, <c>Contact</c>,
     /// <c>License</c> — from literals and in-project constants; other values are skipped, never evaluated.
     /// </summary>
-    private static InfoMetadata TryExtractInfoMetadata(InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    private static InfoMetadata TryExtractInfoMetadata(InvocationExpressionSyntax invocation, CSharpCompilation? compilation, string? sourceRoot)
     {
         var result = new InfoMetadata();
         foreach (var objCreation in InfoCreations(invocation))
@@ -232,15 +263,23 @@ public static class DocumentTagsExtractor
             string? title = null, description = null, version = null, summary = null, termsOfService = null;
             ContactMetadata? contact = null;
             LicenseMetadata? license = null;
+            var locations = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Locate(string field, string? value, ExpressionSyntax at)
+            {
+                if (value != null)
+                    locations[field] = SourceLocations.Of(at, sourceRoot);
+            }
             foreach (var assignment in objCreation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
             {
                 switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
                 {
                     case "Title":
                         title = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        Locate(InfoFieldTitle, title, assignment.Right);
                         break;
                     case "Description":
                         description = InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                        Locate(InfoFieldDescription, description, assignment.Right);
                         break;
                     case "Version":
                         version = InvocationMatcher.GetStringValue(assignment.Right, compilation);
@@ -258,7 +297,10 @@ public static class DocumentTagsExtractor
                         {
                             switch ((field.Left as IdentifierNameSyntax)?.Identifier.Text)
                             {
-                                case "Name":  contactName = InvocationMatcher.GetStringValue(field.Right, compilation); break;
+                                case "Name":
+                                    contactName = InvocationMatcher.GetStringValue(field.Right, compilation);
+                                    Locate(InfoFieldContactName, contactName, field.Right);
+                                    break;
                                 case "Email": email = InvocationMatcher.GetStringValue(field.Right, compilation); break;
                                 case "Url":   contactUrl = TryExtractUriLiteral(field.Right, compilation); break;
                             }
@@ -283,7 +325,7 @@ public static class DocumentTagsExtractor
                 }
             }
 
-            result = result.OrElse(new InfoMetadata(title, description, version, summary, termsOfService, contact, license));
+            result = result.OrElse(new InfoMetadata(title, description, version, summary, termsOfService, contact, license, locations));
         }
 
         return result;

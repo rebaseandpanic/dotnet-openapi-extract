@@ -127,8 +127,8 @@ var formatOption = new Option<string>("--format")
 
 var titleOption = new Option<string?>("--title")
 {
-    Description = "API title. Defaults to the Title of SwaggerDoc / AddOpenApi in Program.cs, then [AssemblyTitle], " +
-                  "then [AssemblyProduct], then DLL file name",
+    Description = "API title. Defaults to [AssemblyTitle], then [AssemblyProduct], then the Title of SwaggerDoc / " +
+                  "AddOpenApi in Program.cs, then DLL file name",
 };
 
 var versionOption = new Option<string?>("--version")
@@ -138,8 +138,8 @@ var versionOption = new Option<string?>("--version")
 
 var descriptionOption = new Option<string?>("--description")
 {
-    Description = "API description written to the info block. Defaults to the Description of SwaggerDoc / AddOpenApi " +
-                  "in Program.cs, then [AssemblyDescription]",
+    Description = "API description written to the info block. Defaults to [AssemblyDescription], then the Description " +
+                  "of SwaggerDoc / AddOpenApi in Program.cs",
 };
 
 var xmlOption = new Option<string[]>("--xml")

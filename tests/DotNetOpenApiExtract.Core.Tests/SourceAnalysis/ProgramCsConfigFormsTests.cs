@@ -87,10 +87,10 @@ public class ProgramCsConfigFormsTests(ConfigFormsApiFixture fixture) : IClassFi
     {
         // form → where it lands → the value Swashbuckle serves
         { "target-typed info with a nested target-typed contact, summary by literal concatenation", "/info/summary", "\"Summary joined\"" },
-        { "title by literal concatenation, over [AssemblyTitle]", "/info/title", "\"Config forms\"" },
+        { "title by literal concatenation, over the MSBuild default [AssemblyTitle]", "/info/title", "\"Config forms\"" },
         { "version by interpolation of a constant", "/info/version", "\"2.0\"" },
-        { "description by a raw string, over [AssemblyDescription]", "/info/description", "\"A raw\\ndescription\"" },
-        { "contact name by nameof, email from a const of another class, URL by new Uri, over [AssemblyCompany]", "/info/contact",
+        { "description by a raw string", "/info/description", "\"A raw\\ndescription\"" },
+        { "contact name by nameof, email from a const of another class, URL by new Uri, over the MSBuild default [AssemblyCompany]", "/info/contact",
           """{"name":"Team","url":"https://contact.example.com","email":"team@example.com"}""" },
         { "terms of service by a target-typed Uri from a const of another class", "/info/termsOfService", "\"https://terms.example.com/v2\"" },
         { "license name by interpolation of constants, URL from a const of another class", "/info/license",

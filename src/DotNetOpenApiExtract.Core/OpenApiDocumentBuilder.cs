@@ -63,9 +63,10 @@ public sealed class OpenApiDocumentOptions
 
     /// <summary>
     /// Title of the API (used in OpenAPI Info).
-    /// When <see langword="null"/> or whitespace, the builder falls back to the <c>Title</c> of the
-    /// <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>, then <c>[AssemblyTitle]</c>, then
-    /// <c>[AssemblyProduct]</c>, then the DLL file name.
+    /// When <see langword="null"/> or whitespace, the builder falls back to <c>[AssemblyTitle]</c>, then
+    /// <c>[AssemblyProduct]</c>, then the <c>Title</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> /
+    /// <c>AddOpenApi</c>, then the DLL file name; an attribute equal to the assembly name (the MSBuild
+    /// default) comes after <c>SwaggerDoc</c>.
     /// </summary>
     public string? Title { get; init; }
 
@@ -78,8 +79,8 @@ public sealed class OpenApiDocumentOptions
 
     /// <summary>
     /// Optional description for the API. When <see langword="null"/> or whitespace, the builder falls
-    /// back to the <c>Description</c> of the <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>,
-    /// then <c>[AssemblyDescription]</c>.
+    /// back to <c>[AssemblyDescription]</c>, then the <c>Description</c> of the <c>OpenApiInfo</c> in
+    /// <c>SwaggerDoc</c> / <c>AddOpenApi</c>.
     /// </summary>
     public string? Description { get; init; }
 
@@ -121,8 +122,9 @@ public sealed class OpenApiDocumentOptions
     /// <summary>
     /// Optional name of the contact person or organisation responsible for the API.
     /// Maps to <c>info.contact.name</c> in the generated document. When <see langword="null"/> or
-    /// whitespace, the builder falls back to the <c>Contact.Name</c> of the <c>OpenApiInfo</c> in
-    /// <c>SwaggerDoc</c> / <c>AddOpenApi</c>, then <c>[AssemblyCompany]</c>.
+    /// whitespace, the builder falls back to <c>[AssemblyCompany]</c>, then the <c>Contact.Name</c> of the
+    /// <c>OpenApiInfo</c> in <c>SwaggerDoc</c> / <c>AddOpenApi</c>; an <c>[AssemblyCompany]</c> equal to the
+    /// assembly name (the MSBuild default) comes after <c>SwaggerDoc</c>.
     /// </summary>
     public string? ContactName { get; init; }
 
@@ -557,32 +559,68 @@ public sealed class OpenApiDocumentBuilder
         var asmProduct     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyProduct);
         var asmCompany     = ReadAsmStringAttr(asmAttrs, AttributeHelper.Names.AssemblyCompany);
 
-        // Precedence chains, field by field: the option, then the OpenApiInfo of SwaggerDoc / AddOpenApi in
-        // Program.cs, then the assembly attributes (IsNullOrWhiteSpace rejects both null and empty/whitespace).
+        // Precedence chains, field by field. Title, description and the contact name: the option, then the
+        // assembly attributes, then the OpenApiInfo of SwaggerDoc / AddOpenApi in Program.cs — the order of
+        // 0.16, with SwaggerDoc as a fallback. An attribute equal to the assembly name is the MSBuild default,
+        // not a value the project set: SwaggerDoc goes before it, and it stays the fallback after SwaggerDoc.
+        // (IsNullOrWhiteSpace rejects both null and empty/whitespace.)
         static string? Given(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+        var assemblyName = loader.Assembly.GetName().Name;
+        string? Explicit(string? value) => Given(value) is { } v && !string.Equals(v, assemblyName, StringComparison.Ordinal) ? v : null;
 
         var programContact = docTagsResult.Contact;
+        var (explicitTitle, explicitTitleSource) = Explicit(asmTitle) is { } setTitle ? (setTitle, "[AssemblyTitle] (<AssemblyTitle> in the .csproj)")
+            : Explicit(asmProduct) is { } setProduct ? (setProduct, "[AssemblyProduct] (<Product> in the .csproj)")
+            : ((string?)null, "");
         var resolvedTitle =
             Given(options.Title)
+            ?? explicitTitle
             ?? Given(docTagsResult.InfoTitle)
             ?? Given(asmTitle)
             ?? Given(asmProduct)
-            ?? loader.Assembly.GetName().Name
+            ?? assemblyName
             ?? "API";
 
         var resolvedDescription =
             Given(options.Description)
-            ?? Given(docTagsResult.InfoDescription)
-            ?? Given(asmDescription);
+            ?? Given(asmDescription)
+            ?? Given(docTagsResult.InfoDescription);
+
+        // A value the project set in both places, differently, and no option to choose: the document takes
+        // the assembly attribute, Swagger UI shows the SwaggerDoc text — say so.
+        void WarnIfDiffers(string field, string? option, string? attribute, string attributeSource, string? swaggerDoc, string locationKey, string flag)
+        {
+            if (Given(option) != null || attribute == null || Given(swaggerDoc) is not { } fromSwaggerDoc
+                || string.Equals(attribute, fromSwaggerDoc, StringComparison.Ordinal))
+                return;
+            var where = docTagsResult.InfoSourceLocations.GetValueOrDefault(locationKey);
+            diagnostics.Report(new ExtractionDiagnostic
+            {
+                Code           = ExtractionDiagnosticCodes.DocumentInfoSourcesDiffer,
+                Message        = $"{(where != null ? where + ": " : "")}{field} in SwaggerDoc ('{fromSwaggerDoc}') differs from {attributeSource} ('{attribute}'): " +
+                                 $"the document takes {attributeSource}, Swagger UI shows the SwaggerDoc text. Make them equal, or set {flag}.",
+                Location       = "#/" + field.Replace('.', '/'),
+                SourceLocation = where,
+                Subjects       = [field, attribute, fromSwaggerDoc],
+            });
+        }
+
+        WarnIfDiffers("info.title", options.Title, explicitTitle, explicitTitleSource, docTagsResult.InfoTitle, DocumentTagsExtractor.InfoFieldTitle, "--title");
+        WarnIfDiffers("info.description", options.Description, Given(asmDescription), "[AssemblyDescription] (<Description> in the .csproj)",
+            docTagsResult.InfoDescription, DocumentTagsExtractor.InfoFieldDescription, "--description");
+        WarnIfDiffers("info.contact.name", options.ContactName, Explicit(asmCompany), "[AssemblyCompany] (<Company> in the .csproj)",
+            programContact?.Name, DocumentTagsExtractor.InfoFieldContactName, "--contact-name");
 
         var resolvedVersion =
             Given(options.Version)
             ?? Given(docTagsResult.InfoVersion)
             ?? "v1";
 
-        // contact.name: option wins, then Program.cs, then [AssemblyCompany] as last resort.
+        // contact.name: the option, then [AssemblyCompany] set by the project, then Program.cs, then the
+        // MSBuild default of [AssemblyCompany] (the assembly name).
         var resolvedContactName =
             Given(options.ContactName)
+            ?? Explicit(asmCompany)
             ?? Given(programContact?.Name)
             ?? Given(asmCompany);
 

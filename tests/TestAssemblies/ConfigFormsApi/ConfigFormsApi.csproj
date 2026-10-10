@@ -10,8 +10,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
-    <!-- [AssemblyDescription]: the description of SwaggerDoc takes precedence over it. -->
-    <Description>Description from the assembly</Description>
   </PropertyGroup>
 
   <ItemGroup>

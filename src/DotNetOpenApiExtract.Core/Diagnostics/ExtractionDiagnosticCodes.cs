@@ -336,6 +336,18 @@ public static class ExtractionDiagnosticCodes
     public const string DocumentMetadataNotStatic = "document.metadata-not-static";
 
     /// <summary>
+    /// An <c>info</c> field is set both by an assembly attribute the project set (<c>[AssemblyTitle]</c> /
+    /// <c>[AssemblyProduct]</c>, <c>[AssemblyDescription]</c>, <c>[AssemblyCompany]</c> as the contact name;
+    /// a value equal to the assembly name is the MSBuild default and does not count) and by the
+    /// <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / <c>AddOpenApi</c>, differently, and no CLI flag chooses: the
+    /// document takes the attribute, Swagger UI shows the SwaggerDoc text. Location: the field in the
+    /// document. <see cref="ExtractionDiagnostic.SourceLocation"/>: the SwaggerDoc value. Subjects: the
+    /// field (<c>info.title</c>, <c>info.description</c>, <c>info.contact.name</c>), the attribute value, the
+    /// SwaggerDoc value.
+    /// </summary>
+    public const string DocumentInfoSourcesDiffer = "document.info-sources-differ";
+
+    /// <summary>
     /// The assembly references Swashbuckle.AspNetCore.SwaggerGen or Microsoft.AspNetCore.OpenApi, but the
     /// entry point holds no configuration of them: no <c>SwaggerDoc</c>, <c>AddSecurityDefinition</c>,
     /// <c>AddSecurityRequirement</c> or <c>AddTag</c>, and <c>AddSwaggerGen</c> / <c>AddOpenApi</c> is either
