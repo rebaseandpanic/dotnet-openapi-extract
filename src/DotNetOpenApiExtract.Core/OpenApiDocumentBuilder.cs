@@ -501,6 +501,7 @@ public sealed class OpenApiDocumentBuilder
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
         var docTagsResult = DocumentTagsExtractor.Extract(sourceContext, diagnostics.Report);
+        EntryPointConfigurationCheck.Check(sourceContext, loader.Assembly, diagnostics.Report);
 
         // ── Resolve effective naming policy ───────────────────────────────────
         // Controller bodies serialize with the MVC options (AddJsonOptions) only; the HTTP

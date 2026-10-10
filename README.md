@@ -218,6 +218,7 @@ application runs is therefore not seen:
 |---------|---------|-----|
 | `IConfiguration` and environment values | `Name = builder.Configuration["Auth:Header"]`, `Summary = Environment.GetEnvironmentVariable("API_SUMMARY")` | Value comes from `appsettings.json` / env vars at runtime |
 | Values computed at startup | `Description = BuildDescription()`, `SwaggerDoc("v1", info)` with `info` built elsewhere | The code that computes them is not run |
+| Configuration outside the entry point | `builder.Services.AddApiSwagger()` with `AddSwaggerGen(c => …)` in `SwaggerSetup.cs`, `Startup.ConfigureServices`, `IConfigureOptions<SwaggerGenOptions>` | Only the entry point (`Program.cs`) is read; the warning `document.configuration-not-in-entry-point` says so |
 | Swashbuckle filters and `AddOpenApi` transformers | `c.OperationFilter<SecurityRequirementsFilter>()`, `o.AddDocumentTransformer<T>()` | Arbitrary code that edits the document at runtime |
 | Conditional registration | `if (env.IsDevelopment()) services.AddX()` | Depends on runtime environment |
 | DI-factory registration | `services.AddScoped<ISchemeProvider>(sp => sp.GetRequiredService<X>())` | Resolved from runtime DI graph |
@@ -232,6 +233,7 @@ the tool recognizes but cannot compute is never dropped silently: it gives a war
 | Warning code | When | Result |
 |---|---|---|
 | `document.metadata-not-static` | `SwaggerDoc` info, its `Title`, `Description`, `Version`, `Summary`, `TermsOfService`, `Contact` (`Name`, `Email`, `Url`), `License` (`Name`, `Url`, `Identifier`) or `ExternalDocs` is not a creation / literal / constant | the field is not taken from `SwaggerDoc` (the next source applies); the subjects end with the flags that set it (`--title`, `--description`, `--version`, `--summary`, `--terms-of-service`, `--contact-*`, `--license-*`) |
+| `document.configuration-not-in-entry-point` | the assembly references `Swashbuckle.AspNetCore.SwaggerGen` or `Microsoft.AspNetCore.OpenApi`, and the entry point has no `SwaggerDoc` / `AddSecurityDefinition` / `AddSecurityRequirement` / `AddTag`, and calls `AddSwaggerGen` / `AddOpenApi` not at all, or without arguments next to an options class registered for it (`IConfigureOptions<SwaggerGenOptions>`, `ConfigureOptions<ConfigureSwaggerOptions>()`). A bare `AddSwaggerGen()` alone is a project without configuration and gives no warning | the configuration in the other file is not read; set the metadata with the flags |
 | `security.scheme-not-static` | `Type`, `In`, `Name`, `Scheme` of a security scheme, or a value an OAuth2 / OpenID Connect scheme needs | the scheme is omitted, with the requirements that name it |
 | `security.scheme-field-not-static` | `Description` or `BearerFormat` of a security scheme | the scheme is written without the field |
 | `security.requirement-not-static` | `AddSecurityRequirement(requirement)` or a lambda returning something that is not an object creation | the requirement is not written |

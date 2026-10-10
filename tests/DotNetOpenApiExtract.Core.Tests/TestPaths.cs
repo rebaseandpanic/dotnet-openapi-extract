@@ -49,6 +49,12 @@ internal static class TestPaths
     public static string StrayEntryApiDll    => FindFixtureDll("StrayEntryApi");
 
     /// <summary>
+    /// Path to the SwaggerSetupApi test fixture DLL: Program.cs calls an extension method of another file
+    /// that registers SwaggerGen with its document and security definition.
+    /// </summary>
+    public static string SwaggerSetupApiDll  => FindFixtureDll("SwaggerSetupApi");
+
+    /// <summary>
     /// Path to the built CLI (<c>src/DotNetOpenApiExtract.Cli/bin/**/DotNetOpenApiExtract.Cli.dll</c>),
     /// resolved by the same convention as the fixtures.
     /// </summary>

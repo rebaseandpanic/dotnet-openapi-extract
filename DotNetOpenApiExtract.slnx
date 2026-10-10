@@ -13,5 +13,6 @@
     <Project Path="tests/TestAssemblies/ModernApi/ModernApi.csproj" />
     <Project Path="tests/TestAssemblies/SampleApi/SampleApi.csproj" />
     <Project Path="tests/TestAssemblies/StrayEntryApi/StrayEntryApi.csproj" />
+    <Project Path="tests/TestAssemblies/SwaggerSetupApi/SwaggerSetupApi.csproj" />
   </Folder>
 </Solution>

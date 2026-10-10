@@ -327,6 +327,18 @@ public static class ExtractionDiagnosticCodes
     public const string DocumentMetadataNotStatic = "document.metadata-not-static";
 
     /// <summary>
+    /// The assembly references Swashbuckle.AspNetCore.SwaggerGen or Microsoft.AspNetCore.OpenApi, but the
+    /// entry point holds no configuration of them: no <c>SwaggerDoc</c>, <c>AddSecurityDefinition</c>,
+    /// <c>AddSecurityRequirement</c> or <c>AddTag</c>, and <c>AddSwaggerGen</c> / <c>AddOpenApi</c> is either
+    /// not called there or called without arguments next to an options class registered for it. The
+    /// configuration is then in another file — an extension method, a <c>Startup</c> class, an
+    /// <c>IConfigureOptions&lt;SwaggerGenOptions&gt;</c> — which is not read: the document lacks the
+    /// metadata and security it declares. <see cref="ExtractionDiagnostic.SourceLocation"/>: the entry
+    /// point. Subjects: the referenced packages.
+    /// </summary>
+    public const string DocumentConfigurationNotInEntryPoint = "document.configuration-not-in-entry-point";
+
+    /// <summary>
     /// A descriptive field of an <c>AddSecurityDefinition</c> declaration (<c>Description</c>,
     /// <c>BearerFormat</c>) cannot be resolved statically (a variable, a call, configuration): the
     /// scheme is written without it. Location: the field in <c>#/components/securitySchemes/{name}</c>.
