@@ -24,10 +24,12 @@ var allRuleIds = string.Join(", ", CoreValidator.AllRules.Select(r =>
 
 var validateOption = new Option<bool>("--validate")
 {
-    Description = $"Enable OpenAPI spec validation. Runs {CoreValidator.AllRuleIds.Count} rules — " +
-                  $"{CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Error)} as errors, " +
-                  $"{CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Warning && !CoreValidator.DefaultOffRuleIds.Contains(r.Id))} as warnings, " +
-                  $"{CoreValidator.DefaultOffRuleIds.Count} as warnings (off by default). " +
+    // Counted from the rule registry: errors and warnings that run by default, then the rules that
+    // run only when enabled (of either severity), so the three numbers add up to the total.
+    Description = $"Enable OpenAPI spec validation. {CoreValidator.AllRuleIds.Count} rules — " +
+                  $"{CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Error && !CoreValidator.DefaultOffRuleIds.Contains(r.Id))} errors and " +
+                  $"{CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Warning && !CoreValidator.DefaultOffRuleIds.Contains(r.Id))} warnings run by default, " +
+                  $"{CoreValidator.AllRules.Count(r => CoreValidator.DefaultOffRuleIds.Contains(r.Id))} more are off by default. " +
                   "Error severity blocks CI (exit 1). Warnings are reported but do not fail by default. " +
                   "Use --strict to treat all warnings as errors. " +
                   "Off-by-default rules can be enabled with --enable-rule <id>. " +
@@ -833,7 +835,12 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
 
 rootCommand.Subcommands.Add(validateCommand);
 
-return await rootCommand.Parse(args).InvokeAsync();
+// A command line that does not parse (an unknown option, a missing value or required option, an
+// argument where an option is expected) is a usage error: exit 2, as every other error, since 1
+// means validation errors. System.CommandLine reports the errors and returns 1 for it by default.
+var parseResult = rootCommand.Parse(args);
+var exitCode = await parseResult.InvokeAsync();
+return parseResult.Action is System.CommandLine.Invocation.ParseErrorAction ? 2 : exitCode;
 
 // ── Helper: build severity overrides dictionary ────────────────────────────────
 /// <summary>

@@ -65,7 +65,7 @@ This means you can generate OpenAPI specs:
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `--validate` | no | off | Enable validation (52 rules, errors block CI via exit 1) |
+| `--validate` | no | off | Enable validation (errors block CI via exit 1; `--help` prints the rule counts) |
 | `--skip-rule <id>` | no | — | Disable a rule (repeatable). Unknown IDs print warning to stderr |
 | `--warn-rule <id>` | no | — | Demote error → warning (repeatable) |
 | `--error-rule <id>` | no | — | Promote warning → error (repeatable) |
@@ -79,13 +79,15 @@ This means you can generate OpenAPI specs:
 
 ## Validation
 
-Running `--validate` checks the extracted spec against **58 completeness rules** — 33 errors + 16 warnings always-on + 9 warnings off-by-default.
+Running `--validate` checks the extracted spec against the completeness rules; `openapi-extract --help` prints how many run as errors, how many as warnings and how many are off by default (the counts come from the rule registry).
 
-| Severity | Count | Exit code | When to use |
-|----------|------:|----------:|-------------|
-| Error | 33 | 1 | OpenAPI-spec MUST violations, broken codegen |
-| Warning | 16 | 0 | Industry best-practice (Spectral / Redocly consensus) |
-| Warning (off-by-default) | 9 | 0 (disabled) | Opt-in via `--enable-rule`. Includes: `operation.has-required-response-codes`, `operation.operation-id-pascal-case`, `schema.additional-properties-explicit`, `response.content-type-json-default`, `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
+Exit codes: `0` success, `1` validation errors, `2` any other error — a command line that does not parse (an unknown option, a missing value or required option) included.
+
+| Severity | Exit code | When to use |
+|----------|----------:|-------------|
+| Error | 1 | OpenAPI-spec MUST violations, broken codegen |
+| Warning | 0 | Industry best-practice (Spectral / Redocly consensus) |
+| Off by default (error or warning when enabled) | 0 (disabled) | Opt-in via `--enable-rule`. Includes: `operation.has-required-response-codes`, `operation.operation-id-pascal-case`, `schema.additional-properties-explicit`, `response.content-type-json-default`, `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
 
 **Typical CI usage:**
 
