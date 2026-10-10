@@ -11,10 +11,12 @@ CLI tool that extracts OpenAPI specifications from compiled .NET assemblies (DLL
 dotnet tool install -g DotNetOpenApiExtract
 ```
 
+A global tool is run by its command name, `openapi-extract`. As a local tool (`dotnet new tool-manifest`, then `dotnet tool install DotNetOpenApiExtract`) it is run as `dotnet openapi-extract` from the directory of the manifest; the examples below use the global form.
+
 ## Usage
 
 ```bash
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --output openapi.json
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --output openapi.json
 ```
 
 ## Why
@@ -26,7 +28,8 @@ DotNetOpenApiExtract reads metadata straight from the compiled DLL via `Metadata
 This means you can generate OpenAPI specs:
 - In CI/CD without any infrastructure
 - On developer machines without Docker or databases running
-- From any .NET version (6, 7, 8, 9, 10) assembly
+
+The tool itself runs on .NET 10. References of the target assembly are resolved from its build output directory and from the shared frameworks (`Microsoft.NETCore.App`, `Microsoft.AspNetCore.App`) of the .NET runtime that runs the tool, not from the target framework of the project. The test fixtures of this repository target `net10.0`; assemblies built for earlier .NET versions are not covered by them.
 
 ## CLI Parameters
 
@@ -38,24 +41,24 @@ This means you can generate OpenAPI specs:
 | `--title <string>` | no | `[AssemblyTitle]`, `[AssemblyProduct]`, then `SwaggerDoc` `Title`, then assembly name | API title in the info block |
 | `--version <string>` | no | `SwaggerDoc` `Version`, then `v1` | API version in the info block |
 | `--description <string>` | no | `[AssemblyDescription]`, then `SwaggerDoc` `Description` | API description |
-| `--xml <path>` | no | auto-detect | Path to XML documentation file. Repeatable — each `--xml` adds one more source. Sources are merged with first-added winning on key collision. Framework/SDK ref-pack XMLs are also discovered automatically and added last (lowest priority). |
-| `--source <path>` | no | — | Entry-point source file (usually auto-detected) |
+| `--xml <path>` | no | auto-detect | Path to XML documentation file. Repeatable — each `--xml` adds one more source. Sources are merged with first-added winning on key collision. The project's XML next to the DLL is detected automatically and added after the explicit paths; framework/SDK ref-pack XMLs are also discovered automatically and added last (lowest priority). |
+| `--source <path>` | no | — | Reserved; currently not used (the entry point is found under `--source-root`) |
 | `--source-root <dir>` | no | auto-detect | Project root for Roslyn analysis of `Program.cs` |
 | `--naming-policy <policy>` | no | `camelCase` | `camelCase`, `snake_case_lower`, `snake_case_upper`, `kebab-case-lower`, `kebab-case-upper`, `preserve`. Used only when `Program.cs` sets no JSON options (`AddJsonOptions` / `ConfigureHttpJsonOptions`) at all; otherwise each serialization context uses its own setting or the ASP.NET Core default (camelCase) |
 | `--enum-as-string` | no | `false` | Serialize enums as strings |
-| `--no-enum-auto-description` | no | off | Disable the auto-glue markdown description (type summary + per-value bullet list) on enum schemas. With this flag, `schema.description` on enums is not populated (unless set by a `JsonConverter` hint). `x-enum-descriptions` and `x-enum-varnames` still emit. |
+| `--no-enum-auto-description` | no | off | Disable the per-value bullet list in the description of enum schemas. The description is not removed: it is whatever the enum type summary or the property gives without the list. `x-enum-descriptions` and `x-enum-varnames` still emit. |
 | `--no-enum-varnames` | no | off | Disable the `x-enum-varnames` extension on enum schemas |
 | `--path-base-emission <mode>` | no | `prefix` | How to emit `UsePathBase`: `prefix` (prepend to paths) or `servers` (add to `servers[]`) |
 | `--openapi-version <3.0\|3.1\|3.2>` | no | `3.0` | OpenAPI version the document is built, validated and serialized for. Any other value is an error (exit 2) |
 | `--exclude-path <prefix>` | no | — | Exclude paths by prefix (repeatable) |
-| `--contact-name <string>` | no | — | `info.contact.name` |
-| `--contact-email <string>` | no | — | `info.contact.email` |
-| `--contact-url <url>` | no | — | `info.contact.url` |
-| `--license-name <string>` | no | — | `info.license.name` |
-| `--license-url <url>` | no | — | `info.license.url` |
-| `--license-identifier <spdx>` | no | — | `info.license.identifier` (OpenAPI 3.1+; `x-oai-license-identifier` with a warning for 3.0); needs `--license-name`, excludes `--license-url` |
-| `--summary <text>` | no | — | `info.summary` (OpenAPI 3.1+; omitted with a warning for 3.0); wins over `OpenApiInfo.Summary` in Program.cs |
-| `--terms-of-service <url>` | no | — | `info.termsOfService` |
+| `--contact-name <string>` | no | `[AssemblyCompany]`, then `SwaggerDoc` `Contact.Name` | `info.contact.name` |
+| `--contact-email <string>` | no | `SwaggerDoc` `Contact.Email` | `info.contact.email` |
+| `--contact-url <url>` | no | `SwaggerDoc` `Contact.Url` | `info.contact.url` |
+| `--license-name <string>` | no | `SwaggerDoc` `License.Name` | `info.license.name` |
+| `--license-url <url>` | no | `SwaggerDoc` `License.Url` | `info.license.url` |
+| `--license-identifier <spdx>` | no | `SwaggerDoc` `License.Identifier` | `info.license.identifier` (OpenAPI 3.1+; `x-oai-license-identifier` with a warning for 3.0); needs `--license-name`, excludes `--license-url` |
+| `--summary <text>` | no | `SwaggerDoc` `Summary` | `info.summary` (OpenAPI 3.1+; omitted with a warning for 3.0); wins over `OpenApiInfo.Summary` in Program.cs |
+| `--terms-of-service <url>` | no | `SwaggerDoc` `TermsOfService` | `info.termsOfService` |
 | `--server <url>` | no | — | Server URL in `servers[]` (repeatable) |
 | `--server-name <name>` | no | — | Name of the k-th `--server` (`servers[].name`, OpenAPI 3.2; `x-oai-name` with a warning before); repeatable, none or one per `--server`, non-empty and unique |
 | `--self-url <uri>` | no | — | `$self` (OpenAPI 3.2; `x-oai-$self` with a warning before); a URI reference without a fragment |
@@ -66,14 +69,14 @@ This means you can generate OpenAPI specs:
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `--validate` | no | off | Enable validation (errors block CI via exit 1; `--help` prints the rule counts) |
-| `--skip-rule <id>` | no | — | Disable a rule (repeatable). Unknown IDs print warning to stderr |
+| `--skip-rule <id>` | no | — | Disable a rule (repeatable). Unknown IDs print a warning to stderr, as for `--warn-rule`, `--error-rule` and `--enable-rule` |
 | `--warn-rule <id>` | no | — | Demote error → warning (repeatable) |
 | `--error-rule <id>` | no | — | Promote warning → error (repeatable) |
 | `--enable-rule <id>` | no | — | Enable an off-by-default rule (repeatable) |
 | `--strict` | no | `false` | Treat all warnings as errors (CI-strict mode) |
 | `--min-description-length <N>` | no | `5` | Minimum length for description-rule checks (global default) |
 | `--rule-min-length <id>:<N>` | no | — | Per-rule override for min-description-length (repeatable). Example: `--rule-min-length enum.value-description:3` |
-| `--require-response-code <method>:<code>` | no | — | Required response code for a method filter (repeatable). Activates `operation.has-required-response-codes` rule. Method: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`QUERY` or groups `safe` (GET, HEAD, OPTIONS, TRACE, QUERY), `mutating` (any other method, including non-standard ones) and `*` |
+| `--require-response-code <method>:<code>` | no | — | Required response code for a method filter (repeatable). Used by the `operation.has-required-response-codes` rule, which is off by default: pass `--enable-rule operation.has-required-response-codes` too, or the codes are not checked. Method: `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`QUERY` or groups `safe` (GET, HEAD, OPTIONS, TRACE, QUERY), `mutating` (any other method, including non-standard ones) and `*` |
 | `--exclude-validation-path <prefix>` | no | — | Path prefixes skipped by `operation.has-error-response`, `operation.success-response`, `operation.has-required-response-codes` (repeatable) |
 | `--validation-report <path>` | no | — | Write JSON report to file (else printed to stdout) |
 
@@ -85,7 +88,7 @@ Exit codes: `0` success, `1` validation errors, `2` any other error — a comman
 
 | Severity | Exit code | When to use |
 |----------|----------:|-------------|
-| Error | 1 | OpenAPI-spec MUST violations, broken codegen |
+| Error | 1 | OpenAPI-spec MUST violations, broken codegen, required documentation completeness (summaries, descriptions, `operationId`, tags) |
 | Warning | 0 | Industry best-practice (Spectral / Redocly consensus) |
 | Off by default (error or warning when enabled) | 0 (disabled) | Opt-in via `--enable-rule`. Includes: `operation.has-required-response-codes`, `operation.operation-id-pascal-case`, `schema.additional-properties-explicit`, `response.content-type-json-default`, `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
 
@@ -93,33 +96,33 @@ Exit codes: `0` success, `1` validation errors, `2` any other error — a comman
 
 ```bash
 # Block on errors, ignore warnings
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate
 
 # Strict: block on any violation including warnings
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --strict
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --strict
 
 # Skip a noisy rule
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule schema.required-consistency
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule schema.required-consistency
 
 # Enforce 422 on mutating endpoints (your org convention)
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
   --enable-rule operation.has-required-response-codes \
   --require-response-code mutating:422
 
 # Different min-length per rule
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
   --min-description-length 10 \
   --rule-min-length enum.value-description:3 \
   --rule-min-length operation.description:30
 
 # JSON report for tooling/agents
-dotnet openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --validation-report report.json
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --validation-report report.json
 ```
 
 **Standalone validation** — validate an existing spec file without extracting:
 
 ```bash
-dotnet openapi-extract validate --spec openapi.json --validation-report report.json
+openapi-extract validate --spec openapi.json --validation-report report.json
 ```
 
 Rules run for the version of the document: the `--openapi-version` of the build, or the `openapi:` field of a standalone file. Some levels depend on it — `response.description` is an error for 3.0/3.1 and a warning for 3.2, where a response description is optional (`--strict` promotes it like any other warning). `response.schema-when-body` accepts `itemSchema` (3.2) and `x-oai-itemSchema` (3.0/3.1) as the schema of a streaming response, and a `text/event-stream` media type without a schema is not a violation.
@@ -134,14 +137,15 @@ Rules for the document structure of newer versions: `spec.license-identifier-or-
 
 Standalone `validate` takes the version from the file's `openapi:` field and walks operations under `paths` and `webhooks`; a 3.1/3.2 file with only `components` or only `webhooks` is a valid document.
 
-All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
+All severity/skip/enable flags apply to both modes. Run `openapi-extract --help` and `openapi-extract validate --help` for the full rule list with per-rule severities.
 
 ## What It Extracts
 
-- Controllers (`[ApiController]`, `ControllerBase` inheritance)
+- Controllers (`[ApiController]`, `ControllerBase` inheritance); a controller with `[NonController]`, and a controller or an action with `[ApiExplorerSettings(IgnoreApi = true)]`, is left out
 - Routes (`[Route]`, `[HttpGet]`, `[HttpPost]`, etc., and `[AcceptVerbs]` with one or several methods and a named `Route`) with full template resolution; an action whose HTTP methods are not statically visible (an empty `[AcceptVerbs()]`, a custom `HttpMethodAttribute` subclass) is skipped with a warning
 - Polymorphism (`[JsonPolymorphic]` / `[JsonDerivedType]`, or Swashbuckle `[SwaggerDiscriminator]` / `[SwaggerSubType]`) as unions: `oneOf` of per-type variants (with a `discriminator` for an abstract base or interface; plus a base branch for a concrete base), or `anyOf` when some derived types have no discriminator value
-- Parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, `[FromForm]`) with `[ApiController]` inference
+- Parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, `[FromForm]`) with `[ApiController]` inference; `[FromServices]` parameters are left out
+- `operationId` from `[SwaggerOperation(OperationId)]`, else the `Name` of the attribute that produced the operation (`[HttpGet(Name = …)]`, `[AcceptVerbs(…, Name = …)]`); it is never synthesized, so an action with neither has no `operationId`
 - `[JsonExtensionData]` (`IDictionary<string, object>`, `IDictionary<string, JsonElement>` and implementing types, `JsonObject`): not a property, the object gets `additionalProperties: {}`; shapes System.Text.Json rejects (other key/value types, two such properties, one bound to a constructor parameter, combined with `[JsonUnmappedMemberHandling(Disallow)]`) are extraction errors (exit 2)
 - Dictionary keys (OpenAPI 3.1/3.2): `propertyNames` never narrower than what System.Text.Json writes and accepts — `Guid` keys `format: uuid`, integer keys a sign-and-digits `pattern`; string and enum keys unconstrained; a key converter unknown to the extractor leaves the keys unconstrained with a warning. `[MinLength]` / `[MaxLength]` on a dictionary give `minProperties` / `maxProperties`
 - `[AllowedValues]` → `enum` (one string value: `const` for 3.1/3.2), `[DeniedValues]` → `not: {enum}`, typed by the schema; combined with the schema's own constraints (an enum type keeps its own `enum`, the allowed values are a second `allOf` element); values of another JSON type give a warning and no constraint
@@ -196,7 +200,15 @@ naming the candidates, and when there is no such single file none is read.
 - Strings from literals (plain, verbatim, raw `"""…"""`), literal concatenation, in-project `const string` members of any class, `nameof(...)` and interpolation of constants (`SemanticModel.GetConstantValue`)
 - Both Swashbuckle API generations: `Microsoft.OpenApi.Models.*` with `Reference = new OpenApiReference { … }` (Swashbuckle ≤ 9) and `Microsoft.OpenApi.*` with `new OpenApiSecuritySchemeReference("x", document)` as a collection or index initializer key, in an expression or block lambda (Swashbuckle 10)
 
+### OpenAPI 3.0, 3.1 and 3.2
+
+The document is built for the `--openapi-version` (default `3.0`). A field the target version has no place for is written as an extension or omitted, with a warning. QUERY and non-standard methods (`[AcceptVerbs("QUERY")]`) are `query` / `additionalOperations` in 3.2 and move with the whole operation under `x-oai-additionalOperations` in 3.0/3.1; the item schema of a streaming response is `itemSchema` in 3.2 and `x-oai-itemSchema` before; server names, `$self` and the 3.2 OAuth2 fields become `x-oai-name`, `x-oai-$self`, `x-oai-oauth2-metadata-url`, `x-oai-deprecated`, `x-oai-deviceAuthorization` before 3.2; tag `summary` / `parent` / `kind` become `x-oas-summary` / `x-oas-parent` / `x-oas-kind` before 3.2; the license identifier is `x-oai-license-identifier` in 3.0; `info.summary` and `jsonSchemaDialect` are omitted in 3.0, and a `mutualTLS` scheme is removed in 3.0, with its name in every security requirement.
+
 For every OpenAPI field the tool emits, could emit or never emits — its source in C#, its form in OpenAPI 3.0, 3.1 and 3.2, its warning and its validation rule — see the [OpenAPI Field Catalog](docs/specs/openapi-field-catalog.md).
+
+## Library
+
+The extractor is also published as the NuGet package `DotNetOpenApiExtract.Core` (namespace `DotNetOpenApiExtract.Core`). `OpenApiDocumentBuilder.Build(OpenApiDocumentOptions)` returns a `Microsoft.OpenApi` `OpenApiDocument`; `OpenApiDocumentBuilder.BuildWithValidation(options, validationContext, out var validationResult)` also runs the validation rules (`ValidationContext` in `DotNetOpenApiExtract.Core.Validation`). `OpenApiDocumentOptions` carries the extraction settings of the CLI flags, with `AssemblyPath` required, and `OnDiagnostic` receives the extraction warnings as `ExtractionDiagnostic` records instead of stderr.
 
 ## Limitations
 
@@ -253,7 +265,7 @@ approach which executes the assembly partially instead of analyzing it staticall
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `Microsoft.OpenApi` | 3.10.2 | OpenAPI document model, JSON/YAML serialization, validation |
-| `Microsoft.OpenApi.YamlReader` | 3.10.2 | YAML output support |
+| `Microsoft.OpenApi.YamlReader` | 3.10.2 | Reading YAML spec files in `validate` (YAML output comes from `Microsoft.OpenApi`) |
 | `System.Reflection.MetadataLoadContext` | 10.0.12 | Load DLLs without executing code, read attributes and types |
 | `Microsoft.CodeAnalysis.CSharp` | 5.9.0 | Roslyn parsing of `Program.cs` for runtime-configuration extraction (`LanguageVersion.Latest`, i.e. C# 14) |
 | `System.CommandLine` | 2.0.12 | CLI argument parsing |
@@ -269,7 +281,7 @@ Does **not** depend on: ASP.NET Core, Swashbuckle, Entity Framework, or any infr
 
 ```bash
 dotnet build
-dotnet test
+dotnet test --solution DotNetOpenApiExtract.slnx
 ```
 
 ## License
