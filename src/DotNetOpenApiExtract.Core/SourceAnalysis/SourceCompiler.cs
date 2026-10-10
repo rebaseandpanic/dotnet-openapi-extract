@@ -48,7 +48,28 @@ public static class SourceCompiler
         if (!Directory.Exists(sourceRoot))
             throw new ArgumentException($"Source root directory does not exist: {sourceRoot}", nameof(sourceRoot));
 
-        var csFiles = EnumerateCsFiles(sourceRoot);
+        return Compile(sourceRoot, EnumerateCsFiles(sourceRoot));
+    }
+
+    /// <summary>
+    /// Compiles <paramref name="files"/>, files under <paramref name="sourceRoot"/>, into a
+    /// <see cref="SourceCompilationResult"/>: the files of the project that were compiled into the
+    /// assembly, when they are known.
+    /// </summary>
+    /// <param name="sourceRoot">The root directory of the project.</param>
+    /// <param name="files">Full paths of the <c>.cs</c> files to compile.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="sourceRoot"/> is null, empty, or does not exist on disk.
+    /// </exception>
+    public static SourceCompilationResult Compile(string sourceRoot, IEnumerable<string> files)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRoot))
+            throw new ArgumentException("sourceRoot must not be null or empty.", nameof(sourceRoot));
+        if (!Directory.Exists(sourceRoot))
+            throw new ArgumentException($"Source root directory does not exist: {sourceRoot}", nameof(sourceRoot));
+        ArgumentNullException.ThrowIfNull(files);
+
+        var csFiles = files;
 
         var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
         var syntaxTrees = csFiles
@@ -78,7 +99,7 @@ public static class SourceCompiler
     /// Enumerates all <c>.cs</c> files under <paramref name="sourceRoot"/>,
     /// excluding directories listed in <see cref="ExcludedDirectoryNames"/>.
     /// </summary>
-    private static IEnumerable<string> EnumerateCsFiles(string sourceRoot)
+    internal static IEnumerable<string> EnumerateCsFiles(string sourceRoot)
     {
         return EnumerateFilesExcluding(sourceRoot);
     }

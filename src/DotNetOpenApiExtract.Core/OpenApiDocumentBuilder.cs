@@ -493,7 +493,7 @@ public sealed class OpenApiDocumentBuilder
         var ledger = new LossLedger(options.OpenApiVersion);
 
         // ── Source analysis (best-effort, never throws) ──────────────────────
-        var sourceContext = TryBuildSourceAnalysisContext(options, loader);
+        var sourceContext = TryBuildSourceAnalysisContext(options, loader, diagnostics);
 
         // ── Security extraction (Roslyn, best-effort, before operation loop) ──
         var securityResult = SecuritySchemeExtractor.Extract(sourceContext, diagnostics.Report);
@@ -2491,7 +2491,8 @@ public sealed class OpenApiDocumentBuilder
     /// </summary>
     private static SourceAnalysisContext TryBuildSourceAnalysisContext(
         OpenApiDocumentOptions options,
-        AssemblyLoader loader)
+        AssemblyLoader loader,
+        DiagnosticBag diagnostics)
     {
         try
         {
@@ -2507,16 +2508,16 @@ public sealed class OpenApiDocumentBuilder
             if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
                 return SourceAnalysisContext.Empty;
 
-            // 2. Compile sources via Roslyn.
-            var compilationResult = SourceCompiler.Compile(sourceRoot);
+            // 2. Compile via Roslyn the files compiled into the assembly, as its PDB names them; without a
+            //    PDB that matches the source root, every file under it.
+            var compiledFiles = CompiledSourceFiles.TryFind(options.AssemblyPath, sourceRoot, SourceCompiler.EnumerateCsFiles(sourceRoot));
+            var compilationResult = compiledFiles != null
+                ? SourceCompiler.Compile(sourceRoot, compiledFiles)
+                : SourceCompiler.Compile(sourceRoot);
 
             // 3. Locate entry-point syntax node.
-            var entryPoint = loader.Assembly.EntryPoint;
-            SyntaxNode? entryPointNode = null;
-            if (entryPoint != null)
-            {
-                entryPointNode = EntryPointFinder.Find(entryPoint, compilationResult.Compilation);
-            }
+            var candidates = EntryPointFinder.FindAll(loader.Assembly.EntryPoint, compilationResult.Compilation);
+            var entryPointNode = ChooseEntryPoint(candidates, sourceRoot, diagnostics);
 
             return new SourceAnalysisContext(compilationResult, entryPointNode);
         }
@@ -2525,6 +2526,40 @@ public sealed class OpenApiDocumentBuilder
             // Any failure in source analysis must not break the main extraction pipeline.
             return SourceAnalysisContext.Empty;
         }
+    }
+
+    /// <summary>
+    /// The entry point among <paramref name="candidates"/>. One is the entry point. Several happen only when
+    /// the compiled files are unknown and the source root holds files the assembly was not built from (a
+    /// <c>Program.Old.cs</c> copy, a file excluded with <c>&lt;Compile Remove&gt;</c>): the <c>Program.cs</c>
+    /// nearest to the source root is taken, with a warning naming the candidates; when there is no such
+    /// single file, none is taken — a guess could read the configuration of code the assembly does not
+    /// contain.
+    /// </summary>
+    private static SyntaxNode? ChooseEntryPoint(IReadOnlyList<SyntaxNode> candidates, string sourceRoot, DiagnosticBag diagnostics)
+    {
+        if (candidates.Count <= 1)
+            return candidates.FirstOrDefault();
+
+        string Relative(SyntaxNode node) => Path.GetRelativePath(sourceRoot, node.SyntaxTree.FilePath).Replace('\\', '/');
+        int Depth(SyntaxNode node) => Relative(node).Count(c => c == '/');
+
+        var programs = candidates
+            .Where(c => string.Equals(Path.GetFileName(c.SyntaxTree.FilePath), "Program.cs", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var nearest = programs.Count == 0 ? [] : programs.Where(p => Depth(p) == programs.Min(Depth)).ToList();
+        var chosen = nearest.Count == 1 ? nearest[0] : null;
+
+        var names = candidates.Select(Relative).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        diagnostics.Report(new ExtractionDiagnostic
+        {
+            Code     = ExtractionDiagnosticCodes.SourceEntryPointAmbiguous,
+            Message  = chosen != null
+                ? $"Several source files can be the entry point ({string.Join(", ", names)}) and the portable PDB that names the files compiled into the assembly is missing or does not match the source root: {Relative(chosen)} is read. Remove copies that are not compiled, or keep the PDB next to the assembly."
+                : $"Several source files can be the entry point ({string.Join(", ", names)}) and the portable PDB that names the files compiled into the assembly is missing or does not match the source root: none is read, Program.cs configuration is missing from the document. Remove copies that are not compiled, or keep the PDB next to the assembly.",
+            Subjects = chosen != null ? [.. names, Relative(chosen)] : [.. names],
+        });
+        return chosen;
     }
 
 }

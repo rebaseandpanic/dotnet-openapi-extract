@@ -43,6 +43,12 @@ internal static class TestPaths
     public static string ConfigFormsApiDll   => FindFixtureDll("ConfigFormsApi");
 
     /// <summary>
+    /// Path to the StrayEntryApi test fixture DLL: built from Program.cs, next to a Program.Legacy.cs copy
+    /// excluded with <c>&lt;Compile Remove&gt;</c>, each declaring its own security scheme.
+    /// </summary>
+    public static string StrayEntryApiDll    => FindFixtureDll("StrayEntryApi");
+
+    /// <summary>
     /// Path to the built CLI (<c>src/DotNetOpenApiExtract.Cli/bin/**/DotNetOpenApiExtract.Cli.dll</c>),
     /// resolved by the same convention as the fixtures.
     /// </summary>

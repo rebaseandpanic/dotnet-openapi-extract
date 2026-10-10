@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core;
+using DotNetOpenApiExtract.Core.Tests.Harness;
 using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.OpenApi;
 using Xunit;
@@ -193,9 +194,11 @@ public sealed class ConstStringResolutionIntegrationTests
             Path.Combine(tempDir.Path, "Dummy.csproj"),
             "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
 
+        // The source root is not the one SampleApi was built from (its PDB has no Consts.cs): the assembly
+        // is read without its PDB, so every file under the source root is compiled.
         var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
         {
-            AssemblyPath = TestPaths.SampleApiDll,
+            AssemblyPath = OutputWithoutPdb.Of(TestPaths.SampleApiDll),
             XmlPath      = TestPaths.SampleApiXml,
             SourceRoot   = tempDir.Path,
         });

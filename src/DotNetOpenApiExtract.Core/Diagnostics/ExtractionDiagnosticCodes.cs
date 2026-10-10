@@ -3,6 +3,17 @@ namespace DotNetOpenApiExtract.Core.Diagnostics;
 /// <summary>Stable values of <see cref="ExtractionDiagnostic.Code"/>.</summary>
 public static class ExtractionDiagnosticCodes
 {
+    /// <summary>
+    /// Several source files can be the entry point of the assembly — files with top-level statements, or
+    /// <c>Main</c> methods of its entry-point type — and the files compiled into the assembly are not known
+    /// (no portable PDB, or its paths do not match the source root). A copy such as <c>Program.Old.cs</c>
+    /// or a file excluded with <c>&lt;Compile Remove&gt;</c> is not in the assembly. The file named
+    /// <c>Program.cs</c> nearest to the source root is read; when there is none or more than one at that
+    /// depth, no entry point is read and Program.cs configuration is missing from the document. Subjects:
+    /// the candidate files, relative to the source root, then the file read, if any.
+    /// </summary>
+    public const string SourceEntryPointAmbiguous = "source.entry-point-ambiguous";
+
     /// <summary>A security scheme name is registered more than once; the first registration wins. Subjects: the scheme name.</summary>
     public const string SecurityDuplicateScheme = "security.duplicate-scheme";
 

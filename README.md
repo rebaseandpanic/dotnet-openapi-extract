@@ -172,6 +172,15 @@ All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract 
 
 From `Program.cs` via Roslyn (when sources are available):
 
+Only the source files compiled into the assembly are read. Their list comes from the portable PDB
+(`<assembly>.pdb` next to the DLL, or embedded), matched to the source root by path tail, so absolute
+paths of another machine and `PathMap` paths (`/_/…`) work. A file under the source root that is not
+in the assembly — `Program.Old.cs`, a file excluded with `<Compile Remove>`, a file added after the
+build — is ignored. Without a PDB that matches the source root, every `.cs` file under it is read; if
+several of them can be the entry point (top-level statements, or `Main` of the entry-point type), the
+`Program.cs` nearest to the source root is read with the warning `source.entry-point-ambiguous`
+naming the candidates, and when there is no such single file none is read.
+
 - Security schemes (`AddSecurityDefinition`, `AddJwtBearer`, `AddSecurityRequirement`) — including lambda-factory form; OAuth2 flows (implicit, password, client credentials, authorization code, device authorization) with their URLs and scopes, the OpenID Connect URL, and the OpenAPI 3.2 `oauth2MetadataUrl` / `deprecated` (extensions with a warning before 3.2). A literal OAuth2 or OpenID Connect declaration without flows or URL is an extraction error; one built from variables is omitted with a warning; `mutualTLS` for 3.1/3.2 (removed for 3.0 with a warning naming the changed requirements)
 - `UsePathBase("/prefix")` — prepended to paths or emitted as `servers[].url`
 - `AddProblemDetails()` — auto-injects default 400 / 422 / 500 responses with RFC 7807 `ProblemDetails` schema

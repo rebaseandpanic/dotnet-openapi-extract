@@ -66,14 +66,25 @@ public static class EntryPointFinder
     ///   </item>
     /// </list>
     /// </returns>
-    public static SyntaxNode? Find(MethodBase? entryPoint, CSharpCompilation compilation)
+    public static SyntaxNode? Find(MethodBase? entryPoint, CSharpCompilation compilation) =>
+        FindAll(entryPoint, compilation).FirstOrDefault();
+
+    /// <summary>
+    /// Every syntax node of <paramref name="compilation"/> that can be the entry point: each file with
+    /// top-level statements, or each <c>Main</c> of a type named as the declaring type of
+    /// <paramref name="entryPoint"/>. A project compiles
+    /// with one; several mean the compilation holds files the assembly was not built from, and the caller
+    /// chooses among them.
+    /// </summary>
+    /// <param name="entryPoint">The <see cref="MethodBase"/> returned by <c>Assembly.EntryPoint</c>, or <see langword="null"/>.</param>
+    /// <param name="compilation">The Roslyn compilation built from the project's source files.</param>
+    /// <returns>The candidates in the order of the compilation's syntax trees; empty when there is none.</returns>
+    public static IReadOnlyList<SyntaxNode> FindAll(MethodBase? entryPoint, CSharpCompilation compilation)
     {
         if (entryPoint == null)
-            return null;
+            return [];
 
         // Top-level statements: compiler generates "<Main>$" (or "<Main>" in some configurations).
-        // Both names indicate that the program uses top-level statements — return the
-        // CompilationUnitSyntax that contains global statements.
         if (entryPoint.Name == SyntheticMainMethodName ||
             entryPoint.Name == SyntheticMainMethodNameLegacy)
             return FindTopLevelStatements(compilation);
@@ -87,63 +98,44 @@ public static class EntryPointFinder
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Finds the <see cref="CompilationUnitSyntax"/> that contains top-level statements.
-    /// A compilation unit has top-level statements when its <c>Members</c> list includes
-    /// at least one <see cref="GlobalStatementSyntax"/> (i.e. a member that is not a
-    /// namespace or type declaration).
+    /// The <see cref="CompilationUnitSyntax"/>s that contain top-level statements: those whose
+    /// <c>Members</c> include at least one <see cref="GlobalStatementSyntax"/>.
     /// </summary>
-    private static SyntaxNode? FindTopLevelStatements(CSharpCompilation compilation)
-    {
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            var root = tree.GetCompilationUnitRoot();
-            if (root.Members.Any(m => m is GlobalStatementSyntax))
-                return root;
-        }
-
-        return null;
-    }
+    private static List<SyntaxNode> FindTopLevelStatements(CSharpCompilation compilation) =>
+        compilation.SyntaxTrees
+            .Select(tree => tree.GetCompilationUnitRoot())
+            .Where(root => root.Members.Any(m => m is GlobalStatementSyntax))
+            .ToList<SyntaxNode>();
 
     // ──────────────────────────────────────────────────────────────────────────
     // Conventional Main
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Finds a <see cref="MethodDeclarationSyntax"/> matching the declaring type and
-    /// method name of <paramref name="entryPoint"/>.
+    /// The <see cref="MethodDeclarationSyntax"/>s matching the declaring type name and method name of
+    /// <paramref name="entryPoint"/>.
     /// </summary>
-    private static SyntaxNode? FindConventionalMain(
+    private static List<SyntaxNode> FindConventionalMain(
         MethodBase entryPoint,
         CSharpCompilation compilation)
     {
         var declaringType = entryPoint.DeclaringType;
         if (declaringType == null)
-            return null;
+            return [];
 
-        var simpleTypeName = declaringType.Name;
-        var methodName = entryPoint.Name;
-
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            var root = tree.GetCompilationUnitRoot();
-            var found = FindMethodInUnit(root, simpleTypeName, methodName);
-            if (found != null)
-                return found;
-        }
-
-        return null;
+        return compilation.SyntaxTrees
+            .SelectMany(tree => FindMethodsInUnit(tree.GetCompilationUnitRoot(), declaringType.Name, entryPoint.Name))
+            .ToList<SyntaxNode>();
     }
 
     /// <summary>
-    /// Recursively searches <paramref name="root"/> for a method with the given
-    /// containing type name and method name.
+    /// The methods of <paramref name="root"/> with the given containing type name and method name.
     /// </summary>
-    private static MethodDeclarationSyntax? FindMethodInUnit(
+    private static IEnumerable<MethodDeclarationSyntax> FindMethodsInUnit(
         SyntaxNode root,
         string typeName,
         string methodName)
     {
-        // Search all type declarations in the tree
         foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
         {
             if (!string.Equals(typeDecl.Identifier.Text, typeName, StringComparison.Ordinal))
@@ -152,10 +144,8 @@ public static class EntryPointFinder
             foreach (var method in typeDecl.Members.OfType<MethodDeclarationSyntax>())
             {
                 if (string.Equals(method.Identifier.Text, methodName, StringComparison.Ordinal))
-                    return method;
+                    yield return method;
             }
         }
-
-        return null;
     }
 }
