@@ -10,11 +10,13 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// This rule is <b>off by default</b>. Enable with <c>--enable-rule component.no-unused</c>.
 /// </para>
 /// <para>
-/// Implementation note: this rule implements an approximation. It collects <c>$ref</c> IDs
-/// by walking operation request/response bodies, parameter schemas, path item parameters,
-/// and inline schema compositions (allOf/anyOf/oneOf/properties). It does NOT walk deep
-/// into all possible reference chains (e.g., referenced schemas that reference other schemas),
-/// so it may emit false positives for schemas that are transitively reachable.
+/// A schema counts as used when any schema of the document references it: the schemas of
+/// operation parameters, path item parameters, request and response media types (<c>schema</c>
+/// and <c>itemSchema</c>), and every component schema, through <c>properties</c>, <c>items</c>,
+/// <c>additionalProperties</c>, <c>allOf</c> / <c>oneOf</c> / <c>anyOf</c> / <c>not</c>,
+/// <c>propertyNames</c>, <c>contentSchema</c> and <c>discriminator</c> (<c>mapping</c> and
+/// <c>defaultMapping</c>). A reference from a component that is itself unused still counts, so a
+/// group of components referencing only each other is not reported.
 /// </para>
 /// Spectral <c>oas3-unused-component</c> recommended. Redocly <c>no-unused-components</c> warn.
 /// </summary>
@@ -53,7 +55,7 @@ public sealed class ComponentNoUnusedRule : IValidationRule
                     // Request body
                     if (operation.RequestBody?.Content != null)
                         foreach (var (_, mediaType) in operation.RequestBody.Content)
-                            CollectFromSchema(mediaType?.Schema, referencedIds);
+                            CollectFromMediaType(mediaType, referencedIds);
 
                     // Responses
                     if (operation.Responses != null)
@@ -62,7 +64,7 @@ public sealed class ComponentNoUnusedRule : IValidationRule
                         {
                             if (response?.Content == null) continue;
                             foreach (var (_, mediaType) in response.Content)
-                                CollectFromSchema(mediaType?.Schema, referencedIds);
+                                CollectFromMediaType(mediaType, referencedIds);
                         }
                     }
                 }
@@ -84,9 +86,15 @@ public sealed class ComponentNoUnusedRule : IValidationRule
                     DefaultSeverity,
                     JsonPointerHelper.ForSchema(schemaId),
                     null,
-                    $"Schema '{schemaId}' in components/schemas is not referenced anywhere in the document (approximate check).");
+                    $"Schema '{schemaId}' in components/schemas is not referenced anywhere in the document.");
             }
         }
+    }
+
+    private static void CollectFromMediaType(IOpenApiMediaType? mediaType, HashSet<string> ids)
+    {
+        CollectFromSchema(mediaType?.Schema, ids);
+        CollectFromSchema(mediaType?.ItemSchema, ids);
     }
 
     private static void CollectFromSchema(IOpenApiSchema? schema, HashSet<string> ids)
@@ -115,10 +123,21 @@ public sealed class ComponentNoUnusedRule : IValidationRule
         // Items
         CollectFromSchema(schema.Items, ids);
 
-        // anyOf / allOf / oneOf
+        // anyOf / allOf / oneOf / not
         if (schema.AnyOf != null) foreach (var s in schema.AnyOf) CollectFromSchema(s, ids);
         if (schema.AllOf != null) foreach (var s in schema.AllOf) CollectFromSchema(s, ids);
         if (schema.OneOf != null) foreach (var s in schema.OneOf) CollectFromSchema(s, ids);
+        CollectFromSchema(schema.Not, ids);
+
+        // Dictionary keys and encoded content (SSE event data)
+        CollectFromSchema(schema.PropertyNames, ids);
+        CollectFromSchema(schema.ContentSchema, ids);
+
+        // discriminator.mapping / defaultMapping name their targets
+        if (schema.Discriminator?.Mapping != null)
+            foreach (var (_, target) in schema.Discriminator.Mapping)
+                CollectFromSchema(target, ids);
+        CollectFromSchema(schema.Discriminator?.DefaultMapping, ids);
 
         // AdditionalProperties
         if (schema.AdditionalProperties is IOpenApiSchema addProp)

@@ -124,6 +124,8 @@ Rules run for the version of the document: the `--openapi-version` of the build,
 
 Rules for the document structure of newer versions: `spec.license-identifier-or-url` (3.1+: a license has an identifier or a url, not both), `spec.paths-or-webhooks-or-components` (3.0: `paths` is required; 3.1/3.2: at least one of `paths`, `webhooks`, `components` — an empty object counts as present, a missing one does not), `tag.parent-defined` and `tag.no-parent-cycle` (3.2: a tag's `parent` names a declared tag, and parents never form a cycle), `spec.server-names-unique` (3.2: top-level server names are unique), `discriminator.default-mapping-when-optional` (3.2: a discriminator whose property an instance may lack — required-ness followed through `allOf`, `oneOf`, `anyOf` and `$ref` — has a `defaultMapping`; the tool's own polymorphism output always passes it). A rule for one version does not run for another.
 
+`schema.property-constraints` checks the schema against the validation attributes the way the generator applies them: lengths by shape (string, array, dictionary) and at least as tight as the attribute, `[Range]` for every constructor with inclusive and exclusive bounds on their own keywords (on the numeric branch when number handling makes the property an `anyOf`). `component.no-unused` (off by default) counts references through `itemSchema`, `contentSchema`, `propertyNames`, compositions and discriminator mappings.
+
 All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
 
 ## What It Extracts

@@ -492,4 +492,197 @@ public sealed class SchemaPropertyConstraintsRuleTests
         violations[0].Message.Should().NotContain("maxItems",
             because: "the array branch must not fire when Type is null");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // [Length], exclusive bounds, every [Range] constructor, nullable and
+    // number-handling schemas
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private sealed class LengthFixture
+    {
+        [Length(2, 10)]
+        public string? Text { get; set; }
+
+        [Length(1, 5)]
+        public List<int> List { get; set; } = [];
+
+        [Length(1, 3)]
+        public Dictionary<string, int> Map { get; set; } = [];
+    }
+
+    private sealed class RangeFixture
+    {
+        [Range(0.5, 10.0, MinimumIsExclusive = true, MaximumIsExclusive = true)]
+        public double Exclusive { get; set; }
+
+        [Range(typeof(decimal), "0.25", "99.75")]
+        public decimal Typed { get; set; }
+
+        [Range(1, 100)]
+        public int? Nullable { get; set; }
+
+        [Range(1, 100)]
+        public int Handled { get; set; }
+    }
+
+    /// <summary>The rule's violations for one property of a fixture type, checked against <paramref name="schema"/>.</summary>
+    private static IReadOnlyList<DotNetOpenApiExtract.Core.Validation.ValidationViolation> Check(
+        Type fixture, string property, OpenApiSchema schema, OpenApiSpecVersion version = OpenApiSpecVersion.OpenApi3_1)
+    {
+        var doc = new OpenApiDocument
+        {
+            Info  = new OpenApiInfo { Title = "T", Version = "v1" },
+            Paths = new OpenApiPaths(),
+            Components = new OpenApiComponents
+            {
+                Schemas = new Dictionary<string, IOpenApiSchema>
+                {
+                    ["Fixture"] = new OpenApiSchema
+                    {
+                        Type = JsonSchemaType.Object,
+                        Properties = new Dictionary<string, IOpenApiSchema> { [property] = schema },
+                    },
+                },
+            },
+        };
+        var context = new ValidationContext
+        {
+            OpenApiSpecVersion = version,
+            TypeBySchemaId = new Dictionary<string, Type> { ["Fixture"] = fixture },
+        };
+
+        var result = DotNetOpenApiExtract.Core.Validation.OpenApiValidator.Validate(doc, context);
+        result.SkippedRules.Should().NotContain("schema.property-constraints");
+        return result.Violations.Where(v => v.RuleId == "schema.property-constraints").ToList();
+    }
+
+    private static OpenApiSchema Dictionary() => new()
+    {
+        Type = JsonSchemaType.Object,
+        AdditionalProperties = new OpenApiSchema { Type = JsonSchemaType.Integer },
+    };
+
+    public static TheoryData<string, OpenApiSchema> LengthSatisfied => new()
+    {
+        { "text", new OpenApiSchema { Type = JsonSchemaType.String, MinLength = 2, MaxLength = 10 } },
+        { "text", new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null, MinLength = 2, MaxLength = 10 } },
+        { "list", new OpenApiSchema { Type = JsonSchemaType.Array, MinItems = 1, MaxItems = 5 } },
+        { "map", new OpenApiSchema { Type = JsonSchemaType.Object, AdditionalProperties = new OpenApiSchema(), MinProperties = 1, MaxProperties = 3 } },
+        // A tighter bound (another attribute) still satisfies [Length].
+        { "text", new OpenApiSchema { Type = JsonSchemaType.String, MinLength = 3, MaxLength = 8 } },
+    };
+
+    [Theory]
+    [MemberData(nameof(LengthSatisfied))]
+    public void Length_MatchingKeywords_NoViolation(string property, OpenApiSchema schema)
+    {
+        Check(typeof(LengthFixture), property, schema).Should().BeEmpty();
+    }
+
+    public static TheoryData<string, OpenApiSchema, string> LengthMissing => new()
+    {
+        { "text", new OpenApiSchema { Type = JsonSchemaType.String }, "minLength" },
+        { "text", new OpenApiSchema { Type = JsonSchemaType.String, MinLength = 2, MaxLength = 11 }, "maxLength" },
+        // Wrong keywords for the shape.
+        { "list", new OpenApiSchema { Type = JsonSchemaType.Array, MinLength = 1, MaxLength = 5 }, "minItems" },
+        { "map", new OpenApiSchema { Type = JsonSchemaType.Object, AdditionalProperties = new OpenApiSchema(), MinItems = 1, MaxItems = 3 }, "minProperties" },
+        { "map", new OpenApiSchema { Type = JsonSchemaType.Object, AdditionalProperties = new OpenApiSchema(), MinLength = 1, MaxLength = 3 }, "maxProperties" },
+    };
+
+    [Theory]
+    [MemberData(nameof(LengthMissing))]
+    public void Length_MissingOrWrongKeyword_Violates(string property, OpenApiSchema schema, string keyword)
+    {
+        var violations = Check(typeof(LengthFixture), property, schema);
+
+        violations.Should().NotBeEmpty();
+        violations.Should().AllSatisfy(v => v.JsonPointer.Should().Be($"#/components/schemas/Fixture/properties/{property}"));
+        violations.Select(v => v.Message).Should().Contain(m => m.Contains($"'{keyword}'"));
+    }
+
+    public static TheoryData<OpenApiSpecVersion> Versions => [.. Harness.VersionedDocumentHarness.Versions];
+
+    /// <summary>
+    /// The model holds an exclusive bound as a number in every version; the 3.0 output writes it as the
+    /// bound plus a boolean. Either way it is the exclusive keyword, not the inclusive one.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void Range_ExclusiveBounds_NoViolation(OpenApiSpecVersion version)
+    {
+        var schema = new OpenApiSchema { Type = JsonSchemaType.Number, Format = "double", ExclusiveMinimum = "0.5", ExclusiveMaximum = "10" };
+
+        Check(typeof(RangeFixture), "exclusive", schema, version).Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void Range_ExclusiveWrittenAsInclusive_Violates(OpenApiSpecVersion version)
+    {
+        var schema = new OpenApiSchema { Type = JsonSchemaType.Number, Minimum = "0.5", Maximum = "10" };
+
+        var violations = Check(typeof(RangeFixture), "exclusive", schema, version);
+
+        violations.Select(v => v.Message).Should().HaveCount(2)
+            .And.Contain(m => m.Contains("'exclusiveMinimum'"))
+            .And.Contain(m => m.Contains("'exclusiveMaximum'"));
+    }
+
+    [Fact]
+    public void Range_TypedStringBounds_NoViolation()
+    {
+        var schema = new OpenApiSchema { Type = JsonSchemaType.Number, Format = "double", Minimum = "0.25", Maximum = "99.750" };
+
+        Check(typeof(RangeFixture), "typed", schema).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Range_TypedStringBounds_WrongValue_Violates()
+    {
+        var schema = new OpenApiSchema { Type = JsonSchemaType.Number, Minimum = "0", Maximum = "99.75" };
+
+        Check(typeof(RangeFixture), "typed", schema)
+            .Should().ContainSingle().Which.Message.Should().Contain("'minimum'");
+    }
+
+    [Fact]
+    public void Range_NullableNumber_NoViolation()
+    {
+        var schema = new OpenApiSchema { Type = JsonSchemaType.Integer | JsonSchemaType.Null, Format = "int32", Minimum = "1", Maximum = "100" };
+
+        Check(typeof(RangeFixture), "nullable", schema).Should().BeEmpty();
+    }
+
+    /// <summary>Number handling: an untyped anyOf whose first branch is the number carries the range.</summary>
+    private static OpenApiSchema NumberUnion(OpenApiSchema number, JsonSchemaType? type = null) => new()
+    {
+        Type  = type,
+        AnyOf = [number, new OpenApiSchema { Type = JsonSchemaType.String, Pattern = "^-?(?:0|[1-9]\\d*)$" }],
+    };
+
+    [Fact]
+    public void Range_NumberHandlingUnion_ConstrainedBranch_NoViolation()
+    {
+        var number = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "1", Maximum = "100" };
+
+        Check(typeof(RangeFixture), "handled", NumberUnion(number)).Should().BeEmpty();
+        Check(typeof(RangeFixture), "nullable", NumberUnion(number, JsonSchemaType.Null)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Range_NumberHandlingUnion_UnconstrainedBranch_Violates()
+    {
+        var union = NumberUnion(new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32" });
+        union.Minimum = "1";
+        union.Maximum = "100";
+
+        Check(typeof(RangeFixture), "handled", union).Should().HaveCount(2,
+            because: "the bounds belong on the numeric branch, not on the anyOf wrapper");
+    }
+
+    [Fact]
+    public void Range_OnNonNumericSchema_ExpectsNothing()
+    {
+        Check(typeof(RangeFixture), "handled", new OpenApiSchema { Type = JsonSchemaType.String }).Should().BeEmpty();
+    }
 }
