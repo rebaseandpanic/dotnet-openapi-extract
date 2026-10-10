@@ -94,4 +94,71 @@ public class GeneratedFileValidationTests(GeneratedFileValidationFixture fixture
             .Should().NotContain("spec.no-ref-siblings");
         Pointers(report, "spec.no-ref-siblings").Should().BeEmpty();
     }
+
+    /// <summary>The generator writes enum values of the schema's own type, in every format.</summary>
+    [Theory]
+    [MemberData(nameof(Files))]
+    public void GeneratedFile_HasNoTypedEnumViolations(string name, OpenApiSpecVersion version, DocumentFormat format)
+    {
+        Pointers(fixture.Reports[(name, version, format)], "schema.typed-enum").Should().BeEmpty();
+    }
+
+    public static TheoryData<string, OpenApiSpecVersion> Documents
+    {
+        get
+        {
+            var data = new TheoryData<string, OpenApiSpecVersion>();
+            foreach (var name in new[] { "ModernApi", "SampleApi" })
+            foreach (var version in VersionedDocumentHarness.Versions)
+                data.Add(name, version);
+            return data;
+        }
+    }
+
+    /// <summary>One document written as JSON and as YAML gets the same violations.</summary>
+    [Theory]
+    [MemberData(nameof(Documents))]
+    public void Report_DoesNotDependOnTheFormat(string name, OpenApiSpecVersion version)
+    {
+        static List<string> Violations(JsonNode report) =>
+            report["violations"]!.AsArray()
+                .Select(v => $"{v!["rule"]!.GetValue<string>()} {v["jsonPointer"]!.GetValue<string>()}")
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+        Violations(fixture.Reports[(name, version, DocumentFormat.Yaml)])
+            .Should().Equal(Violations(fixture.Reports[(name, version, DocumentFormat.Json)]));
+    }
+
+    /// <summary>
+    /// A value of another JSON type is still reported, in both formats: <c>"0"</c> (a string) and
+    /// <c>1.5</c> under <c>type: integer</c>; <c>2.0</c> is an integer.
+    /// </summary>
+    [Theory]
+    [InlineData("json", """
+        {"openapi":"3.0.4","info":{"title":"T","version":"1"},"paths":{},
+         "components":{"schemas":{"Mode":{"type":"integer","enum":["0",1,1.5,2.0]}}}}
+        """)]
+    [InlineData("yaml", """
+        openapi: 3.0.4
+        info: {title: T, version: '1'}
+        paths: {}
+        components:
+          schemas:
+            Mode:
+              type: integer
+              enum: ['0', 1, 1.5, 2.0]
+        """)]
+    public async Task MismatchedEnumValues_AreReported_InEitherFormat(string extension, string content)
+    {
+        using var directory = new TempDirectory();
+        var spec = Path.Combine(directory.Path, $"openapi.{extension}");
+        await File.WriteAllTextAsync(spec, content, TestContext.Current.CancellationToken);
+
+        var result = await CliRunner.RunAsync(["validate", "--spec", spec], directory.Path, TestContext.Current.CancellationToken);
+
+        result.ExitCode.Should().NotBe(2, result.StdErr);
+        Pointers(JsonNode.Parse(result.StdOut)!, "schema.typed-enum")
+            .Should().Equal("#/components/schemas/Mode/enum/0", "#/components/schemas/Mode/enum/2");
+    }
 }

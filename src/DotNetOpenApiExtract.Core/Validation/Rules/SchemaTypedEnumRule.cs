@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 
@@ -64,24 +66,32 @@ public sealed class SchemaTypedEnumRule : IValidationRule
         }
     }
 
+    /// <summary>
+    /// Whether the JSON value <paramref name="node"/> is of <paramref name="type"/>, judged by its
+    /// JSON kind and, for an integer, by its number text — never by the CLR type that holds it,
+    /// which depends on the reader (a JSON file, a YAML file, a document built in memory).
+    /// </summary>
     private static bool IsCompatible(JsonNode node, JsonSchemaType type)
     {
         if (node is not JsonValue jv) return false; // complex node
 
+        var kind = jv.GetValueKind();
         return type switch
         {
-            JsonSchemaType.Integer =>
-                jv.TryGetValue<long>(out _) || jv.TryGetValue<int>(out _) || jv.TryGetValue<short>(out _),
-            JsonSchemaType.Number =>
-                jv.TryGetValue<double>(out _) || jv.TryGetValue<float>(out _) ||
-                jv.TryGetValue<decimal>(out _) || jv.TryGetValue<long>(out _) || jv.TryGetValue<int>(out _),
-            JsonSchemaType.String =>
-                jv.TryGetValue<string>(out _),
-            JsonSchemaType.Boolean =>
-                jv.TryGetValue<bool>(out _),
+            JsonSchemaType.Integer => kind == JsonValueKind.Number && IsIntegral(jv.ToJsonString()),
+            JsonSchemaType.Number  => kind == JsonValueKind.Number,
+            JsonSchemaType.String  => kind == JsonValueKind.String,
+            JsonSchemaType.Boolean => kind is JsonValueKind.True or JsonValueKind.False,
             _ => true, // other types — pass
         };
     }
+
+    /// <summary>Whether the JSON number <paramref name="text"/> has no fractional part (<c>2</c>, <c>2.0</c>, <c>2e3</c>).</summary>
+    private static bool IsIntegral(string text) =>
+        decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var exact)
+            ? exact == decimal.Truncate(exact)
+            : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var approximate)
+              && double.IsFinite(approximate) && approximate == Math.Floor(approximate);
 
     private static string? GetExpectedNodeKind(JsonSchemaType type) => type switch
     {
