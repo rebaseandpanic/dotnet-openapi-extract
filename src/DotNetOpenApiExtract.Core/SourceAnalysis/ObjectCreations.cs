@@ -60,19 +60,4 @@ internal static class ObjectCreations
             }
             : null;
     }
-
-    /// <summary>
-    /// Whether <paramref name="creation"/> is the argument at <paramref name="index"/> of
-    /// <paramref name="invocation"/> (positional; parentheses around it are allowed).
-    /// </summary>
-    public static bool IsArgument(SyntaxNode creation, InvocationExpressionSyntax invocation, int index)
-    {
-        var node = creation;
-        while (node.Parent is ParenthesizedExpressionSyntax paren)
-            node = paren;
-
-        return node.Parent is ArgumentSyntax { NameColon: null } argument
-               && argument.Parent == invocation.ArgumentList
-               && invocation.ArgumentList.Arguments.IndexOf(argument) == index;
-    }
 }

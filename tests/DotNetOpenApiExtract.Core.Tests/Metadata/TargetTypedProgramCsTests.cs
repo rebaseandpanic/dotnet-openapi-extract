@@ -125,6 +125,8 @@ public class TargetTypedProgramCsTests(TargetTypedProgramCsFixture fixture) : IC
     [InlineData("""c.SwaggerDoc("v1", new OpenApiInfo { Title = "T", ExternalDocs = Docs() });""", "Docs()")]
     [InlineData("""c.AddTag(tag);""", "tag")]
     [InlineData("""c.AddTag(new() { Name = "T", ExternalDocs = docs });""", "docs")]
+    [InlineData("""c.SwaggerDoc("v1", info: info);""", "info")]
+    [InlineData("""c.SwaggerDoc(info: info, name: "v1");""", "info")]
     public void UnreadableDocumentMetadata_GivesOneWarning(string body, string expression)
     {
         var diagnostics = new List<ExtractionDiagnostic>();
@@ -152,5 +154,34 @@ public class TargetTypedProgramCsTests(TargetTypedProgramCsFixture fixture) : IC
 
         result.Schemes.Should().BeEmpty();
         result.OmittedSchemes.Should().Equal("ApiKey");
+    }
+
+    /// <summary>
+    /// A parenthesized license and a named <c>info:</c> argument are read like the plain forms, and
+    /// without a warning: reading and the diagnostics normalize the expression and find the argument
+    /// the same way.
+    /// </summary>
+    [Theory]
+    [InlineData("""c.SwaggerDoc("v1", new() { Title = "T", License = (new() { Name = "MIT" }) });""")]
+    [InlineData("""c.SwaggerDoc("v1", info: new() { Title = "T", License = new() { Name = "MIT" } });""")]
+    [InlineData("""c.SwaggerDoc(info: new() { Title = "T", License = new() { Name = "MIT" } }, name: "v1");""")]
+    [InlineData("""c.SwaggerDoc("v1", new OpenApiInfo { Title = "T", License = (new OpenApiLicense { Name = "MIT" }) });""")]
+    public void ParenthesizedLicense_AndNamedInfo_AreRead_WithoutAWarning(string call)
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), $"builder.Services.AddSwaggerGen(c => {{ {call} }});");
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+        {
+            AssemblyPath   = TestPaths.ModernApiDll,
+            XmlPath        = TestPaths.ModernApiXml,
+            SourceRoot     = directory.Path,
+            OpenApiVersion = OpenApiSpecVersion.OpenApi3_1,
+            OnDiagnostic   = onDiagnostic,
+        });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!;
+
+        json["info"]!["license"].Should().NotBeNull(because: "the license is read");
+        json["info"]!["license"]!.ToJsonString().Should().Be("""{"name":"MIT"}""");
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.DocumentMetadataNotStatic);
     }
 }

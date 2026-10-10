@@ -189,7 +189,8 @@ public static class DocumentTagsExtractor
                     case "Summary":
                         summary = InvocationMatcher.GetStringValue(assignment.Right, compilation);
                         break;
-                    case "License" when assignment.Right is BaseObjectCreationExpressionSyntax { Initializer: { } licenseInit }:
+                    // The same normalization as the diagnostics: parentheses around the creation are read through.
+                    case "License" when ObjectCreations.Of(assignment.Right) is { Initializer: { } licenseInit }:
                         string? name = null, url = null, identifier = null;
                         foreach (var field in licenseInit.Expressions.OfType<AssignmentExpressionSyntax>())
                         {
@@ -455,11 +456,24 @@ public static class DocumentTagsExtractor
         invocation.ArgumentList.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>().Where(creation => creation switch
         {
             ObjectCreationExpressionSyntax explicitCreation => IsInfoTypeName(GetUnqualifiedTypeName(explicitCreation.Type)),
-            _ => IsSwaggerDocInfoArgument(creation, invocation) || ObjectCreations.AssignedMember(creation) == "Info",
+            _ => (SwaggerDocInfoArgument(invocation) is { } info && ObjectCreations.Of(info.Expression) == creation)
+                 || ObjectCreations.AssignedMember(creation) == "Info",
         });
 
-    private static bool IsSwaggerDocInfoArgument(SyntaxNode node, InvocationExpressionSyntax invocation) =>
-        InvocationMatcher.GetSimpleMethodName(invocation.Expression) == "SwaggerDoc" && ObjectCreations.IsArgument(node, invocation, 1);
+    /// <summary>
+    /// The <c>info</c> argument of <c>SwaggerDoc(name, info)</c>: the argument named <c>info:</c>, else the
+    /// second positional one; <see langword="null"/> for any other call or when there is none. Reading
+    /// and the diagnostics resolve it the same way.
+    /// </summary>
+    private static ArgumentSyntax? SwaggerDocInfoArgument(InvocationExpressionSyntax invocation)
+    {
+        if (InvocationMatcher.GetSimpleMethodName(invocation.Expression) != "SwaggerDoc")
+            return null;
+
+        var arguments = invocation.ArgumentList.Arguments;
+        return arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.Text == "info")
+            ?? (arguments.Count > 1 && arguments[1].NameColon == null ? arguments[1] : null);
+    }
 
     /// <summary>
     /// Warns about document metadata that is not an object creation the extractor reads, instead of
@@ -497,8 +511,7 @@ public static class DocumentTagsExtractor
         foreach (var methodName in SwaggerDocMethodNames)
         foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
         {
-            if (methodName == "SwaggerDoc" && invocation.ArgumentList.Arguments is [_, { NameColon: null } info, ..]
-                && ObjectCreations.Of(info.Expression) == null)
+            if (SwaggerDocInfoArgument(invocation) is { } info && ObjectCreations.Of(info.Expression) == null)
                 Report("SwaggerDoc info", info.Expression);
 
             foreach (var assignment in invocation.ArgumentList.DescendantNodes().OfType<AssignmentExpressionSyntax>())
