@@ -411,6 +411,19 @@ public static class SecuritySchemeExtractor
         Require(flows.DeviceAuthorization, "deviceAuthorization", "TokenUrl", flows.DeviceAuthorization?.TokenUrl);
     }
 
+    /// <summary>
+    /// Whether the constructor arguments of a collection creation leave it empty before its initializer:
+    /// none, an integer capacity, or a <c>StringComparer</c>. Any other argument (another collection to
+    /// copy) makes the content unknown.
+    /// </summary>
+    private static bool OnlyCapacityOrComparer(BaseObjectCreationExpressionSyntax creation) =>
+        creation.ArgumentList?.Arguments.All(argument => argument.Expression switch
+        {
+            LiteralExpressionSyntax literal => literal.IsKind(SyntaxKind.NumericLiteralExpression),
+            MemberAccessExpressionSyntax { Expression: var owner } => owner.ToString().EndsWith("StringComparer", StringComparison.Ordinal),
+            _ => false,
+        }) ?? true;
+
     /// <summary>What reading a security scheme initializer found that keeps the scheme out of the document.</summary>
     private sealed class ParseIssues
     {
@@ -541,7 +554,8 @@ public static class SecuritySchemeExtractor
         if (IsNoValue(value))
             return null; // known: no scopes (written as the empty map)
 
-        if (Creation(value) is not { } creation)
+        // A constructor copying another dictionary is unknown; a capacity or a comparer is still empty.
+        if (Creation(value) is not { } creation || !OnlyCapacityOrComparer(creation))
         {
             issues.Unresolved = true;
             return null;
@@ -749,12 +763,15 @@ public static class SecuritySchemeExtractor
             if (value == null)
                 continue;
 
+            // Every element must be known: a spread (..other) or a constructor copying another collection
+            // (new List<string>(other)) makes the list unknown; a capacity is still an empty list.
             IEnumerable<ExpressionSyntax>? items = value switch
             {
-                CollectionExpressionSyntax collection => collection.Elements.OfType<ExpressionElementSyntax>().Select(e => e.Expression),
+                CollectionExpressionSyntax collection when collection.Elements.All(e => e is ExpressionElementSyntax)
+                    => collection.Elements.Cast<ExpressionElementSyntax>().Select(e => e.Expression),
                 ArrayCreationExpressionSyntax { Initializer: { } array } => array.Expressions,
                 ImplicitArrayCreationExpressionSyntax { Initializer: { } implicitArray } => implicitArray.Expressions,
-                BaseObjectCreationExpressionSyntax created => created.Initializer?.Expressions ?? [],
+                BaseObjectCreationExpressionSyntax created when OnlyCapacityOrComparer(created) => created.Initializer?.Expressions ?? [],
                 _ => null,
             };
             var scopes = items?.Select(item => InvocationMatcher.GetStringValue(item, compilation)).ToList();

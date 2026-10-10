@@ -132,4 +132,66 @@ public class RequirementScopesTests(RequirementScopesFixture fixture) : IClassFi
         diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes)
             .Which.Subjects.Should().Equal("scopes");
     }
+
+    private static (JsonNode Document, IReadOnlyList<ExtractionDiagnostic> Diagnostics) BuildWith(string flowScopes, string requirementScopes)
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), $$"""
+            var extra = LoadScopes();
+            var baseScopes = LoadScopeDescriptions();
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("oauth", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.OAuth2,
+                    Flows = new OpenApiOAuthFlows { Implicit = new OpenApiOAuthFlow { AuthorizationUrl = new Uri("https://a.example.com"), Scopes = {{flowScopes}} } },
+                });
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement { { new OpenApiSecuritySchemeReference("oauth"), {{requirementScopes}} } });
+            });
+            """);
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.ModernApiDll,
+            XmlPath      = TestPaths.ModernApiXml,
+            SourceRoot   = directory.Path,
+            OnDiagnostic = onDiagnostic,
+        });
+        return (JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, CancellationToken.None).GetAwaiter().GetResult())!, diagnostics);
+    }
+
+    private const string KnownFlowScopes = "new Dictionary<string, string>(StringComparer.Ordinal) { [\"read\"] = \"Read\" }";
+
+    [Theory]
+    [InlineData("[.. extra]")]
+    [InlineData("[\"read\", .. extra]")]
+    [InlineData("new List<string>(extra)")]
+    public void RequirementScopesWithUnknownElements_AreWrittenEmpty_WithAWarning(string scopes)
+    {
+        var (document, diagnostics) = BuildWith(KnownFlowScopes, scopes);
+
+        JsonNode.DeepEquals(document["security"], JsonNode.Parse("""[{ "oauth": [] }]""")).Should().BeTrue(document["security"]!.ToJsonString());
+        diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes);
+    }
+
+    [Theory]
+    [InlineData("new List<string>()")]
+    [InlineData("new List<string>(4)")]
+    public void EmptyOrCapacityRequirementScopes_AreAKnownEmptyList(string scopes)
+    {
+        var (document, diagnostics) = BuildWith(KnownFlowScopes, scopes);
+
+        JsonNode.DeepEquals(document["security"], JsonNode.Parse("""[{ "oauth": [] }]""")).Should().BeTrue();
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes);
+        document["components"]!["securitySchemes"]!["oauth"]!["flows"]!["implicit"]!["scopes"]!.ToJsonString().Should().Be("""{"read":"Read"}""");
+    }
+
+    [Fact]
+    public void FlowScopesCopiedFromAnotherDictionary_MakeTheSchemeNotStatic()
+    {
+        var (document, diagnostics) = BuildWith("new Dictionary<string, string>(baseScopes)", "[]");
+
+        document["components"]?["securitySchemes"]?.AsObject().ContainsKey("oauth").Should().NotBe(true);
+        diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeNotStatic)
+            .Which.Subjects.Should().Equal("oauth");
+    }
 }
