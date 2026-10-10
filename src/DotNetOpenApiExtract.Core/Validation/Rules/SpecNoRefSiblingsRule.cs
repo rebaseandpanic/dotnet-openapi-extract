@@ -137,10 +137,14 @@ public sealed class SpecNoRefSiblingsRule : IValidationRule
     private static bool HasSiblingContent(OpenApiSchemaReference refSchema)
     {
         // A $ref with sibling content is detectable when the reference holder has
-        // locally-overriding fields that should not co-exist with $ref in OAS 3.0.
-        return !string.IsNullOrEmpty(refSchema.Description)
-            || !string.IsNullOrEmpty(refSchema.Title)
-            || (refSchema.Extensions != null && refSchema.Extensions.Count > 0);
+        // locally-overriding fields that should not co-exist with $ref in OAS 3.0. Only the
+        // reference's own fields count: OpenApiSchemaReference.Description / Title / Extensions
+        // fall back to the target schema when the reference is resolved (a document read from a
+        // file), so a clean $ref to a described component would look like one with siblings.
+        var local = refSchema.Reference;
+        return !string.IsNullOrEmpty(local.Description)
+            || !string.IsNullOrEmpty(local.Title)
+            || (local.Extensions != null && local.Extensions.Count > 0);
     }
 
     private IEnumerable<ValidationViolation> WalkSchemaForRefSiblings(OpenApiSchema schema, string pointer)
