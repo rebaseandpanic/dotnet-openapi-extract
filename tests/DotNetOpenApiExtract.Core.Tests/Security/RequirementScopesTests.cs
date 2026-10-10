@@ -165,6 +165,7 @@ public class RequirementScopesTests(RequirementScopesFixture fixture) : IClassFi
     [InlineData("[.. extra]")]
     [InlineData("[\"read\", .. extra]")]
     [InlineData("new List<string>(extra)")]
+    [InlineData("new string[extra.Count]")]
     public void RequirementScopesWithUnknownElements_AreWrittenEmpty_WithAWarning(string scopes)
     {
         var (document, diagnostics) = BuildWith(KnownFlowScopes, scopes);
@@ -176,6 +177,11 @@ public class RequirementScopesTests(RequirementScopesFixture fixture) : IClassFi
     [Theory]
     [InlineData("new List<string>()")]
     [InlineData("new List<string>(4)")]
+    [InlineData("Array.Empty<string>()")]
+    [InlineData("System.Array.Empty<string>()")]
+    [InlineData("[]")]
+    [InlineData("new string[0]")]
+    [InlineData("new string[] { }")]
     public void EmptyOrCapacityRequirementScopes_AreAKnownEmptyList(string scopes)
     {
         var (document, diagnostics) = BuildWith(KnownFlowScopes, scopes);

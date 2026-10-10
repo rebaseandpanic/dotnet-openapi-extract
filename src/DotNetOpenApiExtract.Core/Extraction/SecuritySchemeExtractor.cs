@@ -752,7 +752,8 @@ public static class SecuritySchemeExtractor
     /// The scopes listed for the scheme reference <paramref name="reference"/> in its requirement: the
     /// value of its pair <c>{ key, scopes }</c> or <c>[key] = scopes</c>, where the key is the reference
     /// or the expression that contains it. Scopes are a collection expression, an array or a list
-    /// initializer of literal or constant strings; empty when the pair is not found. Scopes that are
+    /// initializer of literal or constant strings, or an empty array (<c>Array.Empty&lt;string&gt;()</c>,
+    /// <c>new string[0]</c>); empty when the pair is not found. Scopes that are
     /// not literals are dropped with a warning.
     /// </summary>
     private static IReadOnlyList<string> ScopesOf(
@@ -778,8 +779,10 @@ public static class SecuritySchemeExtractor
                 CollectionExpressionSyntax collection when collection.Elements.All(e => e is ExpressionElementSyntax)
                     => collection.Elements.Cast<ExpressionElementSyntax>().Select(e => e.Expression),
                 ArrayCreationExpressionSyntax { Initializer: { } array } => array.Expressions,
+                ArrayCreationExpressionSyntax { Initializer: null } sized when IsZeroLength(sized) => [],
                 ImplicitArrayCreationExpressionSyntax { Initializer: { } implicitArray } => implicitArray.Expressions,
                 BaseObjectCreationExpressionSyntax created when OnlyCapacityOrComparer(created) => created.Initializer?.Expressions ?? [],
+                InvocationExpressionSyntax call when IsArrayEmpty(call) => [],
                 _ => null,
             };
             var scopes = items?.Select(item => InvocationMatcher.GetStringValue(item, compilation)).ToList();
@@ -799,6 +802,20 @@ public static class SecuritySchemeExtractor
 
         return [];
     }
+
+    /// <summary>An array created with the length <c>0</c> and no initializer: <c>new string[0]</c>.</summary>
+    private static bool IsZeroLength(ArrayCreationExpressionSyntax array) =>
+        array.Type.RankSpecifiers is [{ Sizes: [LiteralExpressionSyntax { Token.Value: 0 }] }];
+
+    /// <summary><c>Array.Empty&lt;T&gt;()</c> (also qualified as <c>System.Array</c>): an empty array.</summary>
+    private static bool IsArrayEmpty(InvocationExpressionSyntax call) =>
+        call.ArgumentList.Arguments.Count == 0
+        && call.Expression is MemberAccessExpressionSyntax
+        {
+            Name: GenericNameSyntax { Identifier.Text: "Empty", TypeArgumentList.Arguments.Count: 1 },
+            Expression: var owner,
+        }
+        && owner.ToString() is "Array" or "System.Array" or "global::System.Array";
 
     /// <summary>
     /// Whether <paramref name="creation"/> is the key of a requirement entry: the first element of
