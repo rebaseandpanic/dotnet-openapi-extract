@@ -105,6 +105,7 @@ internal static class DownlevelPass
                 TargetVersion   = targetVersion,
                 Feature         = entry.Feature,
                 Location        = location,
+                SourceLocation  = entry.SourceLocation,
                 Action          = entry.Action,
                 ExtensionName   = entry.ExtensionName,
                 RequiredVersion = entry.RequiredVersion,

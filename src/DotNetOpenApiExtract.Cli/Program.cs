@@ -279,7 +279,14 @@ var noEnumVarnamesOption = new Option<bool>("--no-enum-varnames")
 // ── Root command ──────────────────────────────────────────────────────────────
 
 var rootCommand = new RootCommand(
-    "Extract an OpenAPI specification from a compiled .NET assembly without running the application");
+    "Extract an OpenAPI specification from a compiled .NET assembly without running the application.\n\n" +
+    "Program.cs is read as source code and never run, so configuration that exists only at run time is not seen: " +
+    "values from IConfiguration, appsettings and environment variables, anything computed at startup, and Swashbuckle " +
+    "filters (IDocumentFilter, IOperationFilter, ISchemaFilter) or AddOpenApi transformers. A value the tool recognizes " +
+    "but cannot compute is reported as a warning with its file:line and, where one exists, the flag that sets it. " +
+    "Title, Version, Description, Contact and TermsOfService of SwaggerDoc are not read from Program.cs. " +
+    "Set document metadata explicitly with --title, --version, --description, --summary, --contact-name, " +
+    "--contact-email, --contact-url, --license-name, --license-url, --license-identifier, --terms-of-service and --server.");
 
 // Remove the built-in --version option so our --version (document version) option is unambiguous.
 // The framework's VersionOption occupies the same name and short-circuits normal command handling.

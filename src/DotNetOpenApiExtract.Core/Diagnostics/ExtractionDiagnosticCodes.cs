@@ -6,10 +6,16 @@ public static class ExtractionDiagnosticCodes
     /// <summary>A security scheme name is registered more than once; the first registration wins. Subjects: the scheme name.</summary>
     public const string SecurityDuplicateScheme = "security.duplicate-scheme";
 
-    /// <summary><c>AddSecurityDefinition</c> is called with a name that is neither a literal nor a constant; the call is skipped.</summary>
+    /// <summary>
+    /// <c>AddSecurityDefinition</c> is called with a name that is neither a literal nor a constant; the call is skipped.
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the call.
+    /// </summary>
     public const string SecurityDefinitionNonLiteralName = "security.definition-non-literal-name";
 
-    /// <summary><c>AddSecurityRequirement</c> names a scheme with a value that is neither a literal nor a constant; the name is skipped.</summary>
+    /// <summary>
+    /// <c>AddSecurityRequirement</c> names a scheme with a value that is neither a literal nor a constant; the name is skipped.
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the value. Subjects: the expression.
+    /// </summary>
     public const string SecurityRequirementNonLiteralScheme = "security.requirement-non-literal-scheme";
 
     /// <summary>
@@ -200,9 +206,10 @@ public static class ExtractionDiagnosticCodes
 
     /// <summary>
     /// An <c>AddSecurityDefinition</c> declaration needs a value that cannot be resolved statically
-    /// (OAuth2 flows, their URLs or scopes, the OpenID Connect or OAuth2 metadata URL,
-    /// <c>Deprecated</c>): the scheme is omitted, with the requirements that name it. Location:
-    /// <c>#/components/securitySchemes/{name}</c>. Subjects: the scheme name.
+    /// (<c>Type</c>, <c>In</c>, <c>Name</c>, <c>Scheme</c>, OAuth2 flows, their URLs or scopes, the OpenID
+    /// Connect or OAuth2 metadata URL, <c>Deprecated</c>): the scheme is omitted, with the requirements
+    /// that name it. Location: <c>#/components/securitySchemes/{name}</c>.
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the declaration. Subjects: the scheme name.
     /// </summary>
     public const string SecuritySchemeNotStatic = "security.scheme-not-static";
 
@@ -234,7 +241,8 @@ public static class ExtractionDiagnosticCodes
 
     /// <summary>
     /// The scopes listed for a scheme in <c>AddSecurityRequirement</c> cannot be resolved statically;
-    /// they are written as an empty list. Subjects: the scopes expression.
+    /// they are written as an empty list. <see cref="ExtractionDiagnostic.SourceLocation"/>: the
+    /// scopes. Subjects: the scopes expression.
     /// </summary>
     public const string SecurityRequirementNonLiteralScopes = "security.requirement-non-literal-scopes";
 
@@ -294,10 +302,40 @@ public static class ExtractionDiagnosticCodes
     /// Document metadata in Program.cs is not an object creation the extractor reads (a variable, a
     /// call): the <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / an <c>Info = …</c> assignment, its
     /// <c>License</c> or <c>ExternalDocs</c>, an <c>AddTag</c> argument or a tag's <c>ExternalDocs</c>.
-    /// The fields it holds (license, summary, externalDocs, tag fields) are not written. Subjects: the
-    /// member or call and the expression.
+    /// The fields it holds (license, summary, externalDocs, tag fields) are not written. Also a value
+    /// of a field that is read — the info <c>Summary</c>, the license <c>Name</c> / <c>Url</c> /
+    /// <c>Identifier</c>, the external docs <c>Url</c> / <c>Description</c> — that is not a constant
+    /// string. <see cref="ExtractionDiagnostic.SourceLocation"/>: the value. Subjects: the member or call,
+    /// the expression, then the CLI flags that set the value instead (<c>--summary</c>,
+    /// <c>--license-name</c>, <c>--license-url</c>, <c>--license-identifier</c>), when there are any.
     /// </summary>
     public const string DocumentMetadataNotStatic = "document.metadata-not-static";
+
+    /// <summary>
+    /// A descriptive field of an <c>AddSecurityDefinition</c> declaration (<c>Description</c>,
+    /// <c>BearerFormat</c>) cannot be resolved statically (a variable, a call, configuration): the
+    /// scheme is written without it. Location: the field in <c>#/components/securitySchemes/{name}</c>.
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the value in the source. Subjects: the scheme
+    /// name, the field and the expression.
+    /// </summary>
+    public const string SecuritySchemeFieldNotStatic = "security.scheme-field-not-static";
+
+    /// <summary>
+    /// An <c>AddSecurityRequirement</c> call whose requirement is not an object creation the extractor
+    /// reads (a variable, a call, a lambda returning one): the requirement is not written.
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the call. Subjects: the expression.
+    /// </summary>
+    public const string SecurityRequirementNotStatic = "security.requirement-not-static";
+
+    /// <summary>
+    /// Program.cs registers a document or operation filter (<c>DocumentFilter&lt;T&gt;</c>,
+    /// <c>OperationFilter&lt;T&gt;</c>, their <c>Add…FilterInstance</c> forms, or a document or operation
+    /// transformer of <c>AddOpenApi</c>) and no <c>AddSecurityRequirement</c> is read: the filter runs at
+    /// run time and may set the security requirements, which the document then lacks. One per
+    /// registration. <see cref="ExtractionDiagnostic.SourceLocation"/>: the registration. Subjects: the
+    /// registration method and the filter.
+    /// </summary>
+    public const string SecurityRequirementsMayComeFromFilter = "security.requirements-may-come-from-filter";
 
     /// <summary>A <c>[JsonConverter]</c> type is not in the registry of known converters; the schema is left unchanged. Subjects: the converter type.</summary>
     public const string SchemaUnknownJsonConverter = "schema.unknown-json-converter";

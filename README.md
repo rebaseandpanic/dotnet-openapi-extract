@@ -181,7 +181,8 @@ From `Program.cs` via Roslyn (when sources are available):
 - Request body media types from `[Consumes]` (action, then controller, then a global filter; default `application/json`); a form body uses its `[Consumes]` media type (e.g. `application/x-www-form-urlencoded`), default `multipart/form-data`
 - Document-level tags with descriptions, `externalDocs` and the OpenAPI 3.2 `summary` / `parent` / `kind` from `c.AddTag(...)`; `info.summary` and the license (`name`, `url`, `identifier`) from the `OpenApiInfo` of `SwaggerDoc(...)` / `AddOpenApi(...)` (options and CLI flags win field by field)
 - FQN-prefixed types and enums (`new Microsoft.OpenApi.OpenApiSecurityScheme { Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey }`), and target-typed creations (`c.SwaggerDoc("v1", new() { License = new() { Name = "MIT", Url = new("…") } })`, `AddSecurityDefinition("x", new() { … })`, `Reference = new() { … }`, `[new("x", document)] = []`). Document metadata that is not an object creation (`c.SwaggerDoc("v1", info)`, `License = license`, `AddTag(tag)`) is reported with the warning `document.metadata-not-static`; a security definition built that way is omitted with `security.scheme-not-static`
-- In-project `const string` values via `SemanticModel.GetConstantValue`
+- Strings from literals (plain, verbatim, raw `"""…"""`), literal concatenation, in-project `const string` members of any class, `nameof(...)` and interpolation of constants (`SemanticModel.GetConstantValue`)
+- Both Swashbuckle API generations: `Microsoft.OpenApi.Models.*` with `Reference = new OpenApiReference { … }` (Swashbuckle ≤ 9) and `Microsoft.OpenApi.*` with `new OpenApiSecuritySchemeReference("x", document)` as a collection or index initializer key, in an expression or block lambda (Swashbuckle 10)
 
 For every OpenAPI field the tool emits, could emit or never emits — its source in C#, its form in OpenAPI 3.0, 3.1 and 3.2, its warning and its validation rule — see the [OpenAPI Field Catalog](docs/specs/openapi-field-catalog.md).
 
@@ -199,21 +200,40 @@ For every OpenAPI field the tool emits, could emit or never emits — its source
 | Dictionary keys (`propertyNames`, OpenAPI 3.1/3.2) | An approximation that is never narrower than System.Text.Json: integer keys are a digit pattern without the type's range (`"300"` passes for a `byte` key), unsigned keys also accept a leading `+` that System.Text.Json 10 rejects, and string and enum keys are not constrained. OpenAPI 3.0 has no `propertyNames` and leaves keys unconstrained |
 | Serializing a library-built document into another OpenAPI version | The document is built for `OpenApiDocumentOptions.OpenApiVersion` (default 3.0) and is serialized only into that version; the CLI always builds, validates and serializes for one version |
 
-### Runtime-only Program.cs patterns
+### What the tool cannot see in Program.cs
 
-When analyzing `Program.cs` via Roslyn for security schemes, response headers, global options, etc.,
-the tool recognizes common patterns but cannot resolve values known only at runtime.
+`Program.cs` is read as source code and never run. Configuration that exists only when the
+application runs is therefore not seen:
 
 | Pattern | Example | Why |
 |---------|---------|-----|
-| `IConfiguration` values | `Type = config["Auth:Scheme"]` | Value comes from `appsettings.json` / env vars at runtime |
+| `IConfiguration` and environment values | `Name = builder.Configuration["Auth:Header"]`, `Summary = Environment.GetEnvironmentVariable("API_SUMMARY")` | Value comes from `appsettings.json` / env vars at runtime |
+| Values computed at startup | `Description = BuildDescription()`, `SwaggerDoc("v1", info)` with `info` built elsewhere | The code that computes them is not run |
+| Swashbuckle filters and `AddOpenApi` transformers | `c.OperationFilter<SecurityRequirementsFilter>()`, `o.AddDocumentTransformer<T>()` | Arbitrary code that edits the document at runtime |
 | Conditional registration | `if (env.IsDevelopment()) services.AddX()` | Depends on runtime environment |
 | DI-factory registration | `services.AddScoped<ISchemeProvider>(sp => sp.GetRequiredService<X>())` | Resolved from runtime DI graph |
 | Assembly-scan plugin discovery | `services.Scan(...).AddClasses(...)` | Types discovered by runtime reflection |
 | Runtime interpolation | `Headers.Append($"X-{variable}", ...)` | Variable value known only at runtime |
 
-These patterns are skipped silently (or with a warning to stderr). If your project relies heavily
-on runtime-resolved configuration, consider a [Swashbuckle CLI tofile](https://github.com/domaindrivendev/Swashbuckle.AspNetCore/blob/master/README.md#swashbuckle-cli-tool-for-net-core)
+Values written as literals (plain, verbatim, raw `"""…"""`), concatenations of literals, `const`
+members of any class of the project, `nameof(...)` and interpolations of constants are read. A value
+the tool recognizes but cannot compute is never dropped silently: it gives a warning with its
+`file:line` (`ExtractionDiagnostic.SourceLocation`) and, where one exists, the CLI flag that sets it:
+
+| Warning code | When | Result |
+|---|---|---|
+| `document.metadata-not-static` | `SwaggerDoc` info, its `Summary`, `License` (`Name`, `Url`, `Identifier`) or `ExternalDocs` is not a creation / literal / constant | the field is not written; the subjects end with the flags (`--summary`, `--license-name`, `--license-url`, `--license-identifier`) |
+| `security.scheme-not-static` | `Type`, `In`, `Name`, `Scheme` of a security scheme, or a value an OAuth2 / OpenID Connect scheme needs | the scheme is omitted, with the requirements that name it |
+| `security.scheme-field-not-static` | `Description` or `BearerFormat` of a security scheme | the scheme is written without the field |
+| `security.requirement-not-static` | `AddSecurityRequirement(requirement)` or a lambda returning something that is not an object creation | the requirement is not written |
+| `security.requirements-may-come-from-filter` | a document / operation filter or transformer is registered and no `AddSecurityRequirement` is read | nothing changes; the filter may set requirements the document lacks |
+
+`Title`, `Version`, `Description`, `Contact` and `TermsOfService` of `SwaggerDoc` are not read from
+`Program.cs` at all; they come from the flags and the assembly attributes. Set document metadata the
+tool cannot see with `--title`, `--version`, `--description`, `--summary`, `--contact-name`,
+`--contact-email`, `--contact-url`, `--license-name`, `--license-url`, `--license-identifier`,
+`--terms-of-service` and `--server`. If your project relies heavily on runtime-resolved configuration,
+consider a [Swashbuckle CLI tofile](https://github.com/domaindrivendev/Swashbuckle.AspNetCore/blob/master/README.md#swashbuckle-cli-tool-for-net-core)
 approach which executes the assembly partially instead of analyzing it statically.
 
 ## Dependencies

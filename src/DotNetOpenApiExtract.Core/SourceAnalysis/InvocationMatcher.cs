@@ -190,8 +190,11 @@ public static class InvocationMatcher
     }
 
     /// <summary>
-    /// Attempts to extract a string value from an expression using three strategies:
-    /// literal, interpolated-literal, then semantic constant resolution.
+    /// Attempts to extract a string value from an expression: the constant string C# itself would
+    /// compute for it. Literals (plain, verbatim and raw), parentheses, concatenation with <c>+</c> and
+    /// interpolation are folded syntactically when every part is a string; anything else (in-project
+    /// <c>const string</c> members, <c>nameof</c>, a mix of these with literals) goes through the
+    /// semantic model.
     /// </summary>
     /// <param name="expression">The expression to resolve.</param>
     /// <param name="compilation">
@@ -199,31 +202,57 @@ public static class InvocationMatcher
     /// When <see langword="null"/>, only syntactic strategies are attempted.
     /// </param>
     private static string? ExtractStringValue(ExpressionSyntax expression, CSharpCompilation? compilation)
+        => FoldString(expression) ?? SemanticConstant(expression, compilation);
+
+    /// <summary>
+    /// The string <paramref name="expression"/> stands for when it is built only from string literals:
+    /// a literal, a parenthesized one, <c>a + b</c> of two such strings, or an interpolated string whose
+    /// holes are such strings without alignment or format. <see langword="null"/> otherwise — a
+    /// non-string literal in a hole is not a constant in C# either.
+    /// </summary>
+    private static string? FoldString(ExpressionSyntax expression)
     {
-        // Strategy 1: plain or verbatim string literal
-        if (expression is LiteralExpressionSyntax lit &&
-            lit.Token.Value is string s)
+        switch (expression)
         {
-            return s;
+            case LiteralExpressionSyntax lit when lit.Token.Value is string s:
+                return s;
+
+            case ParenthesizedExpressionSyntax paren:
+                return FoldString(paren.Expression);
+
+            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
+                return FoldString(binary.Left) is { } left && FoldString(binary.Right) is { } right ? left + right : null;
+
+            case InterpolatedStringExpressionSyntax interp:
+                var sb = new StringBuilder();
+                foreach (var content in interp.Contents)
+                {
+                    switch (content)
+                    {
+                        case InterpolatedStringTextSyntax text:
+                            sb.Append(text.TextToken.ValueText);
+                            break;
+                        case InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
+                            when FoldString(hole.Expression) is { } part:
+                            sb.Append(part);
+                            break;
+                        default:
+                            return null;
+                    }
+                }
+
+                return sb.ToString();
+
+            default:
+                return null;
         }
+    }
 
-        // Strategy 2: interpolated string with only literal content (no {expression} holes)
-        // e.g. $"/api/v1" where every Content is InterpolatedStringTextSyntax.
-        if (expression is InterpolatedStringExpressionSyntax interp)
-        {
-            var sb = new StringBuilder();
-            foreach (var content in interp.Contents)
-            {
-                if (content is InterpolatedStringTextSyntax text)
-                    sb.Append(text.TextToken.ValueText);
-                else
-                    return null; // has {expression} hole — not a static literal
-            }
-
-            return sb.ToString();
-        }
-
-        // Strategy 3: compile-time constant via semantic model (in-project consts)
+    /// <summary>The constant string value the semantic model computes for <paramref name="expression"/>, if any.</summary>
+    private static string? SemanticConstant(ExpressionSyntax expression, CSharpCompilation? compilation)
+    {
+        // Compile-time constant via the semantic model: in-project consts, nameof, constant
+        // interpolation and concatenation that mix them with literals.
         if (compilation != null)
         {
             try

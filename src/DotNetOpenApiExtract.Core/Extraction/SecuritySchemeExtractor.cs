@@ -64,6 +64,13 @@ public sealed class SecuritySchemeExtractionResult
         new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
+    /// Where each <c>AddSecurityDefinition</c> with a resolved name stands in the source (<c>file:line</c>,
+    /// see <see cref="ExtractionDiagnostic.SourceLocation"/>), by scheme name; the first declaration of a name.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> DefinitionLocations { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
     /// [DEPRECATED] All scheme names from <see cref="GlobalRequirements"/>, flattened in
     /// order. The flattening loses which names are alternatives and which must be combined.
     /// Setting it replaces <see cref="GlobalRequirements"/> with a single requirement that
@@ -166,21 +173,25 @@ public static class SecuritySchemeExtractor
         }
 
         // ── 2. AddSecurityDefinition registrations ────────────────────────────
+        var compilation = context.CompilationResult?.Compilation;
+        var locations = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddSecurityDefinition"))
         {
-            var name = InvocationMatcher.GetLiteralStringArgument(
-                invocation, 0, context.CompilationResult?.Compilation);
+            var where = SourceLocations.Of(invocation, context);
+            var name = InvocationMatcher.GetLiteralStringArgument(invocation, 0, compilation);
             if (string.IsNullOrWhiteSpace(name))
             {
                 DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
                 {
-                    Code    = ExtractionDiagnosticCodes.SecurityDefinitionNonLiteralName,
-                    Message = "AddSecurityDefinition call with non-literal name — skipped.",
+                    Code           = ExtractionDiagnosticCodes.SecurityDefinitionNonLiteralName,
+                    Message        = $"{where}: AddSecurityDefinition call with non-literal name — skipped.",
+                    SourceLocation = where,
                 });
                 continue;
             }
 
-            var scheme = TryParseSecuritySchemeFromInvocation(invocation, name!, context.CompilationResult?.Compilation, out var notStatic, out var invalidUri);
+            locations.TryAdd(name!, where);
+            var scheme = TryParseSecuritySchemeFromInvocation(invocation, name!, compilation, out var notStatic, out var invalidUri, out var skippedFields);
             if (notStatic)
             {
                 if (!schemes.ContainsKey(name!) && !omitted.Contains(name!))
@@ -199,6 +210,23 @@ public static class SecuritySchemeExtractor
                 if (!schemes.TryAdd(name!, scheme))
                 {
                     WarnDuplicateScheme(onDiagnostic, name!);
+                    continue;
+                }
+
+                foreach (var (field, value) in skippedFields)
+                {
+                    var valueWhere = SourceLocations.Of(value, context);
+                    var pointer = $"{Validation.JsonPointerHelper.ForSecurityScheme(name!)}/{JsonFieldName(field)}";
+                    DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                    {
+                        Code           = ExtractionDiagnosticCodes.SecuritySchemeFieldNotStatic,
+                        Message        = $"{valueWhere}: security scheme '{name}': {field} = {value} cannot be resolved statically — " +
+                                         "the scheme is written without it.",
+                        Feature        = $"securityScheme.{JsonFieldName(field)}",
+                        Location       = pointer,
+                        SourceLocation = valueWhere,
+                        Subjects       = [name!, field, value.ToString()],
+                    });
                 }
             }
         }
@@ -206,13 +234,34 @@ public static class SecuritySchemeExtractor
         // ── 3. AddSecurityRequirement registrations ───────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddSecurityRequirement"))
         {
+            // A requirement that is not an object creation (a variable, a call, a lambda returning one)
+            // cannot be read: reported, never guessed.
+            foreach (var requirement in RequirementExpressions(invocation))
+            {
+                if (ObjectCreations.Of(requirement) != null)
+                    continue;
+                var where = SourceLocations.Of(requirement, context);
+                DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+                {
+                    Code           = ExtractionDiagnosticCodes.SecurityRequirementNotStatic,
+                    Message        = $"{where}: AddSecurityRequirement: {requirement} is not an object creation the extractor can read — " +
+                                     "the requirement is not written.",
+                    Feature        = "security",
+                    SourceLocation = where,
+                    Subjects       = [requirement.ToString()],
+                });
+            }
+
             // One call = one Security Requirement Object: its names are combined (AND),
             // separate calls are alternatives (OR).
-            var entries = TryExtractRequirementSchemeNames(
-                invocation, context.CompilationResult?.Compilation, onDiagnostic);
+            var entries = TryExtractRequirementSchemeNames(invocation, context, onDiagnostic);
             if (entries.Count > 0)
                 globalRequirements.Add(entries);
         }
+
+        // ── 4. Filters that may set the requirements at run time ──────────────
+        if (globalRequirements.Count == 0)
+            WarnFiltersWithoutRequirements(context, onDiagnostic);
 
         return new SecuritySchemeExtractionResult
         {
@@ -221,7 +270,81 @@ public static class SecuritySchemeExtractor
             OmittedSchemes = omitted.Where(n => !schemes.ContainsKey(n)).ToList(),
             SchemesWithInvalidUri = invalidUris.Where(e => !schemes.ContainsKey(e.Key))
                 .ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal),
+            DefinitionLocations = locations,
         };
+    }
+
+    /// <summary>The OpenAPI name of a scheme field read from its C# property.</summary>
+    private static string JsonFieldName(string field) => field switch
+    {
+        "BearerFormat" => "bearerFormat",
+        _ => "description",
+    };
+
+    /// <summary>
+    /// The expressions that give the requirement of an <c>AddSecurityRequirement</c> call: its argument,
+    /// or for a lambda <c>document =&gt; …</c> its expression body or the value of every <c>return</c> in
+    /// its block body (not those of nested lambdas).
+    /// </summary>
+    private static IEnumerable<ExpressionSyntax> RequirementExpressions(InvocationExpressionSyntax invocation)
+    {
+        if (invocation.ArgumentList.Arguments is not [var argument, ..])
+            yield break;
+
+        if (ObjectCreations.Unwrap(argument.Expression) is not LambdaExpressionSyntax lambda)
+        {
+            yield return argument.Expression;
+            yield break;
+        }
+
+        if (lambda.ExpressionBody is { } body)
+        {
+            yield return body;
+            yield break;
+        }
+
+        foreach (var ret in lambda.Block?.DescendantNodes(node => node is not AnonymousFunctionExpressionSyntax and not LocalFunctionStatementSyntax)
+                     .OfType<ReturnStatementSyntax>() ?? [])
+        {
+            if (ret.Expression != null)
+                yield return ret.Expression;
+        }
+    }
+
+    /// <summary>Registrations of filters and transformers that run on the finished document or operation.</summary>
+    private static readonly string[] FilterRegistrations =
+    [
+        "DocumentFilter", "OperationFilter", "AddDocumentFilterInstance", "AddOperationFilterInstance",
+        "AddDocumentTransformer", "AddOperationTransformer",
+    ];
+
+    /// <summary>
+    /// One warning per document or operation filter (or <c>AddOpenApi</c> transformer) registered in
+    /// Program.cs, when no security requirement is read: such a filter may set the requirements at run
+    /// time, which static reading does not see.
+    /// </summary>
+    private static void WarnFiltersWithoutRequirements(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
+    {
+        foreach (var method in FilterRegistrations)
+        foreach (var invocation in InvocationMatcher.FindInvocations(context, method))
+        {
+            var filter = invocation.Expression switch
+            {
+                MemberAccessExpressionSyntax { Name: GenericNameSyntax generic } => generic.TypeArgumentList.Arguments.ToString(),
+                GenericNameSyntax generic => generic.TypeArgumentList.Arguments.ToString(),
+                _ => invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString() ?? string.Empty,
+            };
+            var where = SourceLocations.Of(invocation, context);
+            DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+            {
+                Code           = ExtractionDiagnosticCodes.SecurityRequirementsMayComeFromFilter,
+                Message        = $"{where}: {method} registers {filter}, and no AddSecurityRequirement is read: if the filter sets " +
+                                 "security requirements at run time, the document does not have them.",
+                Feature        = "security",
+                SourceLocation = where,
+                Subjects       = [method, filter],
+            });
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -235,10 +358,12 @@ public static class SecuritySchemeExtractor
     /// with <paramref name="notStatic"/> set when a value the scheme needs cannot be resolved statically.
     /// </summary>
     private static OpenApiSecurityScheme? TryParseSecuritySchemeFromInvocation(
-        InvocationExpressionSyntax invocation, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri)
+        InvocationExpressionSyntax invocation, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri,
+        out IReadOnlyList<(string Field, ExpressionSyntax Value)> skippedFields)
     {
         notStatic = false;
         invalidUri = null;
+        skippedFields = [];
         var args = invocation.ArgumentList.Arguments;
         if (args.Count < 2)
             return null;
@@ -255,7 +380,7 @@ public static class SecuritySchemeExtractor
         if (!ObjectCreations.Creates(objCreation, name => name.Contains("SecurityScheme", StringComparison.Ordinal)))
             return null;
 
-        return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic, out invalidUri);
+        return ParseObjectInitializer(objCreation.Initializer, schemeName, compilation, out notStatic, out invalidUri, out skippedFields);
     }
 
     /// <summary>
@@ -268,10 +393,12 @@ public static class SecuritySchemeExtractor
     /// document can hold it.
     /// </summary>
     private static OpenApiSecurityScheme? ParseObjectInitializer(
-        InitializerExpressionSyntax? initializer, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri)
+        InitializerExpressionSyntax? initializer, string schemeName, CSharpCompilation? compilation, out bool notStatic, out string? invalidUri,
+        out IReadOnlyList<(string Field, ExpressionSyntax Value)> skippedFields)
     {
         notStatic = false;
         invalidUri = null;
+        skippedFields = [];
         if (initializer == null)
             return null;
 
@@ -291,32 +418,35 @@ public static class SecuritySchemeExtractor
 
             switch (propName)
             {
+                // Type, In, Name and Scheme decide what the scheme is: one that cannot be resolved
+                // statically keeps the whole scheme out (a scheme without them is not the one served).
                 case "Type":
                     scheme.Type = ParseSecuritySchemeType(value);
-                    break;
-
-                case "Scheme":
-                    if (value is LiteralExpressionSyntax schemeLit && schemeLit.Token.Value is string s)
-                        scheme.Scheme = s;
-                    break;
-
-                case "BearerFormat":
-                    if (value is LiteralExpressionSyntax bfLit && bfLit.Token.Value is string bf)
-                        scheme.BearerFormat = bf;
-                    break;
-
-                case "Description":
-                    if (value is LiteralExpressionSyntax descLit && descLit.Token.Value is string desc)
-                        scheme.Description = desc;
-                    break;
-
-                case "Name":
-                    if (value is LiteralExpressionSyntax nameLit && nameLit.Token.Value is string n)
-                        scheme.Name = n;
+                    if (scheme.Type == null && !IsNoValue(value))
+                        issues.Unresolved = true;
                     break;
 
                 case "In":
                     scheme.In = ParseParameterLocation(value);
+                    if (scheme.In == null && !IsNoValue(value))
+                        issues.Unresolved = true;
+                    break;
+
+                case "Scheme":
+                    scheme.Scheme = RequiredString(value, compilation, issues);
+                    break;
+
+                case "Name":
+                    scheme.Name = RequiredString(value, compilation, issues);
+                    break;
+
+                // Descriptive values: one that cannot be resolved statically is left out with a warning.
+                case "BearerFormat":
+                    scheme.BearerFormat = DescriptiveString("BearerFormat", value, compilation, issues);
+                    break;
+
+                case "Description":
+                    scheme.Description = DescriptiveString("Description", value, compilation, issues);
                     break;
 
                 case "Flows":
@@ -343,15 +473,17 @@ public static class SecuritySchemeExtractor
             }
         }
 
-        // A scheme without a Type is not useful — skip it.
-        if (scheme.Type == null)
-            return null;
-
         if (issues.Unresolved)
         {
             notStatic = true;
             return null;
         }
+
+        // A scheme without a Type is not useful — skip it.
+        if (scheme.Type == null)
+            return null;
+
+        skippedFields = issues.SkippedFields;
 
         if (issues.InvalidUri != null)
         {
@@ -421,7 +553,7 @@ public static class SecuritySchemeExtractor
             _ => false,
         }) ?? true;
 
-    /// <summary>What reading a security scheme initializer found that keeps the scheme out of the document.</summary>
+    /// <summary>What reading a security scheme initializer found that keeps the scheme or a field of it out of the document.</summary>
     private sealed class ParseIssues
     {
         /// <summary>A value that cannot be resolved statically (a variable, a call).</summary>
@@ -429,6 +561,37 @@ public static class SecuritySchemeExtractor
 
         /// <summary>The first literal or constant URL that is not a URI reference.</summary>
         public string? InvalidUri { get; set; }
+
+        /// <summary>Descriptive fields left out because their value cannot be resolved statically.</summary>
+        public List<(string Field, ExpressionSyntax Value)> SkippedFields { get; } = [];
+    }
+
+    /// <summary>
+    /// A string the scheme needs (<c>Name</c>, <c>Scheme</c>): a literal or a constant; <c>null</c> /
+    /// <c>default</c> is a known absence; anything else marks <paramref name="issues"/> unresolved.
+    /// </summary>
+    private static string? RequiredString(ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
+    {
+        if (IsNoValue(value))
+            return null;
+        var text = InvocationMatcher.GetStringValue(value, compilation);
+        if (text == null)
+            issues.Unresolved = true;
+        return text;
+    }
+
+    /// <summary>
+    /// A descriptive string (<c>Description</c>, <c>BearerFormat</c>): a literal or a constant; anything
+    /// else but <c>null</c> / <c>default</c> is recorded in <paramref name="issues"/> and left out.
+    /// </summary>
+    private static string? DescriptiveString(string field, ExpressionSyntax value, CSharpCompilation? compilation, ParseIssues issues)
+    {
+        if (IsNoValue(value))
+            return null;
+        var text = InvocationMatcher.GetStringValue(value, compilation);
+        if (text == null)
+            issues.SkippedFields.Add((field, value));
+        return text;
     }
 
     /// <summary>
@@ -636,9 +799,10 @@ public static class SecuritySchemeExtractor
     /// </param>
     private static IReadOnlyList<SecurityRequirementEntry> TryExtractRequirementSchemeNames(
         InvocationExpressionSyntax invocation,
-        CSharpCompilation? compilation,
+        SourceAnalysisContext context,
         Action<ExtractionDiagnostic>? onDiagnostic)
     {
+        var compilation = context.CompilationResult?.Compilation;
         // We look for scheme names (string literals or in-project string constants)
         // used as keys inside the object initializer.
         // Two patterns are supported (additive):
@@ -662,7 +826,7 @@ public static class SecuritySchemeExtractor
         void AddName(string name, SyntaxNode reference)
         {
             if (!string.IsNullOrWhiteSpace(name) && seen.Add(name))
-                names.Add(new SecurityRequirementEntry(name, ScopesOf(reference, invocation, compilation, onDiagnostic)));
+                names.Add(new SecurityRequirementEntry(name, ScopesOf(reference, invocation, context, onDiagnostic)));
         }
 
         // ── Pattern A: referenceId argument of new OpenApiSecuritySchemeReference(...) ──
@@ -689,7 +853,7 @@ public static class SecuritySchemeExtractor
 
             var resolvedName = InvocationMatcher.GetStringValue(referenceIdArg, compilation);
             if (resolvedName == null)
-                WarnNonLiteralRequirementSchemeName(onDiagnostic);
+                WarnNonLiteralRequirementSchemeName(onDiagnostic, referenceIdArg, context);
             else
                 AddName(resolvedName, objCreation);
         }
@@ -740,7 +904,7 @@ public static class SecuritySchemeExtractor
             // cannot be resolved statically and is reported as skipped.
             var idValue = InvocationMatcher.GetStringValue(idExpression, compilation);
             if (idValue == null)
-                WarnNonLiteralRequirementSchemeName(onDiagnostic);
+                WarnNonLiteralRequirementSchemeName(onDiagnostic, idExpression, context);
             else
                 AddName(idValue, objCreation);
         }
@@ -757,8 +921,9 @@ public static class SecuritySchemeExtractor
     /// not literals are dropped with a warning.
     /// </summary>
     private static IReadOnlyList<string> ScopesOf(
-        SyntaxNode reference, InvocationExpressionSyntax invocation, CSharpCompilation? compilation, Action<ExtractionDiagnostic>? onDiagnostic)
+        SyntaxNode reference, InvocationExpressionSyntax invocation, SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
+        var compilation = context.CompilationResult?.Compilation;
         for (var node = reference; node != null && node != invocation; node = node.Parent)
         {
             ExpressionSyntax? value = node.Parent switch
@@ -788,11 +953,13 @@ public static class SecuritySchemeExtractor
             var scopes = items?.Select(item => InvocationMatcher.GetStringValue(item, compilation)).ToList();
             if (scopes == null || scopes.Any(scope => scope == null))
             {
+                var where = SourceLocations.Of(value, context);
                 DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
                 {
-                    Code    = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes,
-                    Message = $"AddSecurityRequirement: the scopes {value} cannot be resolved statically — written as an empty list.",
-                    Subjects = [value.ToString()],
+                    Code           = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScopes,
+                    Message        = $"{where}: AddSecurityRequirement: the scopes {value} cannot be resolved statically — written as an empty list.",
+                    SourceLocation = where,
+                    Subjects       = [value.ToString()],
                 });
                 return [];
             }
@@ -851,12 +1018,18 @@ public static class SecuritySchemeExtractor
         return first != null && first.NameColon == null ? first.Expression : null;
     }
 
-    private static void WarnNonLiteralRequirementSchemeName(Action<ExtractionDiagnostic>? onDiagnostic)
-        => DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
+    private static void WarnNonLiteralRequirementSchemeName(
+        Action<ExtractionDiagnostic>? onDiagnostic, ExpressionSyntax name, SourceAnalysisContext context)
+    {
+        var where = SourceLocations.Of(name, context);
+        DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
         {
-            Code    = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScheme,
-            Message = "AddSecurityRequirement call with non-literal scheme name — skipped.",
+            Code           = ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScheme,
+            Message        = $"{where}: AddSecurityRequirement call with non-literal scheme name {name} — skipped.",
+            SourceLocation = where,
+            Subjects       = [name.ToString()],
         });
+    }
 
     private static void WarnDuplicateScheme(Action<ExtractionDiagnostic>? onDiagnostic, string schemeName)
         => DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic

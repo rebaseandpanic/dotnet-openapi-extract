@@ -146,7 +146,7 @@ public static class DocumentTagsExtractor
         {
             foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
             {
-                var (url, desc) = TryExtractRootExternalDocs(invocation);
+                var (url, desc) = TryExtractRootExternalDocs(invocation, compilation);
                 if (!string.IsNullOrWhiteSpace(url))
                 {
                     rootExternalDocsUrl ??= url;
@@ -288,7 +288,7 @@ public static class DocumentTagsExtractor
                     break;
 
                 case "ExternalDocs":
-                    var (url, extDesc) = ParseExternalDocsExpression(assignment.Right);
+                    var (url, extDesc) = ParseExternalDocsExpression(assignment.Right, compilation);
                     tag.ExternalDocsUrl = url;
                     tag.ExternalDocsDescription = extDesc;
                     break;
@@ -324,7 +324,7 @@ public static class DocumentTagsExtractor
     /// from an expression. Returns (null, null) when parsing fails.
     /// </summary>
     private static (string? url, string? description) ParseExternalDocsExpression(
-        ExpressionSyntax expression)
+        ExpressionSyntax expression, CSharpCompilation? compilation)
     {
         // new OpenApiExternalDocs { … } or the target-typed new() { … } (the member is an
         // OpenApiExternalDocs); loose type check on the explicit form.
@@ -332,7 +332,7 @@ public static class DocumentTagsExtractor
             || !ObjectCreations.Creates(objCreation, name => name.Contains("ExternalDoc", StringComparison.Ordinal)))
             return (null, null);
 
-        return ParseExternalDocsInitializer(objCreation.Initializer);
+        return ParseExternalDocsInitializer(objCreation.Initializer, compilation);
     }
 
     /// <summary>
@@ -340,7 +340,7 @@ public static class DocumentTagsExtractor
     /// object initializer.
     /// </summary>
     private static (string? url, string? description) ParseExternalDocsInitializer(
-        InitializerExpressionSyntax? initializer)
+        InitializerExpressionSyntax? initializer, CSharpCompilation? compilation)
     {
         if (initializer == null)
             return (null, null);
@@ -361,13 +361,11 @@ public static class DocumentTagsExtractor
             {
                 case "Url":
                     // Handle: new Uri("https://...") or just a string literal.
-                    url = TryExtractUriLiteral(assignment.Right);
+                    url = TryExtractUriLiteral(assignment.Right, compilation);
                     break;
 
                 case "Description":
-                    if (assignment.Right is LiteralExpressionSyntax descLit &&
-                        descLit.Token.Value is string desc)
-                        description = desc;
+                    description = InvocationMatcher.GetStringValue(assignment.Right, compilation);
                     break;
             }
         }
@@ -378,27 +376,18 @@ public static class DocumentTagsExtractor
     /// <summary>
     /// Extracts a URI string from either <c>new Uri("...")</c> or a plain string literal.
     /// </summary>
-    private static string? TryExtractUriLiteral(ExpressionSyntax expression, CSharpCompilation? compilation = null)
+    private static string? TryExtractUriLiteral(ExpressionSyntax expression, CSharpCompilation? compilation)
     {
-        while (expression is ParenthesizedExpressionSyntax paren)
-            expression = paren.Expression;
+        expression = ObjectCreations.Unwrap(expression);
 
-        // new Uri("https://...") or the target-typed new("https://...")
+        // new Uri("https://...") or the target-typed new("https://..."): its first argument.
         if (expression is BaseObjectCreationExpressionSyntax uriCreation)
-        {
-            var arg0 = uriCreation.ArgumentList?.Arguments.FirstOrDefault();
-            if (arg0?.Expression is LiteralExpressionSyntax uriLit &&
-                uriLit.Token.Value is string uriStr)
-                return uriStr;
-            if (arg0 != null && compilation != null)
-                return InvocationMatcher.GetStringValue(arg0.Expression, compilation);
-        }
+            return uriCreation.ArgumentList?.Arguments.FirstOrDefault() is { } arg0
+                ? InvocationMatcher.GetStringValue(arg0.Expression, compilation)
+                : null;
 
-        // Plain string literal (unlikely but handled gracefully)
-        if (expression is LiteralExpressionSyntax lit && lit.Token.Value is string s)
-            return s;
-
-        return null;
+        // A string (unlikely but handled gracefully).
+        return InvocationMatcher.GetStringValue(expression, compilation);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -411,7 +400,7 @@ public static class DocumentTagsExtractor
     /// object initializer that contains an <c>ExternalDocs</c> property.
     /// </summary>
     private static (string? url, string? description) TryExtractRootExternalDocs(
-        InvocationExpressionSyntax invocation)
+        InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
     {
         // Scan all object-creation expressions in the argument list for OpenApiInfo
         // with an ExternalDocs property.
@@ -429,7 +418,7 @@ public static class DocumentTagsExtractor
                 if (propName != "ExternalDocs")
                     continue;
 
-                return ParseExternalDocsExpression(assignment.Right);
+                return ParseExternalDocsExpression(assignment.Right, compilation);
             }
         }
 
@@ -475,36 +464,73 @@ public static class DocumentTagsExtractor
             ?? (arguments.Count > 1 && arguments[1].NameColon == null ? arguments[1] : null);
     }
 
+    /// <summary>CLI flags that set what an <c>OpenApiInfo</c> from Program.cs would give.</summary>
+    private static readonly string[] InfoFlags = ["--summary", "--license-name", "--license-url", "--license-identifier"];
+
+    /// <summary>CLI flags that set what an <c>OpenApiLicense</c> from Program.cs would give.</summary>
+    private static readonly string[] LicenseFlags = ["--license-name", "--license-url", "--license-identifier"];
+
     /// <summary>
-    /// Warns about document metadata that is not an object creation the extractor reads, instead of
-    /// losing it silently: the info of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the
-    /// <c>License</c> / <c>ExternalDocs</c> of an info, the argument of <c>AddTag</c> and a tag's
-    /// <c>ExternalDocs</c>. <c>null</c> and <c>default</c> are a known absence, not a loss.
+    /// Warns about document metadata the extractor cannot read, instead of losing it silently: the info
+    /// of <c>SwaggerDoc</c> or of an <c>Info = …</c> assignment, the <c>License</c> / <c>ExternalDocs</c> of
+    /// an info, the argument of <c>AddTag</c> and a tag's <c>ExternalDocs</c> that are not object creations,
+    /// and the values of the info fields that are read (<c>Summary</c>, the license <c>Name</c>,
+    /// <c>Url</c>, <c>Identifier</c>, the external docs <c>Url</c>, <c>Description</c>) that are not literals
+    /// or constants. <c>null</c> and <c>default</c> are a known absence, not a loss. Each warning carries
+    /// the place in the source and, as its last subjects, the CLI flags that set the value instead.
     /// </summary>
     private static void ReportUnreadMetadata(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (onDiagnostic == null)
             return;
 
-        void Report(string place, ExpressionSyntax value)
+        var compilation = context.CompilationResult?.Compilation;
+
+        void Report(string place, ExpressionSyntax value, string what, params string[] flags)
         {
             if (IsNoValue(value))
                 return;
+            var where = SourceLocations.Of(value, context);
+            var hint = flags.Length == 0 ? "" : $" Set it with {string.Join(" / ", flags)}.";
             DiagnosticBag.Deliver(onDiagnostic, new ExtractionDiagnostic
             {
-                Code     = ExtractionDiagnosticCodes.DocumentMetadataNotStatic,
-                Message  = $"{place}: {value} is not an object creation the extractor can read — its fields are not written.",
-                Subjects = [place, value.ToString()],
+                Code           = ExtractionDiagnosticCodes.DocumentMetadataNotStatic,
+                Message        = $"{where}: {place}: {value} {what}{hint}",
+                SourceLocation = where,
+                Subjects       = [place, value.ToString(), .. flags],
             });
         }
 
-        void CheckMembers(BaseObjectCreationExpressionSyntax creation, string owner, params string[] members)
+        void ReportCreation(string place, ExpressionSyntax value, params string[] flags) =>
+            Report(place, value, "is not an object creation the extractor can read — its fields are not written.", flags);
+
+        void ReportValue(string place, ExpressionSyntax value, params string[] flags) =>
+            Report(place, value, "cannot be resolved statically — the field is not written.", flags);
+
+        void CheckMembers(BaseObjectCreationExpressionSyntax creation, string owner, params (string Member, string[] Flags)[] members)
         {
             foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
             {
                 if ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text is { } member
-                    && members.Contains(member) && ObjectCreations.Of(assignment.Right) == null)
-                    Report($"{owner}.{member}", assignment.Right);
+                    && members.FirstOrDefault(m => m.Member == member) is { Member: not null } known
+                    && ObjectCreations.Of(assignment.Right) == null)
+                    ReportCreation($"{owner}.{member}", assignment.Right, known.Flags);
+            }
+        }
+
+        // The string fields read from a creation: a value that is neither a literal nor a constant is reported.
+        void CheckValues(BaseObjectCreationExpressionSyntax creation, string owner, params (string Member, bool IsUri, string[] Flags)[] fields)
+        {
+            foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+            {
+                if ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text is not { } member
+                    || fields.FirstOrDefault(f => f.Member == member) is not { Member: not null } field)
+                    continue;
+                var value = field.IsUri
+                    ? TryExtractUriLiteral(assignment.Right, compilation)
+                    : InvocationMatcher.GetStringValue(assignment.Right, compilation);
+                if (value == null)
+                    ReportValue($"{owner}.{member}", assignment.Right, field.Flags);
             }
         }
 
@@ -512,17 +538,35 @@ public static class DocumentTagsExtractor
         foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
         {
             if (SwaggerDocInfoArgument(invocation) is { } info && ObjectCreations.Of(info.Expression) == null)
-                Report("SwaggerDoc info", info.Expression);
+                ReportCreation("SwaggerDoc info", info.Expression, InfoFlags);
 
             foreach (var assignment in invocation.ArgumentList.DescendantNodes().OfType<AssignmentExpressionSyntax>())
             {
                 if (assignment.Left is MemberAccessExpressionSyntax { Name.Identifier.Text: "Info" }
                     && ObjectCreations.Of(assignment.Right) == null)
-                    Report($"{methodName} Info", assignment.Right);
+                    ReportCreation($"{methodName} Info", assignment.Right, InfoFlags);
             }
 
             foreach (var creation in InfoCreations(invocation))
-                CheckMembers(creation, "OpenApiInfo", "License", "ExternalDocs");
+            {
+                CheckMembers(creation, "OpenApiInfo", ("License", LicenseFlags), ("ExternalDocs", []));
+                CheckValues(creation, "OpenApiInfo", ("Summary", false, ["--summary"]));
+                foreach (var assignment in creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>() ?? [])
+                {
+                    if (ObjectCreations.Of(assignment.Right) is not { } nested)
+                        continue;
+                    switch ((assignment.Left as IdentifierNameSyntax)?.Identifier.Text)
+                    {
+                        case "License":
+                            CheckValues(nested, "OpenApiLicense",
+                                ("Name", false, ["--license-name"]), ("Url", true, ["--license-url"]), ("Identifier", false, ["--license-identifier"]));
+                            break;
+                        case "ExternalDocs":
+                            CheckValues(nested, "OpenApiExternalDocs", ("Url", true, []), ("Description", false, []));
+                            break;
+                    }
+                }
+            }
         }
 
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddTag"))
@@ -530,9 +574,9 @@ public static class DocumentTagsExtractor
             if (invocation.ArgumentList.Arguments is not [var tag, ..])
                 continue;
             if (ObjectCreations.Of(tag.Expression) is { } creation)
-                CheckMembers(creation, "OpenApiTag", "ExternalDocs");
+                CheckMembers(creation, "OpenApiTag", ("ExternalDocs", []));
             else
-                Report("AddTag", tag.Expression);
+                ReportCreation("AddTag", tag.Expression);
         }
     }
 

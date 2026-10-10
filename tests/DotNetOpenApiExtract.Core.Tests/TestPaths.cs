@@ -36,6 +36,13 @@ internal static class TestPaths
     public static string ModernApiXml        => Path.ChangeExtension(ModernApiDll, ".xml");
 
     /// <summary>
+    /// Path to the ConfigFormsApi test fixture DLL: a Swashbuckle 10 Program.cs that writes its document
+    /// metadata and security in the forms services use (target-typed and fully qualified creations, both
+    /// requirement syntaxes, strings from raw literals, concatenation, constants and nameof).
+    /// </summary>
+    public static string ConfigFormsApiDll   => FindFixtureDll("ConfigFormsApi");
+
+    /// <summary>
     /// Path to the built CLI (<c>src/DotNetOpenApiExtract.Cli/bin/**/DotNetOpenApiExtract.Cli.dll</c>),
     /// resolved by the same convention as the fixtures.
     /// </summary>

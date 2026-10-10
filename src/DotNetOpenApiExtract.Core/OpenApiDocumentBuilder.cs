@@ -1921,14 +1921,16 @@ public sealed class OpenApiDocumentBuilder
     {
         foreach (var name in securityResult.OmittedSchemes)
         {
+            var where = securityResult.DefinitionLocations.GetValueOrDefault(name);
             ledger.Add(new PendingLoss
             {
                 Class    = LossClass.Source,
                 Code     = ExtractionDiagnosticCodes.SecuritySchemeNotStatic,
                 Anchor   = LossAnchor.Document.Instance,
                 Location = $"#/components/securitySchemes/{Validation.JsonPointerHelper.EncodeSegment(name)}",
-                Message  = $"security scheme '{name}' needs a value that cannot be resolved statically (a variable, a call): " +
-                           "the scheme is omitted, and every requirement that names it loses that scheme.",
+                SourceLocation = where,
+                Message  = $"security scheme '{name}'{(where is null ? "" : $" ({where})")} needs a value that cannot be resolved statically " +
+                           "(a variable, a call, configuration): the scheme is omitted, and every requirement that names it loses that scheme.",
                 Feature  = "securityScheme",
                 Action   = DiagnosticAction.Omitted,
                 Subjects = [name],

@@ -98,6 +98,9 @@ internal sealed record PendingLoss
     /// (the document), and the location names the missing node instead of the owner's.
     /// </summary>
     public string? Location { get; init; }
+
+    /// <summary>Where in the source code the record comes from (<see cref="ExtractionDiagnostic.SourceLocation"/>).</summary>
+    public string? SourceLocation { get; init; }
 }
 
 /// <summary>

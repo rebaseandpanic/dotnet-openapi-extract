@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/TestAssemblies/">
     <Project Path="tests/TestAssemblies/BareMinimalApi/BareMinimalApi.csproj" />
+    <Project Path="tests/TestAssemblies/ConfigFormsApi/ConfigFormsApi.csproj" />
     <Project Path="tests/TestAssemblies/MinimalProductApi/MinimalProductApi.csproj" />
     <Project Path="tests/TestAssemblies/ModernApi/ModernApi.csproj" />
     <Project Path="tests/TestAssemblies/SampleApi/SampleApi.csproj" />

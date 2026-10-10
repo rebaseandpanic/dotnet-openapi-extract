@@ -62,7 +62,7 @@ public class DiagnosticChannelTests
                 { new OpenApiSecuritySchemeReference(args[0]), [] }
             }));
             """,
-            ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScheme, null, []),
+            ExtractionDiagnosticCodes.SecurityRequirementNonLiteralScheme, null, ["args[0]"]),
         new ChannelCase("operation requirement on undeclared scheme",
             "",
             ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme, "GET /api/secure/admin", ["Bearer"]),

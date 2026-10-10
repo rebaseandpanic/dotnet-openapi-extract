@@ -47,6 +47,13 @@ public sealed record ExtractionDiagnostic
     /// </summary>
     public string? Location { get; init; }
 
+    /// <summary>
+    /// Where in the source code the diagnostic comes from, as <c>file:line</c> (the file relative to the
+    /// source root, the line 1-based): the value or call in Program.cs the extractor could not read.
+    /// <see langword="null"/> when the diagnostic does not come from the source code.
+    /// </summary>
+    public string? SourceLocation { get; init; }
+
     /// <summary>What happened to the field, for downlevel diagnostics; otherwise <see langword="null"/>.</summary>
     public DiagnosticAction? Action { get; init; }
 
