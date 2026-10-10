@@ -204,10 +204,19 @@ public static class DocumentTagsExtractor
         string? Title = null, string? Description = null, string? Version = null, string? Summary = null,
         string? TermsOfService = null, ContactMetadata? Contact = null, LicenseMetadata? License = null)
     {
-        /// <summary>These fields, each one this does not set taken from <paramref name="later"/>.</summary>
+        /// <summary>
+        /// These fields, each one this does not set taken from <paramref name="later"/>; the contact field by
+        /// field (<c>Name</c>, <c>Email</c>, <c>Url</c>), the license as a whole (its URL and identifier
+        /// exclude each other, so they come from one declaration).
+        /// </summary>
         public InfoMetadata OrElse(InfoMetadata later) => new(
             Title ?? later.Title, Description ?? later.Description, Version ?? later.Version, Summary ?? later.Summary,
-            TermsOfService ?? later.TermsOfService, Contact ?? later.Contact, License ?? later.License);
+            TermsOfService ?? later.TermsOfService, MergeContact(Contact, later.Contact), License ?? later.License);
+
+        private static ContactMetadata? MergeContact(ContactMetadata? first, ContactMetadata? later) =>
+            first == null ? later
+            : later == null ? first
+            : new ContactMetadata(first.Name ?? later.Name, first.Email ?? later.Email, first.Url ?? later.Url);
     }
 
     /// <summary>

@@ -82,6 +82,27 @@ public class InfoSourcePrecedenceTests
           });
           """, "/info/description", "Only in the second" },
         { """
+          builder.Services.AddSwaggerGen(c =>
+          {
+              c.SwaggerDoc("v1", new OpenApiInfo { Title = "First", Version = "1", Contact = new OpenApiContact { Name = "First team" } });
+              c.SwaggerDoc("v2", new OpenApiInfo { Title = "Second", Version = "2", Contact = new OpenApiContact { Name = "Second team", Email = "second@example.com", Url = new Uri("https://second.example.com/contact") } });
+          });
+          """, "/info/contact/name", "First team" },
+        { """
+          builder.Services.AddSwaggerGen(c =>
+          {
+              c.SwaggerDoc("v1", new OpenApiInfo { Title = "First", Version = "1", Contact = new OpenApiContact { Name = "First team" } });
+              c.SwaggerDoc("v2", new OpenApiInfo { Title = "Second", Version = "2", Contact = new OpenApiContact { Name = "Second team", Email = "second@example.com", Url = new Uri("https://second.example.com/contact") } });
+          });
+          """, "/info/contact/email", "second@example.com" },
+        { """
+          builder.Services.AddSwaggerGen(c =>
+          {
+              c.SwaggerDoc("v1", new OpenApiInfo { Title = "First", Version = "1", Contact = new OpenApiContact { Name = "First team" } });
+              c.SwaggerDoc("v2", new OpenApiInfo { Title = "Second", Version = "2", Contact = new OpenApiContact { Name = "Second team", Email = "second@example.com", Url = new Uri("https://second.example.com/contact") } });
+          });
+          """, "/info/contact/url", "https://second.example.com/contact" },
+        { """
           builder.Services.AddOpenApi(o => o.AddDocumentTransformer((document, context, ct) =>
           {
               document.Info = new() { Title = "Transformed", Version = "3.1.4" };
@@ -92,7 +113,7 @@ public class InfoSourcePrecedenceTests
 
     /// <summary>
     /// Several declarations: each field from the first that sets it, as for <c>info.summary</c> and
-    /// <c>externalDocs</c>; <c>AddOpenApi</c> is read as <c>SwaggerDoc</c> is.
+    /// <c>externalDocs</c>, the contact field by field; <c>AddOpenApi</c> is read as <c>SwaggerDoc</c> is.
     /// </summary>
     [Theory]
     [MemberData(nameof(DeclarationsInProgramCs))]
