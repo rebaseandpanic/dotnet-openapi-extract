@@ -79,11 +79,11 @@ This means you can generate OpenAPI specs:
 
 ## Validation
 
-Running `--validate` checks the extracted spec against **57 completeness rules** — 32 errors + 16 warnings always-on + 9 warnings off-by-default.
+Running `--validate` checks the extracted spec against **58 completeness rules** — 33 errors + 16 warnings always-on + 9 warnings off-by-default.
 
 | Severity | Count | Exit code | When to use |
 |----------|------:|----------:|-------------|
-| Error | 32 | 1 | OpenAPI-spec MUST violations, broken codegen |
+| Error | 33 | 1 | OpenAPI-spec MUST violations, broken codegen |
 | Warning | 16 | 0 | Industry best-practice (Spectral / Redocly consensus) |
 | Warning (off-by-default) | 9 | 0 (disabled) | Opt-in via `--enable-rule`. Includes: `operation.has-required-response-codes`, `operation.operation-id-pascal-case`, `schema.additional-properties-explicit`, `response.content-type-json-default`, `spec.servers-defined`, `tag.description`, `component.no-unused`, `spec.no-eval-in-markdown`, `spec.no-script-tags-in-markdown` |
 
@@ -122,7 +122,7 @@ dotnet openapi-extract validate --spec openapi.json --validation-report report.j
 
 Rules run for the version of the document: the `--openapi-version` of the build, or the `openapi:` field of a standalone file. Some levels depend on it — `response.description` is an error for 3.0/3.1 and a warning for 3.2, where a response description is optional (`--strict` promotes it like any other warning). `response.schema-when-body` accepts `itemSchema` (3.2) and `x-oai-itemSchema` (3.0/3.1) as the schema of a streaming response, and a `text/event-stream` media type without a schema is not a violation.
 
-Rules for the document structure of newer versions: `spec.license-identifier-or-url` (3.1+: a license has an identifier or a url, not both), `spec.paths-or-webhooks-or-components` (3.0: `paths` is required; 3.1/3.2: at least one of `paths`, `webhooks`, `components` — an empty object counts as present, a missing one does not), `tag.parent-defined` and `tag.no-parent-cycle` (3.2: a tag's `parent` names a declared tag, and parents never form a cycle), `spec.server-names-unique` (3.2: top-level server names are unique). A rule for one version does not run for another.
+Rules for the document structure of newer versions: `spec.license-identifier-or-url` (3.1+: a license has an identifier or a url, not both), `spec.paths-or-webhooks-or-components` (3.0: `paths` is required; 3.1/3.2: at least one of `paths`, `webhooks`, `components` — an empty object counts as present, a missing one does not), `tag.parent-defined` and `tag.no-parent-cycle` (3.2: a tag's `parent` names a declared tag, and parents never form a cycle), `spec.server-names-unique` (3.2: top-level server names are unique), `discriminator.default-mapping-when-optional` (3.2: a discriminator whose property an instance may lack — required-ness followed through `allOf`, `oneOf`, `anyOf` and `$ref` — has a `defaultMapping`; the tool's own polymorphism output always passes it). A rule for one version does not run for another.
 
 All severity/skip/enable flags apply to both modes. Run `dotnet openapi-extract --help` and `dotnet openapi-extract validate --help` for the full rule list with per-rule severities.
 

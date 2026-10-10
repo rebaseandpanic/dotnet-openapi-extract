@@ -100,6 +100,7 @@ public sealed class OpenApiValidator
         new TagParentDefinedRule(),                  // 3.2
         new TagNoParentCycleRule(),                  // 3.2
         new SpecServerNamesUniqueRule(),             // 3.2
+        new DiscriminatorDefaultMappingWhenOptionalRule(), // 3.2
     };
 
     /// <summary>
