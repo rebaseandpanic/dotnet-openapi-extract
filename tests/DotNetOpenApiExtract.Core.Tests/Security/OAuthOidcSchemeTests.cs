@@ -242,6 +242,8 @@ public class OAuthOidcSchemeTests(OAuthOidcSchemeFixture fixture) : IClassFixtur
     [InlineData("Type = SecuritySchemeType.OAuth2", "Flows")]
     [InlineData("Type = SecuritySchemeType.OAuth2, Flows = new OpenApiOAuthFlows()", "Flows")]
     [InlineData("Type = SecuritySchemeType.OpenIdConnect, Description = \"no url\"", "OpenIdConnectUrl")]
+    [InlineData("Type = SecuritySchemeType.OAuth2, Flows = null", "Flows")]
+    [InlineData("Type = SecuritySchemeType.OpenIdConnect, OpenIdConnectUrl = null", "OpenIdConnectUrl")]
     public void LiteralDeclaration_WithoutRequiredData_IsAnExtractionError(string initializer, string member)
     {
         using var directory = new TempDirectory();
@@ -295,5 +297,35 @@ public class OAuthOidcSchemeTests(OAuthOidcSchemeFixture fixture) : IClassFixtur
         error.TypeName.Should().Be("Microsoft.OpenApi.OpenApiOAuthFlow");
         error.MemberName.Should().Be(member);
         error.Message.Should().Contain("Broken");
+    }
+
+    [Fact]
+    public void NullOptionalValues_AreKnownAbsences_TheSchemeIsKept()
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), """
+            builder.Services.AddSwaggerGen(c => c.AddSecurityDefinition("Nulls", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.OAuth2,
+                OAuth2MetadataUrl = null,
+                Flows = new OpenApiOAuthFlows
+                {
+                    Implicit = null,
+                    Password = new OpenApiOAuthFlow { TokenUrl = new Uri("https://a.example.com/token"), RefreshUrl = null, Scopes = null },
+                },
+            }));
+            """);
+        var (document, diagnostics) = VersionedDocumentHarness.BuildCollecting(onDiagnostic => new OpenApiDocumentOptions
+        {
+            AssemblyPath = TestPaths.ModernApiDll,
+            XmlPath      = TestPaths.ModernApiXml,
+            SourceRoot   = directory.Path,
+            OnDiagnostic = onDiagnostic,
+        });
+        var json = JsonNode.Parse(document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_0, CancellationToken.None).GetAwaiter().GetResult())!;
+
+        json["components"]!["securitySchemes"]!["Nulls"]!["flows"]!.ToJsonString()
+            .Should().Be("""{"password":{"tokenUrl":"https://a.example.com/token","scopes":{}}}""");
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeNotStatic);
     }
 }

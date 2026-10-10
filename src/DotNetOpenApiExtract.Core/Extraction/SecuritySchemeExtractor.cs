@@ -317,7 +317,9 @@ public static class SecuritySchemeExtractor
                     break;
 
                 case "Deprecated":
-                    if (value is LiteralExpressionSyntax deprecated
+                    if (IsNoValue(value))
+                        scheme.Deprecated = false;
+                    else if (value is LiteralExpressionSyntax deprecated
                         && (deprecated.IsKind(SyntaxKind.TrueLiteralExpression) || deprecated.IsKind(SyntaxKind.FalseLiteralExpression)))
                         scheme.Deprecated = deprecated.IsKind(SyntaxKind.TrueLiteralExpression);
                     else
@@ -385,6 +387,19 @@ public static class SecuritySchemeExtractor
         Require(flows.DeviceAuthorization, "deviceAuthorization", "TokenUrl", flows.DeviceAuthorization?.TokenUrl);
     }
 
+    /// <summary>
+    /// Whether <paramref name="value"/> is <c>null</c>, <c>default</c> or <c>default(T)</c>: a known absence
+    /// of a value, not a value that cannot be resolved.
+    /// </summary>
+    private static bool IsNoValue(ExpressionSyntax value)
+    {
+        while (value is ParenthesizedExpressionSyntax paren)
+            value = paren.Expression;
+        return value is LiteralExpressionSyntax literal
+                   && (literal.IsKind(SyntaxKind.NullLiteralExpression) || literal.IsKind(SyntaxKind.DefaultLiteralExpression))
+               || value is DefaultExpressionSyntax;
+    }
+
     /// <summary>The object creation <c>new T { … }</c> / <c>new() { … }</c> behind <paramref name="value"/>, if it is one.</summary>
     private static BaseObjectCreationExpressionSyntax? Creation(ExpressionSyntax value)
     {
@@ -399,6 +414,9 @@ public static class SecuritySchemeExtractor
     /// </summary>
     private static OpenApiOAuthFlows? ParseFlows(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
     {
+        if (IsNoValue(value))
+            return null; // known: no flows
+
         if (Creation(value) is not { } creation)
         {
             unresolved = true;
@@ -427,6 +445,9 @@ public static class SecuritySchemeExtractor
     /// </summary>
     private static OpenApiOAuthFlow? ParseFlow(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
     {
+        if (IsNoValue(value))
+            return null; // known: no such flow
+
         if (Creation(value) is not { } creation)
         {
             unresolved = true;
@@ -457,6 +478,9 @@ public static class SecuritySchemeExtractor
     /// </summary>
     private static Uri? ParseUri(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
     {
+        if (IsNoValue(value))
+            return null; // known: no URL
+
         if (Creation(value) is { ArgumentList.Arguments: [var first, ..] }
             && InvocationMatcher.GetStringValue(first.Expression, compilation) is { } text
             && Uri.TryCreate(text, UriKind.RelativeOrAbsolute, out var uri))
@@ -472,6 +496,9 @@ public static class SecuritySchemeExtractor
     /// </summary>
     private static Dictionary<string, string>? ParseScopes(ExpressionSyntax value, CSharpCompilation? compilation, ref bool unresolved)
     {
+        if (IsNoValue(value))
+            return null; // known: no scopes (written as the empty map)
+
         if (Creation(value) is not { } creation)
         {
             unresolved = true;
