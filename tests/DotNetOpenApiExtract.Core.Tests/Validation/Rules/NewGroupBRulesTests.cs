@@ -350,6 +350,39 @@ public sealed class NewGroupBRulesTests
         violations[0].Severity.Should().Be(ValidationSeverity.Warning);
     }
 
+    /// <summary>
+    /// Whether a number is an integer is read from its JSON token, beyond the range and precision of
+    /// decimal and double: underflow and excess precision are fractions, a huge exponent is an integer.
+    /// </summary>
+    [Theory]
+    [InlineData("1e-1000", 1)]
+    [InlineData("1.00000000000000000000000000001", 1)]
+    [InlineData("1.5", 1)]
+    [InlineData("1.25e1", 1)]
+    [InlineData("1e1000", 0)]
+    [InlineData("-3E+2", 0)]
+    [InlineData("2.0", 0)]
+    [InlineData("2e3", 0)]
+    [InlineData("20e-1", 0)]
+    [InlineData("0.000", 0)]
+    [InlineData("123456789012345678901234567890", 0)]
+    public void SchemaTypedEnum_IntegerType_ReadsIntegralityFromTheToken(string token, int expectedViolations)
+    {
+        var doc = new OpenApiDocument
+        {
+            Info = new OpenApiInfo { Title = "API", Version = "v1" },
+            Components = new OpenApiComponents
+            {
+                Schemas = new Dictionary<string, IOpenApiSchema>
+                {
+                    ["Code"] = new OpenApiSchema { Type = JsonSchemaType.Integer, Enum = new List<JsonNode> { JsonNode.Parse(token)! } },
+                },
+            },
+        };
+
+        new SchemaTypedEnumRule().Validate(doc, DefaultContext).Should().HaveCount(expectedViolations, because: token);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // B9. schema.no-duplicate-enum
     // ─────────────────────────────────────────────────────────────────────────

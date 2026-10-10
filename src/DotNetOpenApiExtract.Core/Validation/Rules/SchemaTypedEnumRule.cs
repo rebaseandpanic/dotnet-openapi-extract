@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
@@ -86,12 +87,37 @@ public sealed class SchemaTypedEnumRule : IValidationRule
         };
     }
 
-    /// <summary>Whether the JSON number <paramref name="text"/> has no fractional part (<c>2</c>, <c>2.0</c>, <c>2e3</c>).</summary>
-    private static bool IsIntegral(string text) =>
-        decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var exact)
-            ? exact == decimal.Truncate(exact)
-            : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var approximate)
-              && double.IsFinite(approximate) && approximate == Math.Floor(approximate);
+    /// <summary>
+    /// Whether the JSON number <paramref name="text"/> has no fractional part (<c>2</c>, <c>2.0</c>,
+    /// <c>2e3</c>, <c>20e-1</c>, <c>1e1000</c>), decided on the token itself with no conversion that
+    /// rounds: the value is its digits times ten to a power; the trailing zeros of the digits move
+    /// into the power, and the number is an integer when the power is not negative (or the digits
+    /// are all zero). <c>1e-1000</c> and <c>1.00000000000000000000000000001</c> are not integers.
+    /// </summary>
+    private static bool IsIntegral(string text)
+    {
+        var exponentAt = text.IndexOfAny(['e', 'E']);
+        var mantissa = exponentAt < 0 ? text : text[..exponentAt];
+        if (mantissa.StartsWith('-'))
+            mantissa = mantissa[1..];
+
+        var point = mantissa.IndexOf('.');
+        var fraction = point < 0 ? "" : mantissa[(point + 1)..];
+        var digits = (point < 0 ? mantissa : mantissa[..point]) + fraction;
+        if (digits.Length == 0 || !digits.All(char.IsAsciiDigit))
+            return false;
+
+        var significant = digits.TrimStart('0');
+        if (significant.Length == 0)
+            return true; // zero
+
+        BigInteger exponent = 0;
+        if (exponentAt >= 0 && !BigInteger.TryParse(text[(exponentAt + 1)..], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out exponent))
+            return false;
+
+        var trailingZeros = significant.Length - significant.TrimEnd('0').Length;
+        return exponent - fraction.Length + trailingZeros >= 0;
+    }
 
     private static string? GetExpectedNodeKind(JsonSchemaType type) => type switch
     {
