@@ -61,6 +61,11 @@ public class ConfigurationOutsideEntryPointTests
         // a local function of the entry point that passes the options on to another file
         "builder.Services.AddSwaggerGen(Configure); static void Configure(SwaggerGenOptions c) => SwaggerSetup.Configure(c);",
         "builder.Services.AddSwaggerGen(c => Configure(c)); static void Configure(SwaggerGenOptions c) { SwaggerSetup.Configure(c); }",
+        // a delegate variable of the entry point whose value can be code elsewhere
+        """Action<SwaggerGenOptions> configure = c => c.IncludeXmlComments("api.xml"); configure = SwaggerSetup.Configure; builder.Services.AddSwaggerGen(configure);""",
+        """Action<SwaggerGenOptions> configure = c => c.IncludeXmlComments("api.xml"); configure += SwaggerSetup.Configure; builder.Services.AddSwaggerGen(configure);""",
+        """Action<SwaggerGenOptions> configure = c => c.IncludeXmlComments("api.xml"); Replace(out configure); builder.Services.AddSwaggerGen(configure); static void Replace(out Action<SwaggerGenOptions> a) => a = SwaggerSetup.Configure;""",
+        "Action<SwaggerGenOptions> configure = SwaggerSetup.Create(); builder.Services.AddSwaggerGen(configure);",
     };
 
     [Theory]

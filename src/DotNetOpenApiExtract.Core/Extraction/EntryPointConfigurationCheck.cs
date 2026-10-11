@@ -139,7 +139,8 @@ internal static class EntryPointConfigurationCheck
             {
                 LocalFunctionStatementSyntax local => PassedOn(local.ParameterList.Parameters, (SyntaxNode?)local.Body ?? local.ExpressionBody, context, entryPoint, depth),
                 MethodDeclarationSyntax method => PassedOn(method.ParameterList.Parameters, (SyntaxNode?)method.Body ?? method.ExpressionBody, context, entryPoint, depth),
-                VariableDeclaratorSyntax { Initializer.Value: { } value } => DelegationTarget(value, context, entryPoint, depth + 1),
+                VariableDeclaratorSyntax variable when SingleValue(variable, context, entryPoint) is { } value
+                    => DelegationTarget(value, context, entryPoint, depth + 1),
                 _ => argument.ToString(),
             };
         }
@@ -172,6 +173,44 @@ internal static class EntryPointConfigurationCheck
             .Select(invocation => DelegationTarget(invocation.Expression, context, entryPoint, depth + 1))
             .FirstOrDefault(target => target != null);
     }
+
+    /// <summary>
+    /// The one value a delegate variable of the entry point can hold — its initializer — when that value is a
+    /// lambda, an anonymous method or a method group and the variable is a local never written after its
+    /// declaration; otherwise <see langword="null"/>, and the variable counts as handing the configuration
+    /// outside. A reassignment (<c>=</c>, <c>+=</c>, <c>??=</c>…), a <c>ref</c> / <c>out</c> argument or a
+    /// <c>ref</c> alias can give it a value the tool does not see; an initializer computed by a call or a
+    /// conditional is not statically one target.
+    /// </summary>
+    private static ExpressionSyntax? SingleValue(VariableDeclaratorSyntax variable, SourceAnalysisContext context, SyntaxNode entryPoint)
+    {
+        if (variable.Initializer?.Value is not { } initializer
+            || context.CompilationResult?.Compilation is not { } compilation)
+            return null;
+        var value = ObjectCreations.Unwrap(initializer);
+        if (value is not (AnonymousFunctionExpressionSyntax or IdentifierNameSyntax or MemberAccessExpressionSyntax))
+            return null;
+
+        var model = compilation.GetSemanticModel(variable.SyntaxTree);
+        if (model.GetDeclaredSymbol(variable) is not ILocalSymbol local)
+            return null;
+
+        var written = entryPoint.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Where(id => id.Identifier.Text == local.Name && IsWrite(id))
+            .Any(id => SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(id).Symbol, local));
+        return written ? null : value;
+    }
+
+    /// <summary>Whether <paramref name="name"/> stands where a value is stored into it or a reference to it is taken.</summary>
+    private static bool IsWrite(IdentifierNameSyntax name) => name.Parent switch
+    {
+        AssignmentExpressionSyntax assignment => assignment.Left == name,
+        ArgumentSyntax argument => !argument.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.None)
+                                   && !argument.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.InKeyword),
+        RefExpressionSyntax => true,
+        PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax => true,
+        _ => false,
+    };
 
     /// <summary>
     /// The declaration of the method or variable <paramref name="name"/> refers to, when it is declared
