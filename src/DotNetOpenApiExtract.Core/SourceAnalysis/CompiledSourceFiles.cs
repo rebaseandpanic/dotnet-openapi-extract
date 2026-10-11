@@ -75,7 +75,7 @@ internal static class CompiledSourceFiles
         var tied = matchesByPrefix.Values.Where(f => f.Count == most).ToList();
         if (tied.Count > 1)
         {
-            var scored = tied.Select(files => (Files: files, Same: files.Count(f => HasCompiledContent(f.Full, f.Document)))).ToList();
+            var scored = tied.Select(files => (Files: files, Same: files.Count(f => HasCompiledContent(f.Full, f.Document) == true))).ToList();
             var best = scored.Max(s => s.Same);
             tied = scored.Where(s => s.Same == best).Select(s => s.Files).ToList();
         }
@@ -83,18 +83,31 @@ internal static class CompiledSourceFiles
         if (tied.Count > 1)
             return CompiledSourceLookup.Ambiguous(tied.SelectMany(f => f).Select(f => f.Full).Distinct(StringComparer.Ordinal).ToList());
 
-        return CompiledSourceLookup.Found(tied[0].Select(f => f.Full).Distinct(StringComparer.Ordinal).ToList());
+        var found = tied[0];
+        var changed = found
+            .Where(f => HasCompiledContent(f.Full, f.Document) == false)
+            .Select(f => f.Full)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return CompiledSourceLookup.Found(found.Select(f => f.Full).Distinct(StringComparer.Ordinal).ToList(), changed);
     }
 
-    /// <summary>Whether the content of <paramref name="path"/> has the checksum the PDB records for <paramref name="document"/>.</summary>
-    private static bool HasCompiledContent(string path, PdbDocument document)
+    /// <summary>
+    /// Whether the content of <paramref name="path"/> has the checksum the PDB records for
+    /// <paramref name="document"/>; <see langword="null"/> when that cannot be told (no checksum or an
+    /// algorithm other than SHA-1 / SHA-256), <see langword="false"/> also when the file cannot be read.
+    /// </summary>
+    private static bool? HasCompiledContent(string path, PdbDocument document)
     {
+        if (document.Hash.Length == 0 || (document.HashAlgorithm != Sha256 && document.HashAlgorithm != Sha1))
+            return null;
         try
         {
-            byte[]? hash = document.HashAlgorithm == Sha256 ? System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))
-                : document.HashAlgorithm == Sha1 ? System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(path))
-                : null;
-            return hash != null && hash.AsSpan().SequenceEqual(document.Hash);
+            var content = File.ReadAllBytes(path);
+            var hash = document.HashAlgorithm == Sha256
+                ? System.Security.Cryptography.SHA256.HashData(content)
+                : System.Security.Cryptography.SHA1.HashData(content);
+            return hash.AsSpan().SequenceEqual(document.Hash);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -152,20 +165,30 @@ internal static class CompiledSourceFiles
 /// <summary>What the PDB of an assembly says about the source files under a source root.</summary>
 internal sealed class CompiledSourceLookup
 {
-    private CompiledSourceLookup(IReadOnlyList<string>? files, IReadOnlyList<string>? ambiguousFiles) =>
-        (Files, AmbiguousFiles) = (files, ambiguousFiles);
+    private CompiledSourceLookup(IReadOnlyList<string>? files, IReadOnlyList<string>? ambiguousFiles, IReadOnlyList<string> changedFiles) =>
+        (Files, AmbiguousFiles, ChangedFiles) = (files, ambiguousFiles, changedFiles);
 
     /// <summary>No portable PDB, or none of its documents is under the source root.</summary>
-    public static CompiledSourceLookup Unavailable { get; } = new(null, null);
+    public static CompiledSourceLookup Unavailable { get; } = new(null, null, []);
 
-    /// <summary>The files compiled into the assembly.</summary>
-    public static CompiledSourceLookup Found(IReadOnlyList<string> files) => new(files, null);
+    /// <summary>
+    /// The files compiled into the assembly; <paramref name="changedFiles"/> are those of them whose content
+    /// no longer has the checksum the PDB records.
+    /// </summary>
+    public static CompiledSourceLookup Found(IReadOnlyList<string> files, IReadOnlyList<string> changedFiles) =>
+        new(files, null, changedFiles);
 
     /// <summary>The PDB matches several sets of files equally well; <paramref name="files"/> are all of them.</summary>
-    public static CompiledSourceLookup Ambiguous(IReadOnlyList<string> files) => new(null, files);
+    public static CompiledSourceLookup Ambiguous(IReadOnlyList<string> files) => new(null, files, []);
 
     /// <summary>Full paths of the compiled files when they are known.</summary>
     public IReadOnlyList<string>? Files { get; }
+
+    /// <summary>
+    /// Full paths of the compiled files changed since the build: their content differs from the checksum
+    /// the PDB records. Empty when no difference is known.
+    /// </summary>
+    public IReadOnlyList<string> ChangedFiles { get; }
 
     /// <summary>Full paths of the files of the equally good matches when the PDB does not decide.</summary>
     public IReadOnlyList<string>? AmbiguousFiles { get; }

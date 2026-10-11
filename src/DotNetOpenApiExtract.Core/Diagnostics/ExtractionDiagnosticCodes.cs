@@ -23,6 +23,15 @@ public static class ExtractionDiagnosticCodes
     /// </summary>
     public const string SourceCompiledFilesAmbiguous = "source.compiled-files-ambiguous";
 
+    /// <summary>
+    /// A source file compiled into the assembly was changed after the build: its content differs from the
+    /// checksum the portable PDB records. The file is read as it is now, so the configuration it gives
+    /// (Program.cs security schemes, info, constants) may describe code the assembly does not contain.
+    /// Rebuild before extracting. Location in <see cref="ExtractionDiagnostic.SourceLocation"/>: the file,
+    /// line 1. Subjects: the file, relative to the source root.
+    /// </summary>
+    public const string SourceFileChangedSinceBuild = "source.file-changed-since-build";
+
     /// <summary>A security scheme name is registered more than once; the first registration wins. Subjects: the scheme name.</summary>
     public const string SecurityDuplicateScheme = "security.duplicate-scheme";
 

@@ -183,7 +183,9 @@ match the PDB equally well (a root `Program.cs` next to `Api/Program.cs`), the c
 decide; if they do not, Program.cs is not read and the warning `source.compiled-files-ambiguous` names
 the files. A file under the source root that is not
 in the assembly — `Program.Old.cs`, a file excluded with `<Compile Remove>`, a file added after the
-build — is ignored. Without a PDB that matches the source root, every `.cs` file under it is read; if
+build — is ignored. A compiled file whose content no longer has the checksum the PDB records (edited
+after the build) is read as it is now, with the warning `source.file-changed-since-build` at that file:
+rebuild before extracting. Without a PDB that matches the source root, every `.cs` file under it is read; if
 several of them can be the entry point (top-level statements, or `Main` of the entry-point type), the
 `Program.cs` nearest to the source root is read with the warning `source.entry-point-ambiguous`
 naming the candidates, and when there is no such single file none is read.

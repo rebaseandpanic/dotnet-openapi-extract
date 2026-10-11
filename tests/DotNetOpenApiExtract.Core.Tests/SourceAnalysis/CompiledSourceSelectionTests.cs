@@ -122,6 +122,36 @@ public class CompiledSourceSelectionTests
     }
 
     /// <summary>
+    /// Program.cs edited after the build: its checksum no longer matches the PDB. It is still read — the
+    /// document follows the file on disk — with a warning at the file that says so.
+    /// </summary>
+    [Fact]
+    public void CompiledFileChangedAfterTheBuild_IsRead_WithAWarningAtTheFile()
+    {
+        using var sourceRoot = SourceRootWith();
+        File.WriteAllText(Path.Combine(sourceRoot.Path, "Program.cs"), RealProgram.Replace("\"Real\"", "\"Edited\""));
+
+        var (document, diagnostics) = Build(TestPaths.StrayEntryApiDll, sourceRoot.Path);
+
+        SchemeNames(document).Should().Equal("Edited");
+        var warning = diagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SourceFileChangedSinceBuild).Subject;
+        warning.SourceLocation.Should().Be("Program.cs:1");
+        warning.Subjects.Should().Equal("Program.cs");
+    }
+
+    /// <summary>The compiled files as they were built: no warning about a change.</summary>
+    [Fact]
+    public void CompiledFilesUnchanged_NoChangeWarning()
+    {
+        using var sourceRoot = SourceRootWith();
+
+        var (document, diagnostics) = Build(TestPaths.StrayEntryApiDll, sourceRoot.Path);
+
+        SchemeNames(document).Should().Equal("Real");
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SourceFileChangedSinceBuild);
+    }
+
+    /// <summary>
     /// Without a PDB the compiled files are unknown: of several entry-point files the nearest Program.cs is
     /// read, with a warning naming the candidates.
     /// </summary>

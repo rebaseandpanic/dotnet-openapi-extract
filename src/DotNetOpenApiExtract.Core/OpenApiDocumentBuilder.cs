@@ -2564,6 +2564,22 @@ public sealed class OpenApiDocumentBuilder
                 return new SourceAnalysisContext(compilationResult, entryPointNode: null);
             }
 
+            // A compiled file edited after the build is still read: the PDB keeps only its checksum, not the
+            // compiled text, and leaving it out would drop the whole Program.cs configuration for an edit that
+            // may be a comment or a line ending. The warning says the document follows the file on disk.
+            foreach (var changed in compiled.ChangedFiles.Order(StringComparer.Ordinal))
+            {
+                var name = Path.GetRelativePath(sourceRoot, changed).Replace('\\', '/');
+                diagnostics.Report(new ExtractionDiagnostic
+                {
+                    Code           = ExtractionDiagnosticCodes.SourceFileChangedSinceBuild,
+                    Message        = $"{name} differs from the source compiled into the assembly (its checksum in the PDB does not match): " +
+                                     "it is read as it is now, so the document may describe code the assembly does not contain. Rebuild before extracting.",
+                    SourceLocation = $"{name}:1",
+                    Subjects       = [name],
+                });
+            }
+
             // 3. Locate entry-point syntax node.
             var candidates = EntryPointFinder.FindAll(loader.Assembly.EntryPoint, compilationResult.Compilation);
             var entryPointNode = ChooseEntryPoint(candidates, sourceRoot, diagnostics);
