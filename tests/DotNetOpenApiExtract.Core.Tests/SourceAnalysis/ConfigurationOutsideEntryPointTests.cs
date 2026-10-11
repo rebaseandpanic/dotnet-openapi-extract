@@ -58,6 +58,9 @@ public class ConfigurationOutsideEntryPointTests
         "builder.Services.AddSwaggerGen(SwaggerSetup.Configure);",
         "builder.Services.AddSwaggerGen(c => SwaggerSetup.Configure(c));",
         "builder.Services.AddSwaggerGen(c => { c.IncludeXmlComments(\"api.xml\"); SwaggerSetup.Configure(c); });",
+        // a local function of the entry point that passes the options on to another file
+        "builder.Services.AddSwaggerGen(Configure); static void Configure(SwaggerGenOptions c) => SwaggerSetup.Configure(c);",
+        "builder.Services.AddSwaggerGen(c => Configure(c)); static void Configure(SwaggerGenOptions c) { SwaggerSetup.Configure(c); }",
     };
 
     [Theory]
@@ -78,6 +81,10 @@ public class ConfigurationOutsideEntryPointTests
         "builder.Services.AddSwaggerGen();",
         """builder.Services.AddSwaggerGen(c => c.IncludeXmlComments("api.xml"));""",
         "builder.Services.AddSwaggerGen(); builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();",
+        // handed to code of the entry point itself, which the tool reads
+        """builder.Services.AddSwaggerGen(Configure); static void Configure(SwaggerGenOptions c) => c.IncludeXmlComments("api.xml");""",
+        """builder.Services.AddSwaggerGen(c => Configure(c)); static void Configure(SwaggerGenOptions c) { c.IncludeXmlComments("api.xml"); }""",
+        """Action<SwaggerGenOptions> configure = c => c.IncludeXmlComments("api.xml"); builder.Services.AddSwaggerGen(configure);""",
     };
 
     [Theory]

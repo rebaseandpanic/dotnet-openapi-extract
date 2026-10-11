@@ -360,8 +360,9 @@ public static class ExtractionDiagnosticCodes
     /// The assembly references Swashbuckle.AspNetCore.SwaggerGen or Microsoft.AspNetCore.OpenApi, but the
     /// entry point holds no configuration of them: no <c>SwaggerDoc</c>, <c>AddSecurityDefinition</c>,
     /// <c>AddSecurityRequirement</c> or <c>AddTag</c>, and <c>AddSwaggerGen</c> / <c>AddOpenApi</c> is either
-    /// not called there or called without arguments next to an options class registered for it. The
-    /// configuration is then in another file — an extension method, a <c>Startup</c> class, an
+    /// not called there, called with a delegate or lambda handing the options to code declared outside the
+    /// entry point, or called without arguments next to an options class registered for it. The
+    /// configuration is then outside the entry point — an extension method, a <c>Startup</c> class, an
     /// <c>IConfigureOptions&lt;SwaggerGenOptions&gt;</c> — which is not read: the document lacks the
     /// metadata and security it declares. <see cref="ExtractionDiagnostic.SourceLocation"/>: the call that
     /// hands the configuration elsewhere (the registration, the options-class registration, or the first

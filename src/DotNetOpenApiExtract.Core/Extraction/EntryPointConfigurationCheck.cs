@@ -8,7 +8,7 @@ namespace DotNetOpenApiExtract.Core.Extraction;
 
 /// <summary>
 /// Warns when the assembly uses Swashbuckle or Microsoft.AspNetCore.OpenApi but its entry point holds no
-/// configuration of them: the configuration then lives in another file — an extension method, a
+/// configuration of them: the configuration then lives outside the entry point — an extension method, a
 /// <c>Startup</c> class, an <c>IConfigureOptions&lt;SwaggerGenOptions&gt;</c> — which the extractor does
 /// not read, and the document misses it (code <see cref="ExtractionDiagnosticCodes.DocumentConfigurationNotInEntryPoint"/>).
 /// </summary>
@@ -25,7 +25,8 @@ namespace DotNetOpenApiExtract.Core.Extraction;
 ///   <item>The registration hands the options to code elsewhere — a method group
 ///   (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>), a delegate variable, a lambda passing its options to
 ///   another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>): the configuration is in that code.
-///   Warning.</item>
+///   Warning — unless that code is declared inside the entry point (a local function of Program.cs), which
+///   the tool reads: it is followed, and warns only when it hands the options on outside.</item>
 ///   <item>The same bare registration next to an options class registered for them — a type argument
 ///   naming <c>SwaggerGenOptions</c> / <c>OpenApiOptions</c> (<c>AddTransient&lt;IConfigureOptions&lt;SwaggerGenOptions&gt;, X&gt;()</c>),
 ///   or <c>ConfigureOptions&lt;T&gt;()</c> with a <c>T</c> named after Swagger / OpenApi: the
@@ -64,7 +65,7 @@ internal static class EntryPointConfigurationCheck
             return;
         var registrations = Registrations.SelectMany(name => InvocationMatcher.FindInvocations(context, name)).ToList();
         var delegated = registrations
-            .SelectMany(r => r.ArgumentList.Arguments.Select(a => (Registration: r, Target: DelegationTarget(a.Expression))))
+            .SelectMany(r => r.ArgumentList.Arguments.Select(a => (Registration: r, Target: DelegationTarget(a.Expression, context, entryPoint, depth: 0))))
             .FirstOrDefault(d => d.Target != null);
         var optionsClass = OptionsClassRegistration(entryPoint);
         if (registrations.Count > 0 && delegated.Target == null && optionsClass == null)
@@ -83,8 +84,8 @@ internal static class EntryPointConfigurationCheck
         if (delegated.Target != null)
         {
             place = delegated.Registration;
-            message = $"the {InvocationMatcher.GetSimpleMethodName(delegated.Registration.Expression)} options are configured by {delegated.Target} " +
-                      $"in another file, which the tool does not read: {Consequence}";
+            message = $"the {InvocationMatcher.GetSimpleMethodName(delegated.Registration.Expression)} options are configured by {delegated.Target}, " +
+                      $"declared outside the entry point, which the tool does not read: {Consequence}";
         }
         else if (optionsClass != null)
         {
@@ -112,29 +113,82 @@ internal static class EntryPointConfigurationCheck
     }
 
     /// <summary>
-    /// The code a registration argument hands the configuration to, or <see langword="null"/>: a method group or a
-    /// delegate variable (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>), or a lambda that passes its options
-    /// to another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>). A literal (the document name of
-    /// <c>AddOpenApi("v1")</c>) and a lambda configuring the options itself do not.
+    /// The code outside the entry point a registration argument hands the configuration to, or
+    /// <see langword="null"/>: a method group or a delegate variable (<c>AddSwaggerGen(SwaggerSetup.Configure)</c>),
+    /// or a lambda that passes its options to another method (<c>c =&gt; SwaggerSetup.Configure(c)</c>). A
+    /// literal (the document name of <c>AddOpenApi("v1")</c>) and a lambda configuring the options itself do not.
     /// </summary>
-    private static string? DelegationTarget(ExpressionSyntax argument)
+    /// <remarks>
+    /// Where the target is declared is decided by its symbol, not assumed. A local function, a method or a
+    /// delegate variable declared inside the entry point is code the tool reads (its <c>SwaggerDoc</c> and
+    /// other configuration calls count as the entry point's), so it is followed in turn: it hands the
+    /// configuration elsewhere only when it passes its options on to code outside the entry point. A target
+    /// whose symbol cannot be resolved counts as outside.
+    /// </remarks>
+    private static string? DelegationTarget(ExpressionSyntax argument, SourceAnalysisContext context, SyntaxNode entryPoint, int depth)
     {
+        // A chain of local functions in the entry point deeper than this is not followed: it counts as outside.
+        const int MaxDepth = 8;
+
         argument = ObjectCreations.Unwrap(argument);
         if (argument is IdentifierNameSyntax or MemberAccessExpressionSyntax)
-            return argument.ToString();
+        {
+            if (depth >= MaxDepth || DeclarationInEntryPoint(argument, context, entryPoint) is not { } declaration)
+                return argument.ToString();
+            return declaration switch
+            {
+                LocalFunctionStatementSyntax local => PassedOn(local.ParameterList.Parameters, (SyntaxNode?)local.Body ?? local.ExpressionBody, context, entryPoint, depth),
+                MethodDeclarationSyntax method => PassedOn(method.ParameterList.Parameters, (SyntaxNode?)method.Body ?? method.ExpressionBody, context, entryPoint, depth),
+                VariableDeclaratorSyntax { Initializer.Value: { } value } => DelegationTarget(value, context, entryPoint, depth + 1),
+                _ => argument.ToString(),
+            };
+        }
+
         if (argument is not AnonymousFunctionExpressionSyntax lambda)
             return null;
 
-        List<string> parameters = lambda switch
+        List<ParameterSyntax> parameters = lambda switch
         {
-            SimpleLambdaExpressionSyntax simple => [simple.Parameter.Identifier.Text],
-            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.Select(p => p.Identifier.Text).ToList(),
-            AnonymousMethodExpressionSyntax method => method.ParameterList?.Parameters.Select(p => p.Identifier.Text).ToList() ?? [],
+            SimpleLambdaExpressionSyntax simple => [simple.Parameter],
+            ParenthesizedLambdaExpressionSyntax parenthesized => [.. parenthesized.ParameterList.Parameters],
+            AnonymousMethodExpressionSyntax method => method.ParameterList is { } list ? [.. list.Parameters] : [],
             _ => [],
         };
-        return lambda.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
-            .FirstOrDefault(invocation => invocation.ArgumentList.Arguments.Any(a => a.Expression is IdentifierNameSyntax id && parameters.Contains(id.Identifier.Text)))
-            ?.Expression.ToString();
+        return PassedOn(parameters, lambda.Body, context, entryPoint, depth);
+    }
+
+    /// <summary>
+    /// The target outside the entry point of the first call in <paramref name="body"/> that passes one of
+    /// <paramref name="parameters"/> on, or <see langword="null"/> when the body configures the options itself.
+    /// </summary>
+    private static string? PassedOn(
+        IEnumerable<ParameterSyntax> parameters, SyntaxNode? body, SourceAnalysisContext context, SyntaxNode entryPoint, int depth)
+    {
+        if (body == null)
+            return null;
+        var names = parameters.Select(p => p.Identifier.Text).ToHashSet(StringComparer.Ordinal);
+        return body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
+            .Where(invocation => invocation.ArgumentList.Arguments.Any(a => a.Expression is IdentifierNameSyntax id && names.Contains(id.Identifier.Text)))
+            .Select(invocation => DelegationTarget(invocation.Expression, context, entryPoint, depth + 1))
+            .FirstOrDefault(target => target != null);
+    }
+
+    /// <summary>
+    /// The declaration of the method or variable <paramref name="name"/> refers to, when it is declared
+    /// inside <paramref name="entryPoint"/>; otherwise <see langword="null"/>.
+    /// </summary>
+    private static SyntaxNode? DeclarationInEntryPoint(ExpressionSyntax name, SourceAnalysisContext context, SyntaxNode entryPoint)
+    {
+        if (context.CompilationResult?.Compilation is not { } compilation || !compilation.ContainsSyntaxTree(name.SyntaxTree))
+            return null;
+        var info = compilation.GetSemanticModel(name.SyntaxTree).GetSymbolInfo(name);
+        var symbols = info.Symbol != null ? [info.Symbol] : info.CandidateSymbols;
+        if (symbols.Length != 1)
+            return null;
+        var references = symbols[0].DeclaringSyntaxReferences;
+        if (references.Length != 1 || references[0].SyntaxTree != entryPoint.SyntaxTree || !entryPoint.Span.Contains(references[0].Span))
+            return null;
+        return references[0].GetSyntax();
     }
 
     /// <summary>The call of the entry point that registers an options class for SwaggerGen or AddOpenApi, or <see langword="null"/>.</summary>

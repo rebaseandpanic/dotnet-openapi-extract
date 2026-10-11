@@ -8,6 +8,8 @@ All notable changes to this project.
 
 - [FEATURE] A source file compiled into the assembly and edited after the build is no longer read silently: when its content does not have the checksum the portable PDB records, the new warning `source.file-changed-since-build` names the file (`SourceLocation` `file:1`) and asks for a rebuild. The file is still read as it is now, so the document does not change; the warning says it may describe code the assembly does not contain.
 
+- [BUGFIX] `document.configuration-not-in-entry-point` no longer fires when `AddSwaggerGen` / `AddOpenApi` hands its options to a local function or a delegate variable of Program.cs itself: that code is read, so it is followed by its symbol and warns only when it passes the options on to a method declared outside the entry point (the place stays the registration call). The message no longer says the target is "in another file"; it says it is declared outside the entry point.
+
 ## [0.17.0] - 2026-10-10
 
 ### Changes to OpenAPI 3.0 output
