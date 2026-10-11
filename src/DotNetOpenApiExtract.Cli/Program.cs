@@ -51,8 +51,8 @@ var minDescLengthOption = new Option<int>("--min-description-length")
 
 var excludeValidationPathOption = new Option<string[]>("--exclude-validation-path")
 {
-    Description = "Path prefixes skipped by rules that require error responses (operation.has-error-response) " +
-                  "and success responses (operation.success-response). Other rules are not affected. " +
+    Description = "Path prefixes skipped by the rules that require responses: operation.has-error-response, " +
+                  "operation.success-response and operation.has-required-response-codes. Other rules are not affected. " +
                   "Repeatable. Default: none.",
     AllowMultipleArgumentsPerToken = false,
 };
@@ -265,8 +265,8 @@ var pathBaseEmissionOption = new Option<string>("--path-base-emission")
 
 var noEnumAutoDescriptionOption = new Option<bool>("--no-enum-auto-description")
 {
-    Description = "Disable automatic markdown description on enum schemas. " +
-                  "When set, schema.description gets only the type-level summary (old behavior). " +
+    Description = "Disable the per-value markdown list in the description of enum schemas. " +
+                  "The description is not removed: it is whatever the enum type summary or the property gives, without the list. " +
                   "x-enum-descriptions is still emitted when values are documented.",
     DefaultValueFactory = _ => false,
 };
@@ -639,8 +639,8 @@ var validateSubMinDescOption = new Option<int>("--min-description-length")
 
 var validateSubExcludePathOption = new Option<string[]>("--exclude-validation-path")
 {
-    Description = "Path prefixes skipped by rules that require error responses (operation.has-error-response) " +
-                  "and success responses (operation.success-response). Other rules are not affected. " +
+    Description = "Path prefixes skipped by the rules that require responses: operation.has-error-response, " +
+                  "operation.success-response and operation.has-required-response-codes. Other rules are not affected. " +
                   "Repeatable. Default: none.",
     AllowMultipleArgumentsPerToken = false,
 };

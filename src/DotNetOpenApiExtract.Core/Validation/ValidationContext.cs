@@ -18,7 +18,8 @@ public sealed class ValidationContext
     public int MinDescriptionLength { get; init; } = 5;
 
     /// <summary>
-    /// Path prefixes that are skipped for rules requiring error responses (e.g. health check endpoints).
+    /// Path prefixes skipped by the rules that require responses (<c>operation.has-error-response</c>,
+    /// <c>operation.success-response</c>, <c>operation.has-required-response-codes</c>), e.g. health check endpoints.
     /// Comparisons are case-insensitive.
     /// Default: empty (no paths excluded by default — pass /healthz, /ready, /metrics explicitly if needed).
     /// </summary>

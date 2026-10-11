@@ -10,6 +10,8 @@ All notable changes to this project.
 
 - [BUGFIX] `document.configuration-not-in-entry-point` no longer fires when `AddSwaggerGen` / `AddOpenApi` hands its options to a local function or a delegate variable of Program.cs itself: that code is read, so it is followed by its symbol and warns only when it passes the options on to a method declared outside the entry point (the place stays the registration call). The message no longer says the target is "in another file"; it says it is declared outside the entry point.
 
+- [DOCS] `--help` corrected: `--exclude-validation-path` names all three rules it affects (`operation.has-error-response`, `operation.success-response`, `operation.has-required-response-codes`), and `--no-enum-auto-description` says it removes only the per-value list, not the description. No behavior change.
+
 ## [0.17.0] - 2026-10-10
 
 ### Changes to OpenAPI 3.0 output
