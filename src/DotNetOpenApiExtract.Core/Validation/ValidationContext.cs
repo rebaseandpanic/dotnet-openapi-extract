@@ -101,6 +101,30 @@ public sealed class ValidationContext
     public IReadOnlyDictionary<string, int>? MinDescriptionLengthPerRule { get; init; }
 
     /// <summary>
+    /// Copy of this context with every user option kept and the CLR bindings and the spec
+    /// version replaced. The one place that lists the options, so a new option cannot be dropped
+    /// by a caller that rebuilds the context (the <c>generate --validate</c> path).
+    /// </summary>
+    internal ValidationContext WithBindings(
+        IReadOnlyDictionary<string, (ControllerInfo Controller, ActionInfo Action)>? actionByOperationKey,
+        IReadOnlyDictionary<string, Type>? typeBySchemaId,
+        SourceAnalysisContext? sourceContext,
+        OpenApiSpecVersion? openApiSpecVersion) => new()
+    {
+        MinDescriptionLength        = MinDescriptionLength,
+        ExcludedPathPrefixes        = ExcludedPathPrefixes,
+        SkippedRuleIds              = SkippedRuleIds,
+        EnabledRuleIds              = EnabledRuleIds,
+        SeverityOverrides           = SeverityOverrides,
+        RequiredResponseCodes       = RequiredResponseCodes,
+        MinDescriptionLengthPerRule = MinDescriptionLengthPerRule,
+        ActionByOperationKey        = actionByOperationKey,
+        TypeBySchemaId              = typeBySchemaId,
+        SourceContext               = sourceContext,
+        OpenApiSpecVersion          = openApiSpecVersion,
+    };
+
+    /// <summary>
     /// Returns the effective minimum description length for the given rule.
     /// If <paramref name="ruleId"/> has an entry in <see cref="MinDescriptionLengthPerRule"/>,
     /// that value is returned; otherwise, <see cref="MinDescriptionLength"/> is returned.

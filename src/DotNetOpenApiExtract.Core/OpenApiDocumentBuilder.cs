@@ -370,18 +370,8 @@ public sealed class OpenApiDocumentBuilder
         var typeBySchemaId = new Dictionary<string, Type>(
             core.SchemaTypes, StringComparer.Ordinal);
 
-        var enrichedContext = new ValidationContext
-        {
-            MinDescriptionLength     = validationContext.MinDescriptionLength,
-            ExcludedPathPrefixes     = validationContext.ExcludedPathPrefixes,
-            SkippedRuleIds           = validationContext.SkippedRuleIds,
-            EnabledRuleIds           = validationContext.EnabledRuleIds,
-            SeverityOverrides        = validationContext.SeverityOverrides,
-            ActionByOperationKey     = actionByKey,
-            TypeBySchemaId           = typeBySchemaId,
-            SourceContext            = core.SourceContext,
-            OpenApiSpecVersion       = validationVersion,
-        };
+        var enrichedContext = validationContext.WithBindings(
+            actionByKey, typeBySchemaId, core.SourceContext, validationVersion);
 
         validationResult = Validation.OpenApiValidator.Validate(core.Document, enrichedContext);
         return core.Document;

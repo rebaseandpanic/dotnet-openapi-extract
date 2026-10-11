@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [BUGFIX] `--validate` on the extraction command ignored `--require-response-code` and `--rule-min-length`: the options passed to `OpenApiDocumentBuilder.BuildWithValidation` lost `RequiredResponseCodes` and `MinDescriptionLengthPerRule`, so `operation.has-required-response-codes` reported nothing and every description rule used `--min-description-length`. Every option of the validation context is now kept, and the same flags give the same violations as the `validate` command on the written document (apart from `operation.security`, which needs the assembly).
+
 ## [0.17.0] - 2026-10-10
 
 ### Changes to OpenAPI 3.0 output
