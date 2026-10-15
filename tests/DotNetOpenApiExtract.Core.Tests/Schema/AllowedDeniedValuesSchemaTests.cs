@@ -100,18 +100,25 @@ public class AllowedDeniedValuesSchemaTests(AllowedValuesFixture fixture) : ICla
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void AllowedValuesOnAReference_AreAnElementOfItsAllOfWrapper(OpenApiSpecVersion version)
+    public void AllowedValuesOnAReference_AreAnAllOfElementIn30_AndASiblingOfTheReferenceFrom31(OpenApiSpecVersion version)
     {
         var target = Property(version, "target");
-        var allOf = target["allOf"]!.AsArray();
 
-        allOf[0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AllowedTarget");
-        target["$ref"].Should().BeNull();
-        target["enum"].Should().BeNull(because: "the values are not a sibling of the reference");
-        target["const"].Should().BeNull();
-        allOf.Should().HaveCount(2);
-        var constraint = allOf[1]!;
-        (constraint["const"]?.GetValue<string>() ?? constraint["enum"]![0]!.GetValue<string>()).Should().Be("x");
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+        {
+            // 3.0 ignores the siblings of $ref: the values are a second element of the allOf wrapper.
+            var allOf = target["allOf"]!.AsArray();
+            allOf[0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AllowedTarget");
+            target["$ref"].Should().BeNull();
+            target["enum"].Should().BeNull(because: "the values are not a sibling of the reference in 3.0");
+            allOf.Should().HaveCount(2);
+            allOf[1]!["enum"]!.AsArray().Select(v => v!.GetValue<string>()).Should().Equal("x");
+            return;
+        }
+
+        target["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AllowedTarget");
+        target["allOf"].Should().BeNull(because: "the constraint is not an element of allOf from 3.1");
+        target["const"]!.GetValue<string>().Should().Be("x", because: "one allowed string is const from 3.1");
     }
 
     [Theory]

@@ -124,13 +124,20 @@ public class SchemaExampleTests(SchemaExampleFixture fixture) : IClassFixture<Sc
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void ReferenceExample_IsOnTheWrapper_AndTheComponentKeepsItsOwn(OpenApiSpecVersion version)
+    public void ReferenceExample_IsOnThePlace_AndTheComponentKeepsItsOwn(OpenApiSpecVersion version)
     {
-        var wrapper = Property(version, "ExampleModel", "target");
+        var place = Property(version, "ExampleModel", "target");
 
-        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ExampleTarget");
-        Example(wrapper, version).Should().Be(Json("{\"label\": \"from the property\"}"));
-        wrapper["description"]!.GetValue<string>().Should().Be("A reference.");
+        // 3.0 ignores the siblings of $ref: the allOf wrapper carries them; 3.1+ writes them next to $ref.
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            place["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ExampleTarget");
+        else
+        {
+            place["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/ExampleTarget");
+            place["allOf"].Should().BeNull();
+        }
+        Example(place, version).Should().Be(Json("{\"label\": \"from the property\"}"));
+        place["description"]!.GetValue<string>().Should().Be("A reference.");
         Example(Component(version, "ExampleTarget"), version).Should().Be(Json("{\"label\": \"from the type\"}"));
     }
 

@@ -139,9 +139,16 @@ public class ParameterAttributesTests(ParameterAttributesFixture fixture) : ICla
         Keywords(BodySchema(version, "/parameter-attributes/body-collection")).Select(k => $"{k.Key}={k.Value}")
             .Should().BeEquivalentTo(["minItems=1", "maxItems=5"]);
 
-        var wrapper = BodySchema(version, "/parameter-attributes/body-reference");
-        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
-        wrapper["format"]!.GetValue<string>().Should().Be("x-doc");
+        // 3.0 ignores the siblings of $ref: the allOf wrapper carries them; 3.1+ writes them next to $ref.
+        var reference = BodySchema(version, "/parameter-attributes/body-reference");
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            reference["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+        else
+        {
+            reference["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+            reference["allOf"].Should().BeNull();
+        }
+        reference["format"]!.GetValue<string>().Should().Be("x-doc");
         fixture.Documents[version]["components"]!["schemas"]!["AnnotatedTarget"]!.AsObject().ContainsKey("format").Should().BeFalse();
     }
 

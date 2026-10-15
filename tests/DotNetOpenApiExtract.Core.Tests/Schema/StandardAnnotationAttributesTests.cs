@@ -251,23 +251,39 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void XmlSummary_OnAReference_WinsOverTheAttribute_OnTheWrapper(OpenApiSpecVersion version)
+    public void XmlSummary_OnAReference_WinsOverTheAttribute_OnThePlace(OpenApiSpecVersion version)
     {
-        var wrapper = Property(version, "DescriptionPriorityModel", "xmlOverSchemaOnReference");
+        var place = Property(version, "DescriptionPriorityModel", "xmlOverSchemaOnReference");
 
-        Text(wrapper, "description").Should().Be("Xml summary.");
-        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+        Text(place, "description").Should().Be("Xml summary.");
+        ShouldReferenceAnnotatedTarget(place, version);
     }
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void Display_OnAReference_GoesOnTheWrapper_AndLeavesTheComponent(OpenApiSpecVersion version)
+    public void Display_OnAReference_GoesOnThePlace_AndLeavesTheComponent(OpenApiSpecVersion version)
     {
-        var wrapper = Property(version, "DescriptionPriorityModel", "displayOnReference");
+        var place = Property(version, "DescriptionPriorityModel", "displayOnReference");
 
-        Text(wrapper, "description").Should().Be("From Display");
-        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+        Text(place, "description").Should().Be("From Display");
+        ShouldReferenceAnnotatedTarget(place, version);
         Text(Component(version, "AnnotatedTarget"), "description").Should().Be("A nested object for reference-typed annotated properties.");
+    }
+
+    /// <summary>
+    /// The place references AnnotatedTarget: through the allOf wrapper in 3.0, which ignores the siblings
+    /// of $ref; with the keywords next to $ref from 3.1.
+    /// </summary>
+    private static void ShouldReferenceAnnotatedTarget(JsonObject place, OpenApiSpecVersion version)
+    {
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+        {
+            place["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+            return;
+        }
+
+        place["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+        place["allOf"].Should().BeNull();
     }
 
     // ── readOnly / writeOnly / title ─────────────────────────────────────────
@@ -302,14 +318,14 @@ public class StandardAnnotationAttributesTests(StandardAnnotationFixture fixture
 
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void Title_IsWritten_AndAccessOnAReferenceGoesOnTheWrapper(OpenApiSpecVersion version)
+    public void Title_IsWritten_AndAccessOnAReferenceGoesOnThePlace(OpenApiSpecVersion version)
     {
         Text(Property(version, "AccessModel", "titled"), "title").Should().Be("Display title");
 
-        var wrapper = Property(version, "AccessModel", "readOnlyReference");
-        wrapper["readOnly"]!.GetValue<bool>().Should().BeTrue();
-        Text(wrapper, "title").Should().Be("Target");
-        wrapper["allOf"]![0]!["$ref"]!.GetValue<string>().Should().Be("#/components/schemas/AnnotatedTarget");
+        var place = Property(version, "AccessModel", "readOnlyReference");
+        place["readOnly"]!.GetValue<bool>().Should().BeTrue();
+        Text(place, "title").Should().Be("Target");
+        ShouldReferenceAnnotatedTarget(place, version);
         Component(version, "AnnotatedTarget").ContainsKey("readOnly").Should().BeFalse();
         Component(version, "AnnotatedTarget").ContainsKey("title").Should().BeFalse();
     }
