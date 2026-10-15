@@ -1214,6 +1214,8 @@ public sealed class OpenApiDocumentBuilder
                     RecordUnparsableParameterExample(ledger, parameterAnchor, $"parameter {param.Name}", [param.Name, paramExample]);
             }
 
+            // The default and the example are the last writer and reader of the place.
+            openApiParam.Schema = ReferencePlace.Finish(paramSchema, schemaGenerator.OpenApiVersion);
             operation.Parameters.Add(openApiParam);
         }
 
@@ -1265,6 +1267,9 @@ public sealed class OpenApiDocumentBuilder
                 RecordUnparsableParameterExample(ledger, new LossAnchor.Node(new LossAnchor.Operation(operation), ["requestBody"]),
                     $"body parameter {bodyName}", [bodyName, bodyExampleText]);
 
+            // The example is the last reader of the place.
+            bodySchema = ReferencePlace.Finish(bodySchema, schemaGenerator.OpenApiVersion);
+
             operation.RequestBody = new OpenApiRequestBody
             {
                 Required = bodyParam.IsRequired,
@@ -1295,7 +1300,6 @@ public sealed class OpenApiDocumentBuilder
                     $"{fieldReflection.Member.Name}({fieldReflection.Name})",
                     // Located at the media type the finished document has (a global [Consumes] may replace it).
                     new LossAnchor.Node(new LossAnchor.RequestBodyContent(operation), ["schema", "properties", fp.Name]));
-                formSchema.Properties![fp.Name] = fpSchema;
                 if (fp.IsRequired)
                     requiredFields.Add(fp.Name);
 
@@ -1306,6 +1310,9 @@ public sealed class OpenApiDocumentBuilder
                     else
                         unparsableFields.AddRange([fp.Name, fieldExample]);
                 }
+
+                // The example is the last reader of the field.
+                formSchema.Properties![fp.Name] = ReferencePlace.Finish(fpSchema, schemaGenerator.OpenApiVersion);
             }
 
             if (requiredFields.Count > 0)

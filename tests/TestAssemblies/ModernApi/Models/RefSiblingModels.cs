@@ -11,6 +11,13 @@ public class SiblingTarget
     public string Name { get; set; } = string.Empty;
 }
 
+/// <summary>Sibling point component, a struct: its nullable form is a nullable reference.</summary>
+public struct SiblingPoint
+{
+    /// <summary>X.</summary>
+    public int X { get; set; }
+}
+
 /// <summary>
 /// Properties that reference a component and carry keywords of their own: one class of sibling
 /// keyword per property, the forms with allowed values, nullable references, and a bare reference.
