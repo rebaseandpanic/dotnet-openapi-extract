@@ -184,4 +184,12 @@ public class SchemaKeywordsController : ControllerBase
     /// <summary>A polymorphic base whose example is not an object.</summary>
     [HttpGet("arrayexampleshape")]
     public ActionResult<ArrayExampleShape> ArrayExampleShape() => new ArrayExampleShapeItem();
+
+    /// <summary>References with keywords of their own.</summary>
+    [HttpGet("ref-siblings")]
+    public ActionResult<RefSiblingsModel> RefSiblings() => new RefSiblingsModel();
+
+    /// <summary>Other places of the referenced components.</summary>
+    [HttpGet("ref-siblings/neighbour")]
+    public ActionResult<RefSiblingsNeighbour> RefSiblingsNeighbour() => new RefSiblingsNeighbour();
 }

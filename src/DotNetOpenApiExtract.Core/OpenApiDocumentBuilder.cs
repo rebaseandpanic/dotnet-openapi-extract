@@ -881,24 +881,16 @@ public sealed class OpenApiDocumentBuilder
                             if (string.IsNullOrEmpty(propDoc.Description))
                                 continue;
 
-                            if (propSchema is OpenApiSchemaReference)
-                            {
-                                // $ref cannot carry sibling keywords directly — wrap in allOf.
-                                var wrapped = SchemaGenerator.EnsureMutableSchema(propSchema);
-                                wrapped.Description = propDoc.Description;
-                                schema.Properties[propName] = wrapped;
-                            }
-                            else if (propSchema is OpenApiSchema inlineProp
-                                     && (string.IsNullOrEmpty(inlineProp.Description)
-                                         || inlineProp.Description == DocumentationResolver.AttributeDescription(
-                                             AttributeHelper.GetMergedPropertyAttributes(prop))))
-                            {
-                                // An empty description, or the one the attributes gave: the XML
-                                // <summary> replaces it (ResolveProperty puts XML first). A default
-                                // of a converter hint stays when there is no attribute; the description
-                                // of an enum type stays always (the attributes do not replace it either).
-                                inlineProp.Description = propDoc.Description;
-                            }
+                            // An empty description, or the one the attributes gave: the XML
+                            // <summary> replaces it (ResolveProperty puts XML first). A default
+                            // of a converter hint stays when there is no attribute; the description
+                            // of an enum type stays always (the attributes do not replace it either).
+                            // A reference takes it next to $ref in 3.1+, in an allOf wrapper in 3.0.
+                            schema.Properties[propName] = ReferencePlace.SetDescription(
+                                propSchema,
+                                propDoc.Description,
+                                DocumentationResolver.AttributeDescription(AttributeHelper.GetMergedPropertyAttributes(prop)),
+                                options.OpenApiVersion);
                         }
                     }
                 }

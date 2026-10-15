@@ -925,7 +925,7 @@ public sealed class SchemaGenerator
             // When the property schema is a reference AND there are attributes that write sibling
             // keywords, wrap it in allOf so the keywords are valid on the enclosing schema.
             if (propSchema is OpenApiSchemaReference && HasAnySiblingAttribute(propAttrData))
-                propSchema = EnsureMutableSchema(propSchema);
+                propSchema = ReferencePlace.Mutable(propSchema);
 
             if (propSchema is OpenApiSchema inlinePropSchema)
             {
@@ -943,6 +943,9 @@ public sealed class SchemaGenerator
                 ApplyDefaultValue(withDefault, propAttrData, propInfo, serializedName, componentId);
 
             propSchema = ApplyPropertyExample(propSchema, type, propInfo, serializedName, componentId);
+
+            // The example is the last writer of the place: from here on it has the form of the version.
+            propSchema = ReferencePlace.Finish(propSchema, _options.OpenApiVersion);
 
             properties[serializedName] = propSchema;
 
@@ -1538,7 +1541,7 @@ public sealed class SchemaGenerator
         if (!constrains)
             return schema;
 
-        var mutable = EnsureMutableSchema(schema);
+        var mutable = ReferencePlace.Mutable(schema);
         ApplyConstraintAttributes(mutable, attrData, parameterType);
         ApplyRange(mutable, attrData, typeName, memberName, anchor);
 
@@ -1686,6 +1689,8 @@ public sealed class SchemaGenerator
     /// <c>enum</c> of its own; where it has (an enum type), or the schema is the <c>allOf</c> wrapper of
     /// a reference, the allowed values are a separate element of <c>allOf</c>: the type's own
     /// <c>enum</c> is kept, no intersection is computed. Denied values: <c>not: {enum}</c> as a sibling.
+    /// These are the working forms of a reference place: <see cref="ReferencePlace.Finish"/> puts the
+    /// allowed values next to <c>$ref</c> (or beside the <c>anyOf</c> of a nullable reference) in 3.1+.
     /// Values not convertible to the schema's JSON type give a warning and no constraint.
     /// </summary>
     /// <summary>
@@ -1975,7 +1980,7 @@ public sealed class SchemaGenerator
 
         var element = $"{property.DeclaringType?.FullName ?? componentId}.{property.Name}";
         var anchor = new LossAnchor.Node(new LossAnchor.Component(componentId), ["properties", serializedName]);
-        var schema = EnsureMutableSchema(propSchema);
+        var schema = ReferencePlace.Mutable(propSchema);
         WriteExample(schema, doc.Example, doc.ExampleCount, element, anchor);
         return schema;
     }
@@ -2770,22 +2775,6 @@ public sealed class SchemaGenerator
                 VersionedSchemaForms.NullBranch(version),
             },
         };
-    }
-
-    /// <summary>
-    /// Returns a mutable <see cref="OpenApiSchema"/> that can carry sibling keywords
-    /// (description, default, constraints). When <paramref name="schema"/> is already an
-    /// <see cref="OpenApiSchema"/> it is returned unchanged. When it is an
-    /// <see cref="OpenApiSchemaReference"/>, it is wrapped in an allOf-composite so that
-    /// sibling keywords can be attached per OpenAPI spec rules ($ref siblings are forbidden
-    /// in OpenAPI 3.0 and allowed but ambiguous in 3.1 — allOf is unambiguous in both).
-    /// </summary>
-    internal static OpenApiSchema EnsureMutableSchema(IOpenApiSchema schema)
-    {
-        if (schema is OpenApiSchema inline) return inline;
-        if (schema is OpenApiSchemaReference reference)
-            return new OpenApiSchema { AllOf = [reference] };
-        return new OpenApiSchema();
     }
 
     /// <summary>
