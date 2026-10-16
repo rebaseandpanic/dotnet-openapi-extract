@@ -244,15 +244,16 @@ public sealed class SchemaGenerator
     /// The schema of a value ASP.NET Core model binding reads from the route, query string, a header
     /// or a form field. Such a value is converted by its type converter, not by the JSON serializer:
     /// an enum is read by its member names (and numbers), so a string enum lists the member names,
-    /// not the names a JSON converter writes.
+    /// not the names a JSON converter writes. <paramref name="positions"/> are the NRT positions of the
+    /// parameter's declaration (see <see cref="GenerateSchema(Type, TypeNullability?)"/>).
     /// </summary>
-    internal IOpenApiSchema GenerateBoundValueSchema(Type type)
+    internal IOpenApiSchema GenerateBoundValueSchema(Type type, TypeNullability? positions = null)
     {
         var previous = _bindingByMemberName;
         _bindingByMemberName = true;
         try
         {
-            return GenerateSchema(type);
+            return GenerateSchema(type, positions);
         }
         finally
         {

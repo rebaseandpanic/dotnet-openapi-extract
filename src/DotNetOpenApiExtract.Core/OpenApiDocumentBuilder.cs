@@ -1125,8 +1125,10 @@ public sealed class OpenApiDocumentBuilder
             if (param.Location is OurParameterLocation.Body or OurParameterLocation.Form)
                 continue;
 
-            // Bound by model binding (type converters), not by the JSON serializer.
-            var paramSchema = schemaGenerator.GenerateBoundValueSchema(param.Type);
+            // Bound by model binding (type converters), not by the JSON serializer. The parameter's
+            // declaration marks its nullable elements and dictionary values.
+            var paramSchema = schemaGenerator.GenerateBoundValueSchema(
+                param.Type, TypeNullability.ForParameter(param.ReflectionParameter));
 
             // Validation attributes of the parameter, as on a DTO property; the parameter is the
             // next entry of the operation's list.
@@ -1248,7 +1250,7 @@ public sealed class OpenApiDocumentBuilder
 
         if (bodyParam != null)
         {
-            var bodySchema = schemaGenerator.GenerateSchema(bodyParam.Type);
+            var bodySchema = schemaGenerator.GenerateSchema(bodyParam.Type, TypeNullability.ForParameter(bodyParam.ReflectionParameter));
 
             // Validation attributes on the [FromBody] parameter itself constrain the body; a
             // reference is wrapped in allOf, the shared component is left as it is.
@@ -1295,7 +1297,8 @@ public sealed class OpenApiDocumentBuilder
                 // A field is bound by model binding; its validation attributes constrain its schema.
                 var fieldReflection = fp.ReflectionParameter;
                 var fpSchema = schemaGenerator.ApplyParameterValidation(
-                    schemaGenerator.GenerateBoundValueSchema(fp.Type), fieldReflection.GetCustomAttributesData(), fp.Type,
+                    schemaGenerator.GenerateBoundValueSchema(fp.Type, TypeNullability.ForParameter(fieldReflection)),
+                    fieldReflection.GetCustomAttributesData(), fp.Type,
                     fieldReflection.Member.DeclaringType?.FullName ?? string.Empty,
                     $"{fieldReflection.Member.Name}({fieldReflection.Name})",
                     // Located at the media type the finished document has (a global [Consumes] may replace it).
