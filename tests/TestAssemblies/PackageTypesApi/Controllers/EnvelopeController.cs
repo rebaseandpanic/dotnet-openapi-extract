@@ -13,7 +13,16 @@ public class Envelope
     /// <summary>Settings of a NuGet package type.</summary>
     public JsonMergeSettings Settings { get; set; } = new();
 
+    /// <summary>Settings of the application derived from a package type.</summary>
+    public LocalMergeSettings Local { get; set; } = new();
+
     public string Undocumented { get; set; } = "";
+}
+
+/// <summary>Settings of the application that extend a package type.</summary>
+public class LocalMergeSettings : JsonMergeSettings
+{
+    public bool OwnUndocumented { get; set; }
 }
 
 /// <summary>Returns the envelope.</summary>

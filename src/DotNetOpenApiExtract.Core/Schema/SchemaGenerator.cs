@@ -2257,7 +2257,7 @@ public sealed class SchemaGenerator
     /// Currently handles <c>[JsonIgnore(Condition = Always)]</c> (condition value 1).
     /// Accepts pre-fetched attribute data to avoid repeated GetCustomAttributesData() calls.
     /// </summary>
-    private static bool ShouldIgnoreProperty(IList<CustomAttributeData> attrData)
+    internal static bool ShouldIgnoreProperty(IList<CustomAttributeData> attrData)
     {
         var attr = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.JsonIgnore);
         if (attr == null)

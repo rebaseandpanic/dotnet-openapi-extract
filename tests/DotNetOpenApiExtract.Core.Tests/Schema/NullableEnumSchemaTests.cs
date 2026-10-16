@@ -286,17 +286,50 @@ public class NullableEnumSchemaTests(NullableElementConformanceFixture fixture) 
     }
 
     /// <summary>
-    /// <c>schema.property-constraints</c> finds the bounds of <c>[Range]</c> on the enum branch of the
-    /// property: the build with validation reports nothing for the property.
+    /// The lengths, the pattern and the format of <c>Level?</c> written by name stand on the enum branch,
+    /// beside its string values — also when <c>[AllowedValues]</c> wraps the union in an outer
+    /// <c>allOf</c> (3.0) — and neither on the union nor on the null branch.
     /// </summary>
     [Theory]
     [MemberData(nameof(AllVersions))]
-    public void RangeOnANullableNumericEnum_SatisfiesThePropertyConstraintsRule(OpenApiSpecVersion version)
+    public void LengthPatternAndFormatOnANullableStringEnum_StandOnTheEnumBranch(OpenApiSpecVersion version)
+    {
+        var properties = Schemas(fixture.Documents[version])["NullableEnumRangeModel"]!["properties"]!;
+
+        var named = properties["namedLevel"]!.AsObject();
+        var branch = named["anyOf"]![0]!.AsObject();
+        branch["enum"]!.AsArray().Select(v => v!.GetValue<string>()).Should().Equal(["Low", "High"]);
+        branch["maxLength"]!.GetValue<int>().Should().Be(8);
+        branch["minLength"]!.GetValue<int>().Should().Be(2);
+        branch["pattern"]!.GetValue<string>().Should().Be("^[A-Z][a-z]+$");
+        branch["format"]!.GetValue<string>().Should().Be("level-name");
+        foreach (var key in new[] { "maxLength", "minLength", "pattern", "format" })
+        {
+            named.Should().NotContainKey(key);
+            named["anyOf"]![1]!.AsObject().Should().NotContainKey(key);
+        }
+
+        var allowed = properties["allowedNamedLevel"]!.AsObject();
+        var union = version == OpenApiSpecVersion.OpenApi3_0 ? allowed["allOf"]![0]!.AsObject() : allowed;
+        union["anyOf"]![0]!["maxLength"]!.GetValue<int>().Should().Be(4);
+        allowed.Should().NotContainKey("maxLength");
+    }
+
+    /// <summary>
+    /// <c>schema.property-constraints</c> and <c>schema.property-format</c> find the bounds of
+    /// <c>[Range]</c>, the lengths, the pattern and the format on the enum branch of each nullable enum
+    /// property, an outer <c>allOf</c> of allowed values included: the build with validation reports
+    /// nothing for the model.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void ConstraintsOfANullableEnum_SatisfyTheConstraintAndFormatRules(OpenApiSpecVersion version)
     {
         OpenApiDocumentBuilder.BuildWithValidation(VersionedDocumentHarness.ModernApiOptions(version), new Core.Validation.ValidationContext(), out var result);
 
         result.Violations
-            .Where(v => v.RuleId == "schema.property-constraints" && v.JsonPointer.Contains("NullableEnumRangeModel", StringComparison.Ordinal))
+            .Where(v => v.RuleId is "schema.property-constraints" or "schema.property-format"
+                        && v.JsonPointer.Contains("NullableEnumRangeModel", StringComparison.Ordinal))
             .Should().BeEmpty();
     }
 }

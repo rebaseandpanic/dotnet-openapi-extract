@@ -174,6 +174,19 @@ public class NullableEnumRangeModel
     /// <summary>A level with a format of its own, or none.</summary>
     [SwaggerSchema(Format = "level-code")]
     public Level? CodedLevel { get; set; }
+
+    /// <summary>A level written by name, with a length, a pattern and a format, or none.</summary>
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+    [StringLength(8, MinimumLength = 2)]
+    [RegularExpression("^[A-Z][a-z]+$")]
+    [SwaggerSchema(Format = "level-name")]
+    public Level? NamedLevel { get; set; }
+
+    /// <summary>A level written by name among allowed values, with a maximum length, or none.</summary>
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+    [MaxLength(4)]
+    [AllowedValues(ModernApi.Models.Keywords.Level.High)]
+    public Level? AllowedNamedLevel { get; set; }
 }
 
 /// <summary>An item held by a dictionary or a list of a type of its own.</summary>

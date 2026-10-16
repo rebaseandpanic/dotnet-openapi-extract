@@ -108,6 +108,9 @@ public sealed class SchemaRulesTests
         [Required, JsonPropertyName("display_name")] public string? Display { get; set; }
         public int Plain { get; set; }
         public string Text { get; set; } = "";
+        [Required] public string? FirstName { get; set; }
+        [Required, JsonIgnore] public string? Hidden { get; set; }
+        [JsonPropertyName("hidden")] public string? Shown { get; set; }
     }
 
     private static OpenApiDocument RequiredDocument(params string[] required) => new()
@@ -128,6 +131,8 @@ public sealed class SchemaRulesTests
                         ["display_name"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null },
                         ["plain"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
                         ["text"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                        ["first_name"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null },
+                        ["hidden"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null },
                     },
                     Required = new HashSet<string>(required),
                 },
@@ -143,7 +148,9 @@ public sealed class SchemaRulesTests
     /// <summary>
     /// <c>[Required]</c>, <c>[JsonRequired]</c> and the <c>required</c> modifier declare a requirement the
     /// schema must list; a non-nullable value type or reference type declares none (System.Text.Json
-    /// reads a default for an absent <c>int</c>), so <c>plain</c> and <c>text</c> are not reported.
+    /// reads a default for an absent <c>int</c>), so <c>plain</c> and <c>text</c> are not reported. The
+    /// property is found under a naming policy (<c>first_name</c>), and an ignored member is never the one
+    /// written (<c>hidden</c> is <c>Shown</c>, not the <c>[Required]</c> <c>Hidden</c>).
     /// </summary>
     [Fact]
     public void SchemaRequiredConsistency_DeclaredRequiredNotListed_IsReported_AndUndeclaredIsNot()
@@ -155,6 +162,7 @@ public sealed class SchemaRulesTests
             "#/components/schemas/RequiredDto/properties/code",
             "#/components/schemas/RequiredDto/properties/count",
             "#/components/schemas/RequiredDto/properties/display_name",
+            "#/components/schemas/RequiredDto/properties/first_name",
             "#/components/schemas/RequiredDto/properties/name",
         ]);
         violations.Should().OnlyContain(v => v.RuleId == "schema.required-consistency");
@@ -163,7 +171,7 @@ public sealed class SchemaRulesTests
     [Fact]
     public void SchemaRequiredConsistency_DeclaredRequiredListed_NoViolation()
     {
-        new SchemaRequiredConsistencyRule().Validate(RequiredDocument("name", "count", "code", "display_name"), RequiredContext)
+        new SchemaRequiredConsistencyRule().Validate(RequiredDocument("name", "count", "code", "display_name", "first_name"), RequiredContext)
             .Should().BeEmpty();
     }
 

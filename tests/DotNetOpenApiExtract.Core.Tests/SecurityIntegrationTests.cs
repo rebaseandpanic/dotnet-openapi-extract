@@ -575,4 +575,35 @@ public class SecurityIntegrationTests
         build.Should().Throw<OpenApiConfigurationException>()
             .Which.Message.Should().Contain("'Cookie'").And.Contain("'WebSession'");
     }
+
+    /// <summary>
+    /// A scheme declared in Program.cs whose definition is not static is omitted from the document;
+    /// naming it as the default scheme says so instead of calling it undefined.
+    /// </summary>
+    [Fact]
+    public void DefaultSecurityScheme_OmittedDefinition_SaysItWasOmitted()
+    {
+        using var tempDir = new TempDirectory();
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Program.cs"),
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c => c.AddSecurityDefinition("WebSession", scheme));
+            builder.Build().Run();
+            """);
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+
+        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath          = TestPaths.SampleApiDll,
+            XmlPath               = TestPaths.SampleApiXml,
+            SourceRoot            = tempDir.Path,
+            DefaultSecurityScheme = "WebSession",
+        });
+
+        build.Should().Throw<OpenApiConfigurationException>()
+            .Which.Message.Should().Contain("'WebSession'").And.Contain("omitted");
+    }
 }

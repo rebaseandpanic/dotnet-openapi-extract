@@ -92,9 +92,14 @@ public sealed class SchemaPropertyFormatRule : IValidationRule
         }
     }
 
-    /// <summary>The format of a property schema, or of the numeric branch of a number-handling <c>anyOf</c>.</summary>
+    /// <summary>
+    /// The format of a property schema, of the enum branch of a nullable enum, or of the numeric branch
+    /// of a number-handling <c>anyOf</c>.
+    /// </summary>
     private static string? FormatOf(OpenApiSchema prop)
     {
+        // A nullable enum keeps its format on the enum branch of the union.
+        prop = VersionedSchemaForms.ConstraintTarget(prop);
         if (prop.Format != null)
             return prop.Format;
 

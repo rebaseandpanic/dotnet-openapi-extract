@@ -122,8 +122,20 @@ public sealed class ValidationContext
     /// <c>schema.external-property-description</c> (warnings) instead of
     /// <c>schema.description</c> / <c>schema.property-description</c>.
     /// <para>Null when unknown (standalone mode, no <c>*.deps.json</c>): every type counts as the project's.</para>
+    /// <para>
+    /// The build with validation reads it from the <c>*.deps.json</c> beside the assembly; a value set by
+    /// the caller wins.
+    /// </para>
     /// </summary>
     public IReadOnlySet<string>? ProjectAssemblyNames { get; init; }
+
+    /// <summary>
+    /// The simple names of the runtime assemblies of the application's NuGet packages, from its
+    /// <c>*.deps.json</c>. It only shapes the advice of the external description rules: a package's XML
+    /// documentation is copied next to the assembly with <c>CopyDocumentationFilesFromPackages</c>.
+    /// <para>Null when unknown. A value set by the caller wins over the one the build reads.</para>
+    /// </summary>
+    public IReadOnlySet<string>? PackageAssemblyNames { get; init; }
 
     /// <summary>
     /// Copy of this context with every user option kept and the CLR bindings and the spec
@@ -135,7 +147,8 @@ public sealed class ValidationContext
         IReadOnlyDictionary<string, Type>? typeBySchemaId,
         SourceAnalysisContext? sourceContext,
         OpenApiSpecVersion? openApiSpecVersion,
-        IReadOnlySet<string>? projectAssemblyNames = null) => new()
+        IReadOnlySet<string>? projectAssemblyNames = null,
+        IReadOnlySet<string>? packageAssemblyNames = null) => new()
     {
         MinDescriptionLength        = MinDescriptionLength,
         ExcludedPathPrefixes        = ExcludedPathPrefixes,
@@ -148,7 +161,8 @@ public sealed class ValidationContext
         TypeBySchemaId              = typeBySchemaId,
         SourceContext               = sourceContext,
         OpenApiSpecVersion          = openApiSpecVersion,
-        ProjectAssemblyNames        = projectAssemblyNames,
+        ProjectAssemblyNames        = ProjectAssemblyNames ?? projectAssemblyNames,
+        PackageAssemblyNames        = PackageAssemblyNames ?? packageAssemblyNames,
     };
 
     /// <summary>

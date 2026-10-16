@@ -106,6 +106,17 @@ internal static class VersionedSchemaForms
             : null;
 
     /// <summary>
+    /// The schema that holds the constraints of a nullable enum place — lengths, <c>pattern</c>,
+    /// <c>format</c>, the bounds of <c>[Range]</c>: the enum branch of <paramref name="schema"/> when it is
+    /// the nullable enum union, or of the first element of its <c>allOf</c> when allowed values wrapped
+    /// the union (3.0); otherwise <paramref name="schema"/> itself.
+    /// </summary>
+    public static OpenApiSchema ConstraintTarget(OpenApiSchema schema) =>
+        NullableEnumBranch(schema)
+        ?? (schema.AllOf is [var first, ..] ? NullableEnumBranch(first) : null)
+        ?? schema;
+
+    /// <summary>
     /// Whether <paramref name="schema"/> is a <see cref="NullBranch"/> of either version, built or read
     /// from a file (the reader holds a <c>null</c> of <c>enum</c> as <see cref="JsonNullSentinel.JsonNull"/>).
     /// </summary>

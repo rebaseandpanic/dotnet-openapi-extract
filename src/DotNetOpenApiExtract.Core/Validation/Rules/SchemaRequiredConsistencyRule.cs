@@ -35,12 +35,11 @@ public sealed class SchemaRequiredConsistencyRule : IValidationRule
             if (schema is not OpenApiSchema s || s.Properties == null) continue;
             if (!context.TypeBySchemaId.TryGetValue(schemaId, out var clrType)) continue;
 
-            var properties = clrType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
             foreach (var propName in s.Properties.Keys.OrderBy(k => k, StringComparer.Ordinal))
             {
                 if (s.Required?.Contains(propName) == true) continue;
-                if (ClrProperty(properties, propName) is not { } clrProp) continue;
-                if (!IsDeclaredRequired(clrProp.GetCustomAttributesData())) continue;
+                if (ClrProperties.Find(clrType, propName) is not { } clrProp) continue;
+                if (!IsDeclaredRequired(AttributeHelper.GetMergedPropertyAttributes(clrProp))) continue;
 
                 yield return new ValidationViolation(
                     Id,
@@ -51,19 +50,6 @@ public sealed class SchemaRequiredConsistencyRule : IValidationRule
             }
         }
     }
-
-    /// <summary>
-    /// The CLR property written as <paramref name="propName"/>: the one whose <c>[JsonPropertyName]</c>
-    /// is that name, else the one with that name ignoring case (the naming policy).
-    /// </summary>
-    private static PropertyInfo? ClrProperty(PropertyInfo[] properties, string propName) =>
-        properties.FirstOrDefault(p => JsonName(p) == propName)
-        ?? properties.FirstOrDefault(p => JsonName(p) == null && string.Equals(p.Name, propName, StringComparison.OrdinalIgnoreCase));
-
-    private static string? JsonName(PropertyInfo property) =>
-        AttributeHelper.GetAttribute(property.GetCustomAttributesData(), AttributeHelper.Names.JsonPropertyName) is { } attr
-            ? AttributeHelper.GetConstructorArgument<string>(attr, 0)
-            : null;
 
     private static bool IsDeclaredRequired(IList<CustomAttributeData> attributes) =>
         AttributeHelper.HasAttribute(attributes, AttributeHelper.Names.Required)

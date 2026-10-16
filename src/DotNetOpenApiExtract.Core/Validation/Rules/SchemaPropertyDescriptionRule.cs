@@ -12,8 +12,9 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// is not read, and a bare reference is skipped.
 /// </para>
 /// <para>
-/// The properties of a component whose CLR type comes from outside the project
-/// (<see cref="SchemaOrigin"/>) are left to <see cref="SchemaExternalPropertyDescriptionRule"/>.
+/// A property declared outside the project — by a package or framework type, a component's own or a
+/// base type of a project type (<see cref="SchemaOrigin"/>) — is left to
+/// <see cref="SchemaExternalPropertyDescriptionRule"/>.
 /// </para>
 /// </summary>
 public sealed class SchemaPropertyDescriptionRule : IValidationRule
@@ -26,7 +27,7 @@ public sealed class SchemaPropertyDescriptionRule : IValidationRule
         var resolver = new ViolationLocationResolver(context);
         foreach (var (schemaId, propName) in Undescribed(document))
         {
-            if (SchemaOrigin.ExternalAssembly(context, schemaId) != null) continue;
+            if (SchemaOrigin.ExternalAssembly(context, schemaId, propName) != null) continue;
             yield return new ValidationViolation(
                 Id,
                 DefaultSeverity,

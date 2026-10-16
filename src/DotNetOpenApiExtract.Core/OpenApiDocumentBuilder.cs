@@ -212,7 +212,8 @@ public sealed class OpenApiDocumentOptions
     /// application's default authentication scheme, which ASP.NET Core sets at run time and the tool
     /// cannot read when it is configured outside <c>Program.cs</c>. Such an operation gets a requirement
     /// of this scheme (with the roles of <c>[Authorize(Roles)]</c> as usual); <c>[AllowAnonymous]</c> and
-    /// an explicit <c>AuthenticationSchemes</c> keep theirs. The name is the one in
+    /// an explicit <c>AuthenticationSchemes</c> keep theirs. For these operations the scheme replaces the
+    /// document's requirements, as an explicit <c>AuthenticationSchemes</c> does. The name is the one in
     /// <c>components/securitySchemes</c> (<c>AddSecurityDefinition</c>). <see langword="null"/>: such an
     /// operation inherits the document's requirements, if any.
     /// </summary>
@@ -384,9 +385,10 @@ public sealed class OpenApiDocumentBuilder
         var typeBySchemaId = new Dictionary<string, Type>(
             core.SchemaTypes, StringComparer.Ordinal);
 
+        var assemblies = ProjectAssemblies.Read(options.AssemblyPath);
         var enrichedContext = validationContext.WithBindings(
             actionByKey, typeBySchemaId, core.SourceContext, validationVersion,
-            ProjectAssemblies.Read(options.AssemblyPath));
+            assemblies?.Project, assemblies?.Package);
 
         validationResult = Validation.OpenApiValidator.Validate(core.Document, enrichedContext);
         return core.Document;
@@ -506,10 +508,13 @@ public sealed class OpenApiDocumentBuilder
         var securityResult = SecuritySchemeExtractor.Extract(sourceContext, diagnostics.Report);
         if (options.DefaultSecurityScheme is { } defaultScheme && !securityResult.Schemes.ContainsKey(defaultScheme))
             throw new OpenApiConfigurationException(
-                $"The default security scheme '{defaultScheme}' is not defined: the document defines " +
-                (securityResult.Schemes.Count == 0
-                    ? "no security schemes."
-                    : string.Join(", ", securityResult.Schemes.Keys.Order(StringComparer.Ordinal).Select(k => $"'{k}'")) + "."));
+                securityResult.OmittedSchemes.Contains(defaultScheme)
+                    ? $"The default security scheme '{defaultScheme}' is declared in Program.cs, but its definition could not be read " +
+                      "statically and was omitted (see the warning above): it cannot be required."
+                    : $"The default security scheme '{defaultScheme}' is not defined: the document defines " +
+                      (securityResult.Schemes.Count == 0
+                          ? "no security schemes."
+                          : string.Join(", ", securityResult.Schemes.Keys.Order(StringComparer.Ordinal).Select(k => $"'{k}'")) + "."));
 
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);

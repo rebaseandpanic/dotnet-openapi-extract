@@ -1,6 +1,6 @@
 namespace DotNetOpenApiExtract.Core.Validation.Rules;
 
-/// <summary>Where the CLR type of a component schema is declared: in the project or outside it.</summary>
+/// <summary>Where the CLR type of a component schema, or of one of its properties, is declared.</summary>
 internal static class SchemaOrigin
 {
     /// <summary>
@@ -11,15 +11,38 @@ internal static class SchemaOrigin
     /// </summary>
     public static string? ExternalAssembly(ValidationContext context, string schemaId)
     {
-        if (context.ProjectAssemblyNames is not { } project) return null;
+        if (context.ProjectAssemblyNames is null) return null;
         if (context.TypeBySchemaId?.TryGetValue(schemaId, out var type) != true) return null;
-        var name = type!.Assembly.GetName().Name;
-        return name != null && !project.Contains(name) ? name : null;
+        return External(context, type!);
+    }
+
+    /// <summary>
+    /// The assembly that declares the property written as <paramref name="propertyName"/> of
+    /// <paramref name="schemaId"/> when it is outside the project: the declaring type of the CLR
+    /// property, so a property a project type inherits from a package type (<c>class MyProblem :
+    /// ProblemDetails</c>) is external, and one it declares itself is not; the component's type when
+    /// the property has no CLR property.
+    /// </summary>
+    public static string? ExternalAssembly(ValidationContext context, string schemaId, string propertyName)
+    {
+        if (context.ProjectAssemblyNames is null) return null;
+        if (context.TypeBySchemaId?.TryGetValue(schemaId, out var type) != true) return null;
+        var declaring = ClrProperties.Find(type!, propertyName)?.DeclaringType ?? type!;
+        return External(context, declaring);
+    }
+
+    private static string? External(ValidationContext context, Type type)
+    {
+        var name = type.Assembly.GetName().Name;
+        return name != null && !context.ProjectAssemblyNames!.Contains(name) ? name : null;
     }
 
     /// <summary>What to do about a missing description of a type from <paramref name="assembly"/>.</summary>
-    public static string Hint(string assembly) =>
-        $"The type comes from '{assembly}', outside the project, so its description can only come from that assembly's XML documentation. " +
-        "If the package ships one, set <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages> in the project file " +
-        "so the build copies it next to the assembly, or pass it with --xml.";
+    public static string Hint(ValidationContext context, string assembly) =>
+        context.PackageAssemblyNames?.Contains(assembly) == true
+            ? $"The type comes from the NuGet package assembly '{assembly}', so its description can only come from the package's XML documentation. " +
+              "If the package ships one, set <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages> in the project file " +
+              "so the build copies it next to the assembly, or pass it with --xml."
+            : $"The type comes from '{assembly}', outside the project, so its description can only come from that assembly's XML documentation: " +
+              "pass it with --xml.";
 }

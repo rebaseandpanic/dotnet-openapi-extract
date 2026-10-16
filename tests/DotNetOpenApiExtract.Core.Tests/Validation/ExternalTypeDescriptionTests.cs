@@ -34,7 +34,8 @@ public sealed class ExternalTypeDescriptionTests
 
         Pointers(result, "schema.property-description").Should().Equal(
             "#/components/schemas/ContractItem/properties/undocumented",
-            "#/components/schemas/Envelope/properties/undocumented");
+            "#/components/schemas/Envelope/properties/undocumented",
+            "#/components/schemas/LocalMergeSettings/properties/ownUndocumented");
         Pointers(result, "schema.description").Should().BeEmpty();
         result.Violations.Where(v => v.RuleId is "schema.property-description" or "schema.description")
             .Should().OnlyContain(v => v.Severity == ValidationSeverity.Error);
@@ -50,11 +51,20 @@ public sealed class ExternalTypeDescriptionTests
             .ToList();
 
         external.Should().NotBeEmpty();
-        external.Should().OnlyContain(v => v.JsonPointer.StartsWith("#/components/schemas/JsonMergeSettings", StringComparison.Ordinal));
+        external.Should().OnlyContain(v => v.JsonPointer.StartsWith("#/components/schemas/JsonMergeSettings", StringComparison.Ordinal)
+                                           || v.JsonPointer.StartsWith("#/components/schemas/LocalMergeSettings/properties/", StringComparison.Ordinal));
         external.Should().OnlyContain(v => v.Severity == ValidationSeverity.Warning);
-        external.Should().OnlyContain(v => v.Message.Contains("'Newtonsoft.Json'", StringComparison.Ordinal)
+        external.Should().OnlyContain(v => v.Message.Contains("NuGet package assembly 'Newtonsoft.Json'", StringComparison.Ordinal)
                                            && v.Message.Contains("CopyDocumentationFilesFromPackages", StringComparison.Ordinal));
         Pointers(result, "schema.external-description").Should().Equal("#/components/schemas/JsonMergeSettings");
+
+        // A project type inherits the package type's properties: those are external, its own is not.
+        // (propertyNameComparison takes the description of System.StringComparison from the framework XML.)
+        Pointers(result, "schema.external-property-description")
+            .Where(p => p.StartsWith("#/components/schemas/LocalMergeSettings/", StringComparison.Ordinal))
+            .Should().Equal(
+                "#/components/schemas/LocalMergeSettings/properties/mergeArrayHandling",
+                "#/components/schemas/LocalMergeSettings/properties/mergeNullValueHandling");
         result.Violations.Should().NotContain(v => v.JsonPointer.StartsWith("#/components/schemas/JsonMergeSettings", StringComparison.Ordinal)
                                                    && (v.RuleId == "schema.description" || v.RuleId == "schema.property-description"));
     }
@@ -106,5 +116,28 @@ public sealed class ExternalTypeDescriptionTests
         var rules = new IValidationRule[] { new SchemaDescriptionRule(), new SchemaExternalDescriptionRule() };
         rules.SelectMany(r => r.Validate(UndescribedComponent(), context)).Select(v => v.RuleId)
             .Should().Equal([reportedBy]);
+    }
+
+    /// <summary>
+    /// The advice follows the origin: for a package assembly, copying the package's XML documentation;
+    /// for any other assembly outside the project (the framework), passing its XML with <c>--xml</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "CopyDocumentationFilesFromPackages")]
+    [InlineData(false, "pass it with --xml")]
+    public void TheAdvice_FollowsThePackageAssemblyNames(bool fromPackage, string advice)
+    {
+        var context = new ValidationContext
+        {
+            TypeBySchemaId = new Dictionary<string, Type> { ["Version"] = typeof(Version) },
+            ProjectAssemblyNames = new HashSet<string> { "MyApi" },
+            PackageAssemblyNames = fromPackage ? new HashSet<string> { typeof(Version).Assembly.GetName().Name! } : new HashSet<string>(),
+        };
+
+        var message = new SchemaExternalDescriptionRule().Validate(UndescribedComponent(), context).Single().Message;
+
+        message.Should().Contain(advice);
+        if (!fromPackage)
+            message.Should().NotContain("CopyDocumentationFilesFromPackages");
     }
 }

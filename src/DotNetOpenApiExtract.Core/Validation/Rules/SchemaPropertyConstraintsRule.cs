@@ -60,7 +60,8 @@ public sealed class SchemaPropertyConstraintsRule : IValidationRule
                     .FirstOrDefault(p => string.Equals(p.Name, propName, StringComparison.OrdinalIgnoreCase));
                 if (clrProp == null) continue;
 
-                foreach (var problem in Check(prop, clrProp.GetCustomAttributesData()))
+                // A nullable enum keeps its constraints on the enum branch of the union.
+                foreach (var problem in Check(VersionedSchemaForms.ConstraintTarget(prop), clrProp.GetCustomAttributesData()))
                 {
                     yield return new ValidationViolation(
                         Id,

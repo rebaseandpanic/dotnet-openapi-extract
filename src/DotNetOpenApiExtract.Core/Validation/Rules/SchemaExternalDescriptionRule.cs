@@ -25,7 +25,7 @@ public sealed class SchemaExternalDescriptionRule : IValidationRule
                 DefaultSeverity,
                 JsonPointerHelper.ForSchema(schemaId),
                 resolver.ForSchema(schemaId),
-                $"Schema '{schemaId}' is missing a description. {SchemaOrigin.Hint(assembly)}");
+                $"Schema '{schemaId}' is missing a description. {SchemaOrigin.Hint(context, assembly)}");
         }
     }
 }
