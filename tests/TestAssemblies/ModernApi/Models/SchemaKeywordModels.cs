@@ -153,6 +153,24 @@ public class RangeModel
 public class SwappedMap<TValue, TKey> : Dictionary<TKey, TValue>
     where TKey : notnull;
 
+/// <summary>A level written as a number.</summary>
+public enum Level
+{
+    /// <summary>The lowest level.</summary>
+    Low = 0,
+
+    /// <summary>The highest level.</summary>
+    High = 2,
+}
+
+/// <summary>A nullable numeric enum with a range.</summary>
+public class NullableEnumRangeModel
+{
+    /// <summary>A level from 1 to 2, or none.</summary>
+    [Range(1, 2)]
+    public Level? Level { get; set; }
+}
+
 /// <summary>An item held by a dictionary or a list of a type of its own.</summary>
 public class KeyedItem
 {

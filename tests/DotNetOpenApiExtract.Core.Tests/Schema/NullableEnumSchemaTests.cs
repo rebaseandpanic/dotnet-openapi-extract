@@ -189,4 +189,78 @@ public class NullableEnumSchemaTests(NullableElementConformanceFixture fixture) 
         conformance.ValidateSchema(place, JsonValue.Create("scarlet")).IsValid.Should().BeFalse(because: "listed by the enum, not allowed");
         conformance.ValidateSchema(place, null).IsValid.Should().BeFalse(because: "[AllowedValues] does not list null");
     }
+
+    // ── With [Range] ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The places of <c>[Range(1, 2)]</c> on <c>Level?</c>, a numeric enum with the values 0 and 2: a DTO
+    /// property, a request body and a query parameter.
+    /// </summary>
+    private static IEnumerable<(string Place, JsonNode Schema)> RangePlaces(JsonNode document)
+    {
+        var paths = document["paths"]!;
+        yield return ("property", Schemas(document)["NullableEnumRangeModel"]!["properties"]!["level"]!);
+        yield return ("request body",
+            paths["/keywords/range/nullable-enum"]!["post"]!["requestBody"]!["content"]!["application/json"]!["schema"]!);
+        yield return ("query parameter",
+            paths["/keywords/range/nullable-enum-query"]!["get"]!["parameters"]!.AsArray().Single(p => (string?)p!["name"] == "level")!["schema"]!);
+    }
+
+    /// <summary>
+    /// <c>[Range]</c> bounds the numbers of the place (<c>minimum</c> / <c>maximum</c>), here the values of
+    /// the enum: the bounds stand on the enum branch of the union, beside its values, and the null
+    /// branch stays as it is.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void RangeOnANullableNumericEnum_BoundsTheEnumBranch(OpenApiSpecVersion version)
+    {
+        foreach (var (place, schema) in RangePlaces(fixture.Documents[version]))
+        {
+            var anyOf = schema["anyOf"]!.AsArray();
+            var enumBranch = anyOf[0]!.AsObject();
+            enumBranch["type"]!.GetValue<string>().Should().Be("integer", because: place);
+            enumBranch["enum"]!.AsArray().Select(v => v!.GetValue<int>()).Should().Equal([0, 2], because: place);
+            enumBranch["minimum"]!.GetValue<decimal>().Should().Be(1, because: place);
+            enumBranch["maximum"]!.GetValue<decimal>().Should().Be(2, because: place);
+            enumBranch["x-enum-varnames"]!.AsArray().Select(v => v!.GetValue<string>()).Should().Equal(["Low", "High"], because: place);
+            anyOf[1]!.AsObject().Should().NotContainKey("minimum").And.NotContainKey("maximum", because: place);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SchemaVersions))]
+    public void RangeOnANullableNumericEnum_AdmitsNullAndTheValuesInRangeOnly(OpenApiSpecVersion version)
+    {
+        var conformance = fixture.Conformance[version];
+        var written = new
+        {
+            High = StjWire.Serialize<Level?>(Level.High, StjWire.Mvc()),
+            Low = StjWire.Serialize<Level?>(Level.Low, StjWire.Mvc()),
+            None = StjWire.Serialize<Level?>(null, StjWire.Mvc()),
+        };
+
+        foreach (var (place, schema) in RangePlaces(fixture.Documents[version]).Where(p => p.Place != "query parameter"))
+        {
+            conformance.ValidateSchema(schema, written.High).IsValid.Should().BeTrue(because: $"{place}: High (2) is in [1, 2]");
+            conformance.ValidateSchema(schema, written.None).IsValid.Should().BeTrue(because: $"{place}: null is a value of Level?");
+            conformance.ValidateSchema(schema, written.Low).IsValid.Should().BeFalse(because: $"{place}: Low (0) is below the range");
+            conformance.ValidateSchema(schema, JsonValue.Create(1)).IsValid.Should().BeFalse(because: $"{place}: 1 is not a Level");
+        }
+    }
+
+    /// <summary>
+    /// <c>schema.property-constraints</c> finds the bounds of <c>[Range]</c> on the enum branch of the
+    /// property: the build with validation reports nothing for the property.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void RangeOnANullableNumericEnum_SatisfiesThePropertyConstraintsRule(OpenApiSpecVersion version)
+    {
+        OpenApiDocumentBuilder.BuildWithValidation(VersionedDocumentHarness.ModernApiOptions(version), new Core.Validation.ValidationContext(), out var result);
+
+        result.Violations
+            .Where(v => v.RuleId == "schema.property-constraints" && v.JsonPointer.Contains("NullableEnumRangeModel", StringComparison.Ordinal))
+            .Should().BeEmpty();
+    }
 }

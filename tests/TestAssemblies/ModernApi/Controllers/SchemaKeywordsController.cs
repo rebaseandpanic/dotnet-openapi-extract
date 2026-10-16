@@ -45,6 +45,18 @@ public class SchemaKeywordsController : ControllerBase
     [HttpGet("range")]
     public ActionResult<RangeModel> Range() => new RangeModel();
 
+    /// <summary>A range on a nullable numeric enum.</summary>
+    [HttpGet("range/nullable-enum")]
+    public ActionResult<NullableEnumRangeModel> NullableEnumRange() => new NullableEnumRangeModel();
+
+    /// <summary>A range on a nullable numeric enum body.</summary>
+    [HttpPost("range/nullable-enum")]
+    public IActionResult NullableEnumRangeBody([FromBody, System.ComponentModel.DataAnnotations.Range(1, 2)] Level? level) => Ok();
+
+    /// <summary>A range on a nullable numeric enum in the query string.</summary>
+    [HttpGet("range/nullable-enum-query")]
+    public IActionResult NullableEnumRangeQuery([FromQuery, System.ComponentModel.DataAnnotations.Range(1, 2)] Level? level) => Ok();
+
     /// <summary>Dictionary keys.</summary>
     [HttpGet("dictionaries")]
     public ActionResult<DictionaryModel> Dictionaries() => new DictionaryModel();

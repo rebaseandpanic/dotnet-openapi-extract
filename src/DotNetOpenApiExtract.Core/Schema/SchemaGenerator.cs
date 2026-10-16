@@ -2208,8 +2208,11 @@ public sealed class SchemaGenerator
         }
 
         // With number handling the number is the first branch of an anyOf: the range constrains it only.
+        // A nullable numeric enum is the anyOf of its enum and null: the range bounds the enum's numbers.
         if (NumberUnionBranches(schema) is { } union)
             schema = union.Number;
+        else if (VersionedSchemaForms.NullableEnumBranch(schema) is { } enumBranch)
+            schema = enumBranch;
 
         if (!schema.Type.HasValue
             || (schema.Type.Value & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)
