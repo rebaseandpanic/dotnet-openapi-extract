@@ -1050,11 +1050,7 @@ static void WarnUnknownRuleIds(string[]? ruleIds, string flagName)
         Console.Error.WriteLine($"Warning: {flagName} '{id}' is not a valid rule ID.");
 }
 
-// ── Helper: parse --require-response-code entries ─────────────────────────────
-/// <summary>
-/// Parses <c>METHOD:CODE</c> entries from the <c>--require-response-code</c> flag.
-/// Writes warnings to stderr for invalid entries and skips them.
-/// </summary>
+// ── Helper: parse --security-scheme-map entries ───────────────────────────────
 // Parses --security-scheme-map entries "<scheme>=<definition>". A malformed entry, or one scheme mapped
 // to two definitions, is an error: a mapping that is silently dropped leaves the requirement unwritten.
 static bool TryParseSecuritySchemeMap(string[]? entries, out Dictionary<string, string> map, out string? error)
@@ -1084,6 +1080,11 @@ static bool TryParseSecuritySchemeMap(string[]? entries, out Dictionary<string, 
     return true;
 }
 
+// ── Helper: parse --require-response-code entries ─────────────────────────────
+/// <summary>
+/// Parses <c>METHOD:CODE</c> entries from the <c>--require-response-code</c> flag.
+/// Writes warnings to stderr for invalid entries and skips them.
+/// </summary>
 static List<(string MethodFilter, int Code)> ParseRequireResponseCodes(string[]? entries)
 {
     var result = new List<(string MethodFilter, int Code)>();
