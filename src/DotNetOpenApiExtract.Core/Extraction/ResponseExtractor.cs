@@ -1,6 +1,7 @@
 using System.Reflection;
 using DotNetOpenApiExtract.Core.Discovery;
 using DotNetOpenApiExtract.Core.Loading;
+using DotNetOpenApiExtract.Core.Schema;
 
 namespace DotNetOpenApiExtract.Core.Extraction;
 
@@ -44,11 +45,12 @@ public sealed class ResponseInfo
     public bool BodyFromHttpResult { get; init; }
 
     /// <summary>
-    /// The body is the action's <c>IAsyncEnumerable&lt;T?&gt;</c> return type and its reference-type
-    /// element is annotated nullable: the items may be JSON <c>null</c>.
+    /// The nullable annotations of <see cref="BodyType"/> as the action's signature declares it: the
+    /// return type, or the value of the <c>Results&lt;…&gt;</c> variant or typed result that writes the
+    /// body. <see langword="null"/> for a body type taken from an attribute and for bodies the schema
+    /// does not describe position by position (server-sent events): those get no nullable elements.
     /// </summary>
-    internal bool SequenceElementNullable { get; init; }
-
+    internal TypeNullability? BodyPositions { get; init; }
 }
 
 /// <summary>
@@ -107,31 +109,12 @@ public static class ResponseExtractor
     {
         var (defaultContentTypes, contentTypesExplicit) = ResolveProducesContentTypes(action.Method, action.Controller.Type);
         var unknown = new List<Type>();
-        var signatureType = UnwrapReturnType(action.Method.ReturnType);
-        var elementNullable = ReturnNullability.AsyncSequenceElementIsNullable(action.Method);
         var responses = ExtractResponsesCore(action, defaultContentTypes, contentTypesExplicit, unknown)
             .Select(r => WithFileMediaType(r, defaultContentTypes, contentTypesExplicit))
-            .Select(r => elementNullable && r.BodyType != null && signatureType != null && SameType(r.BodyType, signatureType)
-                ? WithNullableElement(r)
-                : r)
             .ToList();
         unknownResults = unknown;
         return responses;
     }
-
-    private static bool SameType(Type left, Type right) =>
-        ReferenceEquals(left, right) || string.Equals(left.FullName, right.FullName, StringComparison.Ordinal);
-
-    private static ResponseInfo WithNullableElement(ResponseInfo response) => new()
-    {
-        StatusCode              = response.StatusCode,
-        BodyType                = response.BodyType,
-        Description             = response.Description,
-        ContentTypes            = response.ContentTypes,
-        ContentTypesExplicit    = response.ContentTypesExplicit,
-        BodyFromHttpResult      = response.BodyFromHttpResult,
-        SequenceElementNullable = true,
-    };
 
     /// <summary>
     /// A file body is raw bytes: unless its response declares media types of its own or
@@ -155,6 +138,7 @@ public static class ResponseExtractor
             ContentTypes         = contentTypesExplicit ? defaultContentTypes : [Schema.FileTypes.DefaultResponseMediaType],
             ContentTypesExplicit = contentTypesExplicit,
             BodyFromHttpResult   = false,
+            BodyPositions        = response.BodyPositions,
         };
     }
 
@@ -173,16 +157,18 @@ public static class ResponseExtractor
         var signatureBody = signatureType == null || IsVoidLike(signatureType) || IsNonGenericActionResult(signatureType)
             ? null
             : signatureType;
+        var signaturePositions = signatureType == null ? null : UnwrapReturnPositions(TypeNullability.ForReturn(method));
 
         // A typed IResult declares its own responses; explicit declarations win per status code.
         if (signatureType != null && TypedResults.IsResult(signatureType))
         {
             return MergeWithResultResponses(
-                declared.Select(d => d.Response).ToList(), signatureType, producesType, defaultContentTypes, unknownResults);
+                declared.Select(d => d.Response).ToList(), signatureType, signaturePositions, producesType,
+                defaultContentTypes, unknownResults);
         }
 
         if (declared.Count == 0 && producesType == null)
-            return InferFromReturnType(signatureType, defaultContentTypes, contentTypesExplicit);
+            return InferFromReturnType(signatureType, signaturePositions, defaultContentTypes, contentTypesExplicit);
 
         var responses = new List<ResponseInfo>(declared.Count + 1);
         var has200 = false;
@@ -194,10 +180,12 @@ public static class ResponseExtractor
                 has200 = true;
                 if (response.BodyType == null)
                 {
-                    // A 200 declared without a type: [Produces(typeof(T))], then the return type.
-                    var bodyType = producesType ?? signatureBody;
-                    if (bodyType != null)
-                        response = Copy(response, bodyType);
+                    // A 200 declared without a type: [Produces(typeof(T))], then the return type. Only
+                    // the return type carries the annotations of the signature.
+                    if (producesType != null)
+                        response = Copy(response, producesType, null);
+                    else if (signatureBody != null)
+                        response = Copy(response, signatureBody, signaturePositions);
                 }
             }
             responses.Add(response);
@@ -221,13 +209,15 @@ public static class ResponseExtractor
     /// <summary>
     /// The declared responses (their bodies, too, are written by the result, in the HTTP context)
     /// followed by the responses the typed result <paramref name="resultType"/> writes, for the status
-    /// codes not declared. Variants whose status is not statically known go to
+    /// codes not declared; <paramref name="resultPositions"/> are the annotations of the result type in
+    /// the action's signature. Variants whose status is not statically known go to
     /// <paramref name="unknownResults"/> (only when nothing is declared, since a declaration documents
     /// them); when no response is known at all, a 200 response without a body stands in.
     /// </summary>
     private static IReadOnlyList<ResponseInfo> MergeWithResultResponses(
         List<ResponseInfo> declared,
         Type resultType,
+        TypeNullability? resultPositions,
         Type? producesType,
         IReadOnlyList<string> defaultContentTypes,
         List<Type> unknownResults)
@@ -242,6 +232,7 @@ public static class ResponseExtractor
                 ContentTypes         = r.ContentTypes,
                 ContentTypesExplicit = r.ContentTypesExplicit,
                 BodyFromHttpResult   = true,
+                BodyPositions        = r.BodyPositions,
             })
             .ToList();
         var codes = declared.Select(r => r.StatusCode).ToHashSet();
@@ -269,7 +260,7 @@ public static class ResponseExtractor
             }
         }
 
-        var (known, unknown) = TypedResults.Analyze(resultType);
+        var (known, unknown) = TypedResults.Analyze(resultType, resultPositions);
         foreach (var response in known)
         {
             if (codes.Add(response.StatusCode))
@@ -341,6 +332,7 @@ public static class ResponseExtractor
             {
                 StatusCode = own.StatusCode,
                 BodyType = own.BodyType ?? fallback.Response.BodyType,
+                BodyPositions = own.BodyType != null ? own.BodyPositions : fallback.Response.BodyPositions,
                 Description = own.Description ?? fallback.Response.Description,
                 ContentTypes = useControllerContentTypes ? fallback.Response.ContentTypes : own.ContentTypes,
                 ContentTypesExplicit = own.ContentTypesExplicit || useControllerContentTypes,
@@ -356,10 +348,11 @@ public static class ResponseExtractor
         return result;
     }
 
-    private static ResponseInfo Copy(ResponseInfo response, Type bodyType) => new()
+    private static ResponseInfo Copy(ResponseInfo response, Type bodyType, TypeNullability? bodyPositions) => new()
     {
         StatusCode = response.StatusCode,
         BodyType = bodyType,
+        BodyPositions = bodyPositions,
         Description = response.Description,
         ContentTypes = response.ContentTypes,
         ContentTypesExplicit = response.ContentTypesExplicit,
@@ -594,6 +587,7 @@ public static class ResponseExtractor
     /// </summary>
     private static IReadOnlyList<ResponseInfo> InferFromReturnType(
         Type? unwrapped,
+        TypeNullability? unwrappedPositions,
         IReadOnlyList<string> defaultContentTypes,
         bool contentTypesExplicit)
     {
@@ -631,6 +625,7 @@ public static class ResponseExtractor
             {
                 StatusCode = 200,
                 BodyType = unwrapped,
+                BodyPositions = unwrappedPositions,
                 ContentTypes = defaultContentTypes,
                 ContentTypesExplicit = contentTypesExplicit,
             },
@@ -671,6 +666,21 @@ public static class ResponseExtractor
 
         // All other generic types (e.g. IEnumerable<T>, List<T>) are returned as-is.
         return type;
+    }
+
+    /// <summary>
+    /// The positions of the return type <see cref="UnwrapReturnType"/> gives: the declared return type
+    /// with <c>Task&lt;T&gt;</c>, <c>ValueTask&lt;T&gt;</c> and <c>ActionResult&lt;T&gt;</c> removed.
+    /// </summary>
+    private static TypeNullability UnwrapReturnPositions(TypeNullability positions)
+    {
+        while (positions.Type.IsGenericType
+               && positions.Type.GetGenericTypeDefinition().FullName is "System.Threading.Tasks.Task`1"
+                   or "System.Threading.Tasks.ValueTask`1"
+                   or "Microsoft.AspNetCore.Mvc.ActionResult`1")
+            positions = positions.Argument(0);
+
+        return positions;
     }
 
     // -------------------------------------------------------------------------

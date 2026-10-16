@@ -1,3 +1,5 @@
+using DotNetOpenApiExtract.Core.Schema;
+
 namespace DotNetOpenApiExtract.Core.Extraction;
 
 /// <summary>
@@ -57,24 +59,28 @@ internal static class TypedResults
     /// The responses <paramref name="resultType"/> writes — one per variant of <c>Results&lt;…&gt;</c>,
     /// or the one response of a result with a known status — and the results (the type itself or
     /// variants) whose status is not statically known. Every variant is visited: an unknown one
-    /// never hides the known ones.
+    /// never hides the known ones. <paramref name="positions"/> are the annotations of
+    /// <paramref name="resultType"/> in the action's signature: each body gets the positions of its own
+    /// variant, its value read through <c>IValueHttpResult&lt;T&gt;</c>.
     /// </summary>
-    public static (IReadOnlyList<ResponseInfo> Known, IReadOnlyList<Type> Unknown) Analyze(Type resultType)
+    public static (IReadOnlyList<ResponseInfo> Known, IReadOnlyList<Type> Unknown) Analyze(
+        Type resultType, TypeNullability? positions)
     {
         var known = new List<ResponseInfo>();
         var unknown = new List<Type>();
-        Collect(resultType, known, unknown);
+        Collect(resultType, positions, known, unknown);
         return (known, unknown);
     }
 
-    private static void Collect(Type type, List<ResponseInfo> responses, List<Type> unknown)
+    private static void Collect(Type type, TypeNullability? positions, List<ResponseInfo> responses, List<Type> unknown)
     {
         var name = DefinitionName(type);
 
         if (name.StartsWith(Namespace + "Results`", StringComparison.Ordinal))
         {
-            foreach (var variant in type.GetGenericArguments())
-                Collect(variant, responses, unknown);
+            var variants = type.GetGenericArguments();
+            for (var i = 0; i < variants.Length; i++)
+                Collect(variants[i], positions?.Argument(i), responses, unknown);
             return;
         }
 
@@ -99,11 +105,13 @@ internal static class TypedResults
             return;
         }
 
-        var bodyType = ValueType(type);
+        var valueInterface = ValueInterface(type);
+        var bodyType = valueInterface?.GetGenericArguments()[0];
         Add(responses, new ResponseInfo
         {
             StatusCode         = status,
             BodyType           = bodyType,
+            BodyPositions      = valueInterface == null ? null : positions?.Implemented(valueInterface).Argument(0),
             ContentTypes       = bodyType == null ? [] : ProblemResults.Contains(name) ? ["application/problem+json"] : ["application/json"],
             BodyFromHttpResult = bodyType != null,
         });
@@ -116,13 +124,13 @@ internal static class TypedResults
             responses.Add(response);
     }
 
-    /// <summary><c>T</c> of the <c>IValueHttpResult&lt;T&gt;</c> the type implements, if any.</summary>
-    private static Type? ValueType(Type type)
+    /// <summary>The <c>IValueHttpResult&lt;T&gt;</c> the type implements, if any; its <c>T</c> is the body.</summary>
+    private static Type? ValueInterface(Type type)
     {
         foreach (var implemented in type.GetInterfaces())
         {
             if (implemented.IsGenericType && implemented.GetGenericTypeDefinition().FullName == ValueResultInterface)
-                return implemented.GetGenericArguments()[0];
+                return implemented;
         }
 
         return null;

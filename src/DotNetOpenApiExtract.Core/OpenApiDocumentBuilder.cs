@@ -1355,7 +1355,7 @@ public sealed class OpenApiDocumentBuilder
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
                 apiResponse.Content = BuildResponseContent(
                     resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots,
-                    httpContext: resp.BodyFromHttpResult, elementNullable: resp.SequenceElementNullable);
+                    httpContext: resp.BodyFromHttpResult, bodyPositions: resp.BodyPositions);
             }
 
             operation.Responses[statusKey] = apiResponse;
@@ -1482,6 +1482,9 @@ public sealed class OpenApiDocumentBuilder
     /// <c>itemSchema: T</c> and no <c>schema</c>; <c>text/event-stream</c> gets no schema, because
     /// standard MVC has no formatter for it (warning on the operation); any other media type gets
     /// the body schema (an array of <c>T</c>). Other body types get the body schema everywhere.
+    /// <paramref name="bodyPositions"/> are the annotations of the body type in the action's signature:
+    /// the body schema and the item schema mark the elements and dictionary values annotated nullable
+    /// there; <see langword="null"/> (a body type from an attribute) marks none.
     /// </summary>
     private static Dictionary<string, IOpenApiMediaType> BuildResponseContent(
         IEnumerable<string> contentTypes,
@@ -1491,7 +1494,7 @@ public sealed class OpenApiDocumentBuilder
         OpenApiOperation operation,
         List<Action<SchemaGenerator>>? httpSlots,
         bool httpContext = false,
-        bool elementNullable = false)
+        TypeNullability? bodyPositions = null)
     {
         var content = new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
 
@@ -1517,7 +1520,14 @@ public sealed class OpenApiDocumentBuilder
         }
 
         Type? elementType = null;
-        var isSequence = bodyType != null && StreamingTypes.TryGetAsyncEnumerableElementType(bodyType, out elementType);
+        TypeNullability? elementPositions = null;
+        var isSequence = false;
+        if (bodyType != null && StreamingTypes.TryGetAsyncEnumerableInterface(bodyType, out var sequence))
+        {
+            isSequence = true;
+            elementType = sequence.GetGenericArguments()[0];
+            elementPositions = bodyPositions?.Implemented(sequence).Argument(0);
+        }
         IOpenApiSchema? bodySchema = null;
 
         foreach (var contentType in contentTypes)
@@ -1527,7 +1537,7 @@ public sealed class OpenApiDocumentBuilder
             {
                 var sequential = new OpenApiMediaType();
                 content[contentType] = sequential;
-                WithGenerator(generator => sequential.ItemSchema = ElementSchema(generator, elementType!, elementNullable));
+                WithGenerator(generator => sequential.ItemSchema = generator.GenerateElementSchema(elementType!, elementPositions));
             }
             else if (isSequence && string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
             {
@@ -1555,21 +1565,12 @@ public sealed class OpenApiDocumentBuilder
                 content[contentType] = plain;
                 if (bodyType != null)
                 {
-                    WithGenerator(generator => plain.Schema = bodySchema ??= isSequence && elementNullable
-                        ? new OpenApiSchema { Type = JsonSchemaType.Array, Items = ElementSchema(generator, elementType!, nullable: true) }
-                        : generator.GenerateSchema(bodyType));
+                    WithGenerator(generator => plain.Schema = bodySchema ??= generator.GenerateSchema(bodyType, bodyPositions));
                 }
             }
         }
 
         return content;
-    }
-
-    /// <summary>The schema of a sequence element; nullable by the version's rules when annotated <c>T?</c>.</summary>
-    private static IOpenApiSchema ElementSchema(SchemaGenerator generator, Type elementType, bool nullable)
-    {
-        var schema = generator.GenerateSchema(elementType);
-        return nullable ? SchemaGenerator.MakeNullable(schema, generator.OpenApiVersion) : schema;
     }
 
     // =========================================================================
@@ -2478,7 +2479,7 @@ public sealed class OpenApiDocumentBuilder
                         {
                             response.Content = BuildResponseContent(
                                 globalMediaTypes.ProducesContentTypes, bodyResponse.BodyType, schemaGenerator, ledger, operation,
-                                httpSlots: null, elementNullable: bodyResponse.SequenceElementNullable);
+                                httpSlots: null, bodyPositions: bodyResponse.BodyPositions);
                             continue;
                         }
 

@@ -2768,6 +2768,13 @@ public sealed class SchemaGenerator
     }
 
     /// <summary>
+    /// The schema of one item of an asynchronous sequence written item by item (the <c>itemSchema</c> of
+    /// a sequential media type), by the rules of a collection element: see
+    /// <see cref="ElementSchema(Type, TypeNullability?)"/>.
+    /// </summary>
+    internal IOpenApiSchema GenerateElementSchema(Type type, TypeNullability? position) => ElementSchema(type, position);
+
+    /// <summary>
     /// The nullable form of a generated schema: an inline <c>anyOf</c> union gets the null branch of the
     /// version (<see cref="VersionedSchemaForms.NullableUnion"/>), anything else <see cref="MakeNullable"/>.
     /// </summary>
