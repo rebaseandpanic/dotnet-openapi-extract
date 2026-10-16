@@ -15,7 +15,9 @@ namespace DotNetOpenApiExtract.Core.Tests.Schema;
 /// <remarks>
 /// Places: <c>ModernApi.Controllers.RefSiblingsOperationsController</c>; expected values are its
 /// attribute literals, in the forms of the field catalog (one allowed string: a one-element
-/// <c>enum</c> in 3.0, <c>const</c> in 3.1+) and the null branches of ИНВ-1.
+/// <c>enum</c> in 3.0, <c>const</c> in 3.1+), and the null branch of a nullable reference by version
+/// (catalog, <c>schema.anyOf</c>): <c>{type: object, nullable: true, enum: [null]}</c> in 3.0,
+/// <c>{type: "null"}</c> in 3.1+.
 /// </remarks>
 public class RefSiblingsOperationPlacesTests(RefSiblingsFormFixture fixture) : IClassFixture<RefSiblingsFormFixture>
 {

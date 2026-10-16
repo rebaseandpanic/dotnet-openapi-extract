@@ -56,7 +56,9 @@ public sealed class RefSiblingsFormFixture
 /// <remarks>
 /// Expected values are the literals of <c>ModernApi.Models.Keywords.RefSiblingsModel</c>; the forms are
 /// those of the field catalog (example: <c>example</c> in 3.0, <c>examples: [v]</c> in 3.1+; one allowed
-/// string: a one-element <c>enum</c> in 3.0, <c>const</c> in 3.1+) and the null branches of ИНВ-1.
+/// string: a one-element <c>enum</c> in 3.0, <c>const</c> in 3.1+), and the null branch of a nullable
+/// reference by version (catalog, <c>schema.anyOf</c>): <c>{type: object, nullable: true, enum: [null]}</c>
+/// in 3.0, <c>{type: "null"}</c> in 3.1+.
 /// </remarks>
 public class RefSiblingsFormTests(RefSiblingsFormFixture fixture) : IClassFixture<RefSiblingsFormFixture>
 {
