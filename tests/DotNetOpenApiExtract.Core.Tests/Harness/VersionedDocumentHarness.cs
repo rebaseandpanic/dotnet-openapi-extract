@@ -42,6 +42,18 @@ internal static class VersionedDocumentHarness
     };
 
     /// <summary>
+    /// Options for the LegacyNoNrtApi fixture (compiled without nullable reference types) with its XML
+    /// documentation, built for <paramref name="version"/>.
+    /// </summary>
+    public static OpenApiDocumentOptions LegacyNoNrtApiOptions(
+        OpenApiSpecVersion version = OpenApiSpecVersion.OpenApi3_0) => new()
+    {
+        AssemblyPath   = TestPaths.LegacyNoNrtApiDll,
+        XmlPath        = TestPaths.LegacyNoNrtApiXml,
+        OpenApiVersion = version,
+    };
+
+    /// <summary>
     /// Options for the SampleApi fixture (the 3.0 regression baseline) with its XML documentation,
     /// built for <paramref name="version"/>.
     /// </summary>

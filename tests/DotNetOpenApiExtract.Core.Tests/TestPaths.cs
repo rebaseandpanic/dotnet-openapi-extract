@@ -36,6 +36,14 @@ internal static class TestPaths
     public static string ModernApiXml        => Path.ChangeExtension(ModernApiDll, ".xml");
 
     /// <summary>
+    /// Path to the LegacyNoNrtApi test fixture DLL: compiled with <c>&lt;Nullable&gt;disable&lt;/Nullable&gt;</c>,
+    /// so no member, type or the assembly itself carries nullable reference type metadata.
+    /// </summary>
+    public static string LegacyNoNrtApiDll   => FindFixtureDll("LegacyNoNrtApi");
+
+    public static string LegacyNoNrtApiXml   => Path.ChangeExtension(LegacyNoNrtApiDll, ".xml");
+
+    /// <summary>
     /// Path to the ConfigFormsApi test fixture DLL: a Swashbuckle 10 Program.cs that writes its document
     /// metadata and security in the forms services use (target-typed and fully qualified creations, both
     /// requirement syntaxes, strings from raw literals, concatenation, constants and nameof).
