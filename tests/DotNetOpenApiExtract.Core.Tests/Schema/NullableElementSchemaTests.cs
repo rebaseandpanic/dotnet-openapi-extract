@@ -159,43 +159,43 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
 
     private static readonly Position[] ModernPositions =
     [
-        // (1) Collections: the element is nullable, the collection is not (checked below).
+        // Collections: the element is nullable, the collection is not (checked below).
         P("strings", "/items", NullableType("string")),
         P("itemArray", "/items", NullableItem),
         P("itemSequence", "/items", NullableItem),
         P("stringSet", "/items", NullableType("string")),
         P("itemReadOnlyList", "/items", NullableItem),
 
-        // (2) Dictionaries: the value is nullable, the key is not.
+        // Dictionaries: the value is nullable, the key is not.
         P("itemsByName", "/additionalProperties", NullableItem),
         P("stringsById", "/additionalProperties", NullableType("string")),
         P("swappedItems", "/additionalProperties", NullableItem),
 
-        // (3) Nested: exactly the positions with ?.
+        // Nested generics: exactly the positions with ?.
         P("nestedLists", "/items/type", new(""" "array" """, """["array", "null"]""")),
         P("nestedLists", "/items/nullable", new("true", "null")),
         P("nestedLists", "/items/items", NullableItem),
         P("listsByName", "/additionalProperties", Same("""{"type": "array", "items": ITEM}""".Replace("ITEM", NullableItemPlaceholder))),
         P("listArray", "/items", Same("""{"type": "array", "items": ITEM}""".Replace("ITEM", NullableItemPlaceholder))),
 
-        // (4) Schemas that already admit null or are a value type, and positions without ?.
+        // Schemas that already admit null or are a value type, and positions without ?.
         P("nullableObjects", "/items", Same("{}")),
         P("objects", "/items", Same("{}")),
         P("nullableInts", "/items", NullableType("integer", "int32")),
         P("notNullStrings", "/items", Same("""{"type": "string"}""")),
         P("notNullItems", "/items", Same(ItemRef)),
 
-        // (6) Other kinds of element schemas.
+        // Other kinds of element schemas: a polymorphic base and a dictionary.
         P("shapes", "/items", NullableRef("#/components/schemas/ElementShape")),
         P("dictionaries", "/items", new(
             $$"""{"type": "object", "nullable": true, "additionalProperties": {{ItemRef}}}""",
             $$"""{"type": ["object", "null"], "additionalProperties": {{ItemRef}}}""")),
 
-        // (7) One component in three places.
+        // One component in three places.
         new("ElementItemPlaces", "nullableItems", "/items", NullableItem),
         new("ElementItemPlaces", "items", "/items", Same(ItemRef)),
 
-        // US-4 in a #nullable disable block (byte 0).
+        // Positions declared in a #nullable disable block (byte 0).
         new("ObliviousElementsModel", "strings", "/items", Same("""{"type": "string"}""")),
         new("ObliviousElementsModel", "items", "/items", Same(ItemRef)),
         new("ObliviousElementsModel", "itemsByName", "/additionalProperties", Same(ItemRef)),
@@ -274,7 +274,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         JsonNode.DeepEquals(NormalizedRoot(actual), NormalizedRoot(expected)).Should().BeTrue(
             $"{because} must be {expected?.ToJsonString() ?? "absent"}, got {actual?.ToJsonString() ?? "absent"}");
 
-    // --- Rows 17–20, 22, 23: positions of DTO properties ----------------------------------------------
+    // --- Positions of DTO properties -----------------------------------------------------------------
 
     [Theory]
     [MemberData(nameof(ModernCases))]
@@ -335,7 +335,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
             At(PropertySchema(document, Model, property), "/propertyNames").Should().BeNull(property);
     }
 
-    // --- Row 20: the enum element keeps the form of Nullable<T> ----------------------------------------
+    // --- The enum element keeps the form of Nullable<T> ----------------------------------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
@@ -356,7 +356,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         }
     }
 
-    // --- Row 21: Page<T> with List<T?> -------------------------------------------------------------------
+    // --- Page<T> with List<T?> -----------------------------------------------------------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
@@ -380,7 +380,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         return reference.GetValue<string>().Split('/')[^1];
     }
 
-    // --- Row 22: the polymorphic union component is not changed ------------------------------------------
+    // --- The polymorphic union component is not changed ----------------------------------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
@@ -392,7 +392,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         union.ToJsonString().Should().NotContain("\"null\"").And.NotContain("\"nullable\":");
     }
 
-    // --- Row 23: INV-4, three places of one component ----------------------------------------------------
+    // --- One component in three places: the component is unchanged -----------------------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
@@ -417,7 +417,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         component.ToJsonString().Should().NotContain("\"null\"").And.NotContain("\"nullable\":").And.NotContain("The item of this place");
     }
 
-    // --- Row 24: the BCL JSON object and array, nullable in one place, plain in another -----------------
+    // --- The BCL JSON object and array, nullable in one place, plain in another ----------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
@@ -455,7 +455,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
         }
     }
 
-    // --- Row 20: the assembly without NRT (kind 19) ------------------------------------------------------
+    // --- The assembly without nullable reference types -----------------------------------------------
 
     public static TheoryData<string, string> LegacyPositions() => new()
     {

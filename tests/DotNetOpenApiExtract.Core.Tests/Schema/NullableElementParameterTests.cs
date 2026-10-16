@@ -54,17 +54,17 @@ public class NullableElementParameterTests(NullableElementSchemaFixture fixture)
 
     private static readonly Place[] Places =
     [
-        // (8) the query collection; (18) the nested generic and the dictionary bound by [FromQuery].
+        // Query: a collection, and the nested generic and the dictionary bound by [FromQuery].
         Of("/nullable-elements/query", "get", "parameter:tags", "array", "items", NullableString),
         Of("/nullable-elements/query", "get", "parameter:nested", "array", "items", NullableArrayOf(NullableString)),
         Of("/nullable-elements/query", "get", "parameter:map", "object", "additionalProperties", NullableString),
 
-        // (9) and (17): bodies.
+        // Request bodies: a list, a dictionary, a nested list.
         Of("/nullable-elements/body", "post", "body", "array", "items", NullableItem),
         Of("/nullable-elements/body-dictionary", "post", "body", "object", "additionalProperties", NullableItem),
         Of("/nullable-elements/body-nested", "post", "body", "array", "items", NullableArrayOf(NullableItem)),
 
-        // (10) the form collection; (18) the nested generic and the dictionary bound by [FromForm].
+        // Form fields: a collection, and the nested generic and the dictionary bound by [FromForm].
         Of("/nullable-elements/form", "post", "form:names", "array", "items", NullableString),
         Of("/nullable-elements/form", "post", "form:nested", "array", "items", NullableArrayOf(NullableString)),
         Of("/nullable-elements/form", "post", "form:map", "object", "additionalProperties", NullableItem),
@@ -119,7 +119,7 @@ public class NullableElementParameterTests(NullableElementSchemaFixture fixture)
             $"{place.Path} {place.Locator} must be {expected!.ToJsonString()}, got {actual.ToJsonString()}");
     }
 
-    // --- The assembly without NRT (kind 19), bodies ------------------------------------------------------
+    // --- Bodies of the assembly without nullable reference types -------------------------------------
 
     public static TheoryData<string, string> LegacyBodies() => new()
     {

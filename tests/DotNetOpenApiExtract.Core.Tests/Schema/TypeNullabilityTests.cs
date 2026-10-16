@@ -8,7 +8,7 @@ namespace DotNetOpenApiExtract.Core.Tests.Schema
 {
     /// <summary>
     /// The NRT positions of a member's declared type: the layout by the open signature, the context chain,
-    /// the navigation steps and P-NRT2 (nullable only for an annotated, non-value position that is not
+    /// the navigation steps and when a position is nullable (only an annotated, non-value position that is not
     /// below a type parameter of the declaration).
     /// </summary>
     /// <remarks>
@@ -211,7 +211,7 @@ namespace DotNetOpenApiExtract.Core.Tests.Schema
             position.IsNullable.Should().Be(expectedNullable);
         }
 
-        // --- P-NRT2 -------------------------------------------------------------------------------------
+        // --- When a position is nullable: annotated, not a value type, not below a type parameter -----
 
         [Fact]
         public void Predicate_IsFalse_ForANotAnnotatedPosition()

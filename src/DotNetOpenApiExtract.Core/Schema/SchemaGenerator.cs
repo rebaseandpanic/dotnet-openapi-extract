@@ -2758,7 +2758,8 @@ public sealed class SchemaGenerator
     /// <summary>
     /// The schema of an element of a collection or array, or of a dictionary value, at
     /// <paramref name="position"/>: in the nullable form of the version when the position is annotated
-    /// nullable (P-NRT2), as generated otherwise. The other positions of the place keep their schemas.
+    /// nullable (<see cref="TypeNullability.IsNullable"/>), as generated otherwise. The other positions of
+    /// the place keep their schemas.
     /// </summary>
     private IOpenApiSchema ElementSchema(Type type, TypeNullability? position)
     {

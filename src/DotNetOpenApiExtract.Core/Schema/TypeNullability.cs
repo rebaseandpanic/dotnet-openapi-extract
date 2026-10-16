@@ -57,9 +57,9 @@ internal sealed class TypeNullability
     public bool BelowTypeParameter { get; }
 
     /// <summary>
-    /// P-NRT2: the position is annotated nullable (byte 2), its CLR type is not a value type (a value
-    /// type's <c>Nullable&lt;T&gt;</c> is a type of its own), and it is not below a type parameter of the
-    /// declaration (the place does not annotate inside a substituted type).
+    /// Whether the position is nullable: it is annotated nullable (byte 2), its CLR type is not a value
+    /// type (a value type's <c>Nullable&lt;T&gt;</c> is a type of its own), and it is not below a type
+    /// parameter of the declaration (the place does not annotate inside a substituted type).
     /// </summary>
     public bool IsNullable => Flag == Annotated && !Type.IsValueType && !BelowTypeParameter;
 
