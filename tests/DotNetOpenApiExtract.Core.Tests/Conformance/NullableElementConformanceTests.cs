@@ -126,9 +126,9 @@ public class NullableElementConformanceTests(NullableElementConformanceFixture f
         ["DTO list value of Dictionary<string, List<ElementItem?>>"] = new(d => Component("NullableElementsModel"), Edited(w => w["listsByName"]!["a"] = null)),
         ["DTO list element of List<ElementItem?>[]"] = new(d => Component("NullableElementsModel"), Edited(w => w["listArray"] = new JsonArray((JsonNode?)null))),
         // Not here: null as a value of the nullable dictionary element of List<Dictionary<string, ElementItem>?>.
-        // Corvus.Json.Validator 5.7.6 does not apply additionalProperties when the type is ["null", "object"]
-        // ({"a": null} passes such a schema although its value schema is an object), so the evaluator
-        // cannot reject it; the value schema of that element is checked by its form in the schema tests.
+        // The evaluator does not apply additionalProperties when the type lists several types (see the
+        // remarks of SchemaConformance; still so in Corvus.Json.Validator 5.7.7), so it cannot reject it;
+        // the value schema of that element is checked by its form in the schema tests.
         ["DTO element of List<ElementItem> beside nullable elements"] =
             new(d => Component("ElementItemPlaces"),
                 StjWire.Serialize(new ElementItemPlaces { NullableItems = [null], Items = [null!], Item = Item }, StjWire.Mvc())),

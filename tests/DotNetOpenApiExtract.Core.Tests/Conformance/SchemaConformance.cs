@@ -35,6 +35,23 @@ public sealed record ConformanceResult(bool IsValid, IReadOnlyList<string> Error
 /// before evaluation, and the content they describe is checked explicitly as above.
 /// </para>
 /// <para>
+/// Known limitation of the evaluator (Corvus.Json.Validator 5.7.6, unchanged in 5.7.7): in a schema
+/// whose <c>type</c> lists several types, such as <c>["null", "object"]</c> or <c>["null", "array"]</c>,
+/// it does not apply <c>additionalProperties</c>, <c>unevaluatedProperties</c>, <c>items</c>,
+/// <c>prefixItems</c> and <c>unevaluatedItems</c>: <c>{"a": null}</c> passes
+/// <c>{type: ["null", "object"], additionalProperties: {type: object}}</c>, and <c>[null]</c> passes
+/// <c>{type: ["null", "array"], items: {type: object}}</c>, which 2020-12 rejects. The other keywords
+/// of such a schema (<c>properties</c>, <c>patternProperties</c>, <c>propertyNames</c>,
+/// <c>required</c>, size bounds, <c>contains</c>, string and number bounds, <c>enum</c>) are applied,
+/// as are all keywords when <c>type</c> is a single type. Replacing the type list with
+/// <c>allOf: [{anyOf: [{type: "null"}, {type: "object"}]}]</c> next to the same keywords does not
+/// avoid it. (<c>additionalProperties</c> and <c>items</c> were measured on both versions, the other
+/// keywords named here on 5.7.7.) A test therefore cannot show through this class that the members
+/// or elements of a nullable object or array are rejected; such a value schema is checked by its
+/// form. The skipped tests of <see cref="SchemaConformanceEvaluatorTests"/> reproduce the
+/// limitation and are to be enabled when an evaluator version applies these keywords.
+/// </para>
+/// <para>
 /// OpenAPI 3.0 schemas are not JSON Schema 2020-12 (<c>nullable</c>, boolean exclusive bounds), so
 /// only 3.1 and 3.2 documents are accepted.
 /// </para>
