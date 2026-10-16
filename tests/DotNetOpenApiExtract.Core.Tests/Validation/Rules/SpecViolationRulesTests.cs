@@ -7,17 +7,16 @@ using Xunit;
 namespace DotNetOpenApiExtract.Core.Tests.Validation.Rules;
 
 /// <summary>
-/// Unit tests for Wave 7b Group A — spec-MUST violation rules (error severity).
-/// Tests: A0 spec.no-ref-siblings, A1 spec.info-version, A2 operation.operation-id-unique,
-///        A3 path.params-match, A4 path.no-empty-declaration, A5 parameter.path-required-true,
-///        A6 schema.array-items, A7 operation.parameters-unique.
+/// Unit tests for the spec-MUST violation rules (error severity): spec.no-ref-siblings,
+/// spec.info-version, operation.operation-id-unique, path.params-match, path.no-empty-declaration,
+/// parameter.path-required-true, schema.array-items, operation.parameters-unique.
 /// </summary>
-public sealed class NewGroupARulesTests
+public sealed class SpecViolationRulesTests
 {
     private static readonly ValidationContext DefaultContext = new();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A0. spec.no-ref-siblings
+    // spec.no-ref-siblings
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -122,7 +121,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A1. spec.info-version
+    // spec.info-version
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -154,7 +153,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A2. operation.operation-id-unique
+    // operation.operation-id-unique
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -214,7 +213,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A3. path.params-match
+    // path.params-match
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -313,7 +312,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A4. path.no-empty-declaration
+    // path.no-empty-declaration
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -344,7 +343,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A5. parameter.path-required-true
+    // parameter.path-required-true
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -367,7 +366,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A6. schema.array-items
+    // schema.array-items
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -443,7 +442,7 @@ public sealed class NewGroupARulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // A7. operation.parameters-unique
+    // operation.parameters-unique
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]

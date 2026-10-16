@@ -9,7 +9,7 @@ using CoreValidator = DotNetOpenApiExtract.Core.Validation.OpenApiValidator;
 namespace DotNetOpenApiExtract.Core.Tests.Validation;
 
 /// <summary>
-/// Tests for Wave 7a severity infrastructure:
+/// Tests for the severity infrastructure:
 /// - ValidationSeverity enum
 /// - DefaultSeverity on all 24 rules
 /// - SeverityOverrides in ValidationContext
@@ -88,16 +88,15 @@ public sealed class SeverityInfrastructureTests
     [Fact]
     public void AllRules_SeverityCounts_33ErrorsAnd25Warnings()
     {
-        // Wave 7b added 8 Group-A error rules and 10 Group-B + 5 Group-C warning rules.
-        // Wave 9 added 1 error (R48) + 4 warnings (R49, R50, R51, R52).
-        // Group E added 6 errors (OpenAPI 3.1/3.2 document structure).
+        // 47 base rules (26 errors, 21 warnings), 5 API convention rules (1 error, 4 warnings),
+        // 6 OpenAPI 3.1/3.2 document structure rules (6 errors).
         // Total: 47 + 5 + 6 = 58 rules.
         // Errors: 26 + 1 + 6 = 33.
         // Warnings: 21 + 4 = 25.
         var errors = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Error);
         var warnings = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Warning);
-        errors.Should().Be(33, because: "33 rules should default to Error (26 from Wave 7b + 1 R48 from Wave 9 + 6 from Group E)");
-        warnings.Should().Be(25, because: "25 rules should default to Warning (21 from Wave 7b + 4 from Wave 9)");
+        errors.Should().Be(33, because: "33 rules should default to Error (26 base rules + 1 API convention rule + 6 document structure rules)");
+        warnings.Should().Be(25, because: "25 rules should default to Warning (21 base rules + 4 API convention rules)");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -461,8 +460,8 @@ public sealed class SeverityInfrastructureTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 14. ValidationContext default values (Wave 7a changed MinDescriptionLength
-    //     from 20 → 5 and removed hardcoded ExcludedPathPrefixes)
+    // 14. ValidationContext default values (MinDescriptionLength is 5,
+    //     ExcludedPathPrefixes has no hardcoded entries)
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -470,7 +469,7 @@ public sealed class SeverityInfrastructureTests
     {
         var ctx = new ValidationContext();
         ctx.MinDescriptionLength.Should().Be(5,
-            because: "Wave 7a changed the default from 20 to 5");
+            because: "the default minimum description length is 5");
     }
 
     [Fact]
@@ -478,7 +477,7 @@ public sealed class SeverityInfrastructureTests
     {
         var ctx = new ValidationContext();
         ctx.ExcludedPathPrefixes.Should().BeEmpty(
-            because: "Wave 7a removed the hardcoded [/healthz, /ready, /metrics] default; " +
+            because: "there is no hardcoded [/healthz, /ready, /metrics] default; " +
                      "callers must pass excluded prefixes explicitly");
     }
 

@@ -13,7 +13,7 @@ namespace DotNetOpenApiExtract.Core.Tests.Validation.Rules;
 /// The document structure rules of OpenAPI 3.1/3.2: each one reports its violation, accepts a valid
 /// document and does not apply to versions without the checked field.
 /// </summary>
-public sealed class Stage1SpecRulesTests
+public sealed class DocumentStructureRulesTests
 {
     private const string LicenseRule = "spec.license-identifier-or-url";
     private const string StructureRule = "spec.paths-or-webhooks-or-components";
@@ -263,7 +263,7 @@ public sealed class Stage1SpecRulesTests
 /// The validation version left unset in the context comes from the build options: the tag rules,
 /// which apply to 3.2 only, see a Program.cs tag whose parent is not declared.
 /// </summary>
-public sealed class Stage1SpecRulesBuildTests
+public sealed class DocumentStructureRulesBuildTests
 {
     [Theory]
     [InlineData(OpenApiSpecVersion.OpenApi3_2, 1)]

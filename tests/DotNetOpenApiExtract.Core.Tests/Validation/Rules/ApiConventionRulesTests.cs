@@ -8,24 +8,24 @@ using CoreValidator = DotNetOpenApiExtract.Core.Validation.OpenApiValidator;
 namespace DotNetOpenApiExtract.Core.Tests.Validation.Rules;
 
 /// <summary>
-/// Unit tests for Wave 9 rules:
-/// R48: operation.has-required-response-codes (off by default, Error)
-/// R49: operation.request-body-description (Warning, on by default)
-/// R50: operation.operation-id-pascal-case (off by default, Warning)
-/// R51: schema.additional-properties-explicit (off by default, Warning)
-/// R52: response.content-type-json-default (off by default, Warning)
+/// Unit tests for the API convention rules:
+/// operation.has-required-response-codes (off by default, Error)
+/// operation.request-body-description (Warning, on by default)
+/// operation.operation-id-pascal-case (off by default, Warning)
+/// schema.additional-properties-explicit (off by default, Warning)
+/// response.content-type-json-default (off by default, Warning)
 /// Plus: per-rule min-description-length and EnumValueDescriptionRule enhancement.
 /// </summary>
-public sealed class Wave9RulesTests
+public sealed class ApiConventionRulesTests
 {
     private static readonly ValidationContext DefaultContext = new();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R48. operation.has-required-response-codes
+    // operation.has-required-response-codes
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R48_NoConfig_NoViolation()
+    public void RequiredResponseCodes_NoConfig_NoViolation()
     {
         // Rule emits nothing when RequiredResponseCodes is null
         var doc = MakeDocWithOperation("POST", "/api/orders");
@@ -34,7 +34,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_RequiredCodePresent_NoViolation()
+    public void RequiredResponseCodes_RequiredCodePresent_NoViolation()
     {
         var doc = MakeDocWithOperation("POST", "/api/orders", responses: new[] { "200", "422" });
         var ctx = new ValidationContext
@@ -47,7 +47,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_RequiredCodeMissing_OneViolation()
+    public void RequiredResponseCodes_RequiredCodeMissing_OneViolation()
     {
         var doc = MakeDocWithOperation("POST", "/api/orders", responses: new[] { "200" });
         var ctx = new ValidationContext
@@ -64,7 +64,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_MutatingFilter_AppliesTo_Post_Put_Patch_Delete()
+    public void RequiredResponseCodes_MutatingFilter_AppliesTo_Post_Put_Patch_Delete()
     {
         var doc = new OpenApiDocument
         {
@@ -101,7 +101,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_SafeFilter_AppliesTo_Get_Head_Options()
+    public void RequiredResponseCodes_SafeFilter_AppliesTo_Get_Head_Options()
     {
         var doc = new OpenApiDocument
         {
@@ -133,7 +133,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_StarFilter_AppliesTo_AllMethods()
+    public void RequiredResponseCodes_StarFilter_AppliesTo_AllMethods()
     {
         var doc = new OpenApiDocument
         {
@@ -160,7 +160,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_MultipleRequiredCodes_AllChecked()
+    public void RequiredResponseCodes_MultipleRequiredCodes_AllChecked()
     {
         var doc = MakeDocWithOperation("POST", "/api/orders", responses: new[] { "200" });
         var ctx = new ValidationContext
@@ -178,7 +178,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_OverlappingFilters_DeduplicatedToOneViolation()
+    public void RequiredResponseCodes_OverlappingFilters_DeduplicatedToOneViolation()
     {
         // Both ("*", 422) and ("mutating", 422) match POST — should produce exactly 1 violation,
         // not 2 violations with the same JsonPointer.
@@ -199,7 +199,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_ExcludedPath_Skipped()
+    public void RequiredResponseCodes_ExcludedPath_Skipped()
     {
         var doc = MakeDocWithOperation("POST", "/healthz", responses: new[] { "200" });
         var ctx = new ValidationContext
@@ -212,17 +212,17 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_IsOffByDefault()
+    public void RequiredResponseCodes_IsOffByDefault()
     {
         CoreValidator.DefaultOffRuleIds.Should().Contain("operation.has-required-response-codes");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R49. operation.request-body-description
+    // operation.request-body-description
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R49_NoRequestBody_NoViolation()
+    public void RequestBodyDescription_NoRequestBody_NoViolation()
     {
         var doc = MakeDocWithOperation("GET", "/api/items", responses: new[] { "200" });
         var rule = new OperationRequestBodyDescriptionRule();
@@ -230,7 +230,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R49_RequestBodyWithDescription_NoViolation()
+    public void RequestBodyDescription_RequestBodyWithDescription_NoViolation()
     {
         var doc = MakeDocWithOperationAndRequestBody("/api/orders", "Creates a new order in the system.");
         var rule = new OperationRequestBodyDescriptionRule();
@@ -238,7 +238,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R49_RequestBodyMissingDescription_OneViolation()
+    public void RequestBodyDescription_RequestBodyMissingDescription_OneViolation()
     {
         var doc = MakeDocWithOperationAndRequestBody("/api/orders", null);
         var rule = new OperationRequestBodyDescriptionRule();
@@ -250,7 +250,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R49_RequestBodyDescriptionTooShort_OneViolation()
+    public void RequestBodyDescription_RequestBodyDescriptionTooShort_OneViolation()
     {
         // Default MinDescriptionLength = 5; "Hi" is 2 chars
         var doc = MakeDocWithOperationAndRequestBody("/api/orders", "Hi");
@@ -261,9 +261,9 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R49_PerRuleMinLength_Override_LongerDescription_Violation()
+    public void RequestBodyDescription_PerRuleMinLength_Override_LongerDescription_Violation()
     {
-        // Global min = 5, override for R49 = 20; "Hello" is 5 chars (passes global but fails override)
+        // Global min = 5, override for operation.request-body-description = 20; "Hello" is 5 chars (passes global but fails override)
         var doc = MakeDocWithOperationAndRequestBody("/api/orders", "Hello");
         var ctx = new ValidationContext
         {
@@ -278,17 +278,17 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R49_IsOnByDefault()
+    public void RequestBodyDescription_IsOnByDefault()
     {
         CoreValidator.DefaultOffRuleIds.Should().NotContain("operation.request-body-description");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R50. operation.operation-id-pascal-case
+    // operation.operation-id-pascal-case
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R50_PascalCaseOperationId_NoViolation()
+    public void OperationIdPascalCase_PascalCaseOperationId_NoViolation()
     {
         var doc = MakeDocWithOperationId("GetUsers");
         var rule = new OperationOperationIdPascalCaseRule();
@@ -296,7 +296,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R50_CamelCaseOperationId_OneViolation()
+    public void OperationIdPascalCase_CamelCaseOperationId_OneViolation()
     {
         var doc = MakeDocWithOperationId("getUsers");
         var rule = new OperationOperationIdPascalCaseRule();
@@ -308,7 +308,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R50_UnderscoreOperationId_OneViolation()
+    public void OperationIdPascalCase_UnderscoreOperationId_OneViolation()
     {
         var doc = MakeDocWithOperationId("Get_Users");
         var rule = new OperationOperationIdPascalCaseRule();
@@ -316,7 +316,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R50_HyphenOperationId_OneViolation()
+    public void OperationIdPascalCase_HyphenOperationId_OneViolation()
     {
         var doc = MakeDocWithOperationId("Get-Users");
         var rule = new OperationOperationIdPascalCaseRule();
@@ -324,7 +324,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R50_NoOperationId_Skipped()
+    public void OperationIdPascalCase_NoOperationId_Skipped()
     {
         var doc = MakeDocWithOperationId(null);
         var rule = new OperationOperationIdPascalCaseRule();
@@ -332,17 +332,17 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R50_IsOffByDefault()
+    public void OperationIdPascalCase_IsOffByDefault()
     {
         CoreValidator.DefaultOffRuleIds.Should().Contain("operation.operation-id-pascal-case");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R51. schema.additional-properties-explicit
+    // schema.additional-properties-explicit
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R51_AdditionalPropertiesSchemaSet_NoViolation()
+    public void AdditionalPropertiesExplicit_AdditionalPropertiesSchemaSet_NoViolation()
     {
         // When AdditionalProperties has an explicit schema, it counts as explicit
         var doc = MakeDocWithSchemaExplicitAdditionalProps("UserDto", hasSchema: true, allowedFalse: false);
@@ -351,7 +351,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R51_AdditionalPropertiesAllowedFalse_NoViolation()
+    public void AdditionalPropertiesExplicit_AdditionalPropertiesAllowedFalse_NoViolation()
     {
         // When AdditionalPropertiesAllowed = false, it counts as explicit
         var doc = MakeDocWithSchemaExplicitAdditionalProps("UserDto", hasSchema: false, allowedFalse: true);
@@ -360,7 +360,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R51_AdditionalPropertiesNotSet_OneViolation()
+    public void AdditionalPropertiesExplicit_AdditionalPropertiesNotSet_OneViolation()
     {
         // No schema and AdditionalPropertiesAllowed = default (true) → not explicit → violation
         var doc = MakeDocWithSchemaExplicitAdditionalProps("UserDto", hasSchema: false, allowedFalse: false);
@@ -373,7 +373,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R51_CompositionSchema_Skipped()
+    public void AdditionalPropertiesExplicit_CompositionSchema_Skipped()
     {
         // Schemas with allOf are excluded
         var doc = new OpenApiDocument
@@ -406,7 +406,7 @@ public sealed class Wave9RulesTests
     [Theory]
     [InlineData("anyOf")]
     [InlineData("oneOf")]
-    public void R51_CompositionSchemaAnyOfOneOf_Skipped(string compositionKind)
+    public void AdditionalPropertiesExplicit_CompositionSchemaAnyOfOneOf_Skipped(string compositionKind)
     {
         // AnyOf and OneOf must also trigger the composition-skip branch in production.
         // Regression guard: dropping either branch from the isComposition check would
@@ -446,7 +446,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R51_SchemaWithNoProperties_Skipped()
+    public void AdditionalPropertiesExplicit_SchemaWithNoProperties_Skipped()
     {
         var doc = new OpenApiDocument
         {
@@ -468,17 +468,17 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R51_IsOffByDefault()
+    public void AdditionalPropertiesExplicit_IsOffByDefault()
     {
         CoreValidator.DefaultOffRuleIds.Should().Contain("schema.additional-properties-explicit");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R52. response.content-type-json-default
+    // response.content-type-json-default
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R52_ResponseWithJson_NoViolation()
+    public void JsonDefaultContentType_ResponseWithJson_NoViolation()
     {
         var doc = MakeDocWithResponseContent("/api/items", "200", "application/json");
         var rule = new ResponseContentTypeJsonDefaultRule();
@@ -486,7 +486,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R52_ResponseWithBothXmlAndJson_NoViolation()
+    public void JsonDefaultContentType_ResponseWithBothXmlAndJson_NoViolation()
     {
         var doc = MakeDocWithResponseContent("/api/items", "200", "application/json", "application/xml");
         var rule = new ResponseContentTypeJsonDefaultRule();
@@ -494,7 +494,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R52_ResponseWithXmlOnly_OneViolation()
+    public void JsonDefaultContentType_ResponseWithXmlOnly_OneViolation()
     {
         var doc = MakeDocWithResponseContent("/api/items", "200", "application/xml");
         var rule = new ResponseContentTypeJsonDefaultRule();
@@ -506,7 +506,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R52_ResponseWithNoContent_Skipped()
+    public void JsonDefaultContentType_ResponseWithNoContent_Skipped()
     {
         // Response with no content body is skipped
         var doc = new OpenApiDocument
@@ -535,7 +535,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R52_IsOffByDefault()
+    public void JsonDefaultContentType_IsOffByDefault()
     {
         CoreValidator.DefaultOffRuleIds.Should().Contain("response.content-type-json-default");
     }
@@ -681,7 +681,7 @@ public sealed class Wave9RulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Wave 9 overall counts
+    // Overall counts
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -697,7 +697,7 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void Wave9Rules_AreInAllRules()
+    public void ApiConventionRules_AreInAllRules()
     {
         CoreValidator.AllRuleIds.Should().Contain("operation.has-required-response-codes");
         CoreValidator.AllRuleIds.Should().Contain("operation.request-body-description");
@@ -707,11 +707,11 @@ public sealed class Wave9RulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // R48 via OpenApiValidator.Validate (full pipeline)
+    // operation.has-required-response-codes via OpenApiValidator.Validate (full pipeline)
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void R48_FullPipeline_EnabledWithConfig_ProducesViolation()
+    public void RequiredResponseCodes_FullPipeline_EnabledWithConfig_ProducesViolation()
     {
         var doc = MakeDocWithOperation("POST", "/api/orders", responses: new[] { "200" });
         var ctx = new ValidationContext
@@ -724,12 +724,12 @@ public sealed class Wave9RulesTests
     }
 
     [Fact]
-    public void R48_FullPipeline_NotEnabled_NeverFires()
+    public void RequiredResponseCodes_FullPipeline_NotEnabled_NeverFires()
     {
         var doc = MakeDocWithOperation("POST", "/api/orders", responses: new[] { "200" });
         var ctx = new ValidationContext
         {
-            // R48 is off by default — not enabled
+            // The rule is off by default — not enabled
             RequiredResponseCodes = new List<(string, int)> { ("mutating", 422) },
         };
         var result = CoreValidator.Validate(doc, ctx);

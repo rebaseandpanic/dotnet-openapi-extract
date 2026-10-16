@@ -8,18 +8,17 @@ using Xunit;
 namespace DotNetOpenApiExtract.Core.Tests.Validation.Rules;
 
 /// <summary>
-/// Unit tests for Wave 7b Group B — structural completeness rules (warning severity).
-/// Tests: B1 operation.success-response, B2 operation.operation-id-url-safe,
-///        B3 path.no-trailing-slash, B4 path.no-query-string, B5 path.no-identical,
-///        B6 tag.no-duplicates, B7 operation.tag-defined, B8 schema.typed-enum,
-///        B9 schema.no-duplicate-enum, B10 schema.no-required-undefined.
+/// Unit tests for the structural completeness rules (warning severity): operation.success-response,
+/// operation.operation-id-url-safe, path.no-trailing-slash, path.no-query-string, path.no-identical,
+/// tag.no-duplicates, operation.tag-defined, schema.typed-enum, schema.no-duplicate-enum,
+/// schema.no-required-undefined.
 /// </summary>
-public sealed class NewGroupBRulesTests
+public sealed class StructuralCompletenessRulesTests
 {
     private static readonly ValidationContext DefaultContext = new();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B1. operation.success-response
+    // operation.success-response
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -50,7 +49,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B2. operation.operation-id-url-safe
+    // operation.operation-id-url-safe
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -93,7 +92,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B3. path.no-trailing-slash
+    // path.no-trailing-slash
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -124,7 +123,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B4. path.no-query-string
+    // path.no-query-string
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -147,7 +146,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B5. path.no-identical
+    // path.no-identical
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -186,7 +185,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B6. tag.no-duplicates
+    // tag.no-duplicates
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -237,7 +236,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B7. operation.tag-defined
+    // operation.tag-defined
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -299,7 +298,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B8. schema.typed-enum
+    // schema.typed-enum
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -384,7 +383,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B9. schema.no-duplicate-enum
+    // schema.no-duplicate-enum
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -436,7 +435,7 @@ public sealed class NewGroupBRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // B10. schema.no-required-undefined
+    // schema.no-required-undefined
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]

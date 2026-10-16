@@ -61,9 +61,9 @@ public class OpenApiDocumentBuilderSourceTests
         withSource.Should().NotBeNull();
         withSource.Paths.Should().NotBeNull();
 
-        // Source analysis must not change the number of paths in Wave 0
+        // Source analysis must not change the number of paths
         withSource.Paths!.Count.Should().Be(baselinePathCount,
-            because: "source analysis in Wave 0 is infrastructure-only and must not alter output");
+            because: "source analysis must not add or remove paths");
     }
 
     // ──────────────────────────────────────────────────────────────────────────

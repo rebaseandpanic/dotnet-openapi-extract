@@ -10,16 +10,17 @@ public sealed class OpenApiValidator
 {
     /// <summary>
     /// All built-in validation rules in canonical order.
-    /// Group A: spec-MUST violations (error severity).
-    /// Group B: structural completeness (warning severity).
-    /// Group C: developer experience (warning severity, off by default — see <see cref="DefaultOffRuleIds"/>).
-    /// Group D: Wave 9 rules (mixed severity, some off by default — see <see cref="DefaultOffRuleIds"/>).
-    /// Group E: document structure of OpenAPI 3.1/3.2 (error, on by default; each rule applies to the
+    /// Spec-MUST violations (error severity).
+    /// Documentation and consistency of operations, parameters, responses, schemas and security.
+    /// Structural completeness (warning severity).
+    /// Developer experience (warning severity, off by default — see <see cref="DefaultOffRuleIds"/>).
+    /// API conventions (mixed severity, some off by default — see <see cref="DefaultOffRuleIds"/>).
+    /// Document structure of OpenAPI 3.1/3.2 (error, on by default; each rule applies to the
     /// versions that have the checked field).
     /// </summary>
     public static IReadOnlyList<IValidationRule> AllRules { get; } = new IValidationRule[]
     {
-        // ── Group A — Spec-MUST violations (error) ────────────────────────────
+        // ── Spec-MUST violations (error) ──────────────────────────────────────
         new SpecNoRefSiblingsRule(),
         new SpecInfoVersionRule(),
         new OperationOperationIdUniqueRule(),
@@ -29,7 +30,7 @@ public sealed class OpenApiValidator
         new SchemaArrayItemsRule(),
         new OperationParametersUniqueRule(),
 
-        // ── Original rules ────────────────────────────────────────────────────
+        // ── Documentation and consistency ─────────────────────────────────────
         // Operation-level rules
         new OperationSummaryRule(),
         new OperationOperationIdRule(),
@@ -68,7 +69,7 @@ public sealed class OpenApiValidator
         new SpecInfoTitleRule(),
         new SpecInfoDescriptionRule(),
 
-        // ── Group B — Structural completeness (warning) ───────────────────────
+        // ── Structural completeness (warning) ─────────────────────────────────
         new OperationSuccessResponseRule(),
         new OperationOperationIdUrlSafeRule(),
         new PathNoTrailingSlashRule(),
@@ -80,21 +81,21 @@ public sealed class OpenApiValidator
         new SchemaNoDuplicateEnumRule(),
         new SchemaNoRequiredUndefinedRule(),
 
-        // ── Group C — Developer experience (warning, off by default) ──────────
+        // ── Developer experience (warning, off by default) ────────────────────
         new SpecServersDefinedRule(),
         new TagDescriptionRule(),
         new ComponentNoUnusedRule(),
         new SpecNoEvalInMarkdownRule(),
         new SpecNoScriptTagsInMarkdownRule(),
 
-        // ── Group D — Wave 9 rules ─────────────────────────────────────────────
-        new OperationHasRequiredResponseCodesRule(), // R48, off by default, error
-        new OperationRequestBodyDescriptionRule(),   // R49, warning, on by default
-        new OperationOperationIdPascalCaseRule(),    // R50, off by default, warning
-        new SchemaAdditionalPropertiesExplicitRule(), // R51, off by default, warning
-        new ResponseContentTypeJsonDefaultRule(),    // R52, off by default, warning
+        // ── API conventions ───────────────────────────────────────────────────
+        new OperationHasRequiredResponseCodesRule(), // off by default, error
+        new OperationRequestBodyDescriptionRule(),   // warning, on by default
+        new OperationOperationIdPascalCaseRule(),    // off by default, warning
+        new SchemaAdditionalPropertiesExplicitRule(), // off by default, warning
+        new ResponseContentTypeJsonDefaultRule(),    // off by default, warning
 
-        // ── Group E — Document structure of OpenAPI 3.1/3.2 (error, on by default) ──
+        // ── Document structure of OpenAPI 3.1/3.2 (error, on by default) ──────
         new SpecLicenseIdentifierOrUrlRule(),        // 3.1+
         new SpecPathsOrWebhooksOrComponentsRule(),   // 3.0: paths; 3.1+: one of the three
         new TagParentDefinedRule(),                  // 3.2
@@ -121,19 +122,19 @@ public sealed class OpenApiValidator
     }
 
     /// <summary>
-    /// Rule IDs that are <b>off by default</b> (Group C and selected Group D rules).
+    /// Rule IDs that are <b>off by default</b> (the developer experience rules and selected API conventions).
     /// These rules run only when explicitly enabled via <see cref="ValidationContext.EnabledRuleIds"/>
     /// or the <c>--enable-rule</c> CLI flag. They are not affected by <c>--strict</c>.
     /// </summary>
     public static IReadOnlyList<string> DefaultOffRuleIds { get; } = new[]
     {
-        // Group C
+        // Developer experience
         "spec.servers-defined",
         "tag.description",
         "component.no-unused",
         "spec.no-eval-in-markdown",
         "spec.no-script-tags-in-markdown",
-        // Group D (off by default)
+        // API conventions (off by default)
         "operation.has-required-response-codes",
         "operation.operation-id-pascal-case",
         "schema.additional-properties-explicit",
@@ -142,7 +143,7 @@ public sealed class OpenApiValidator
 
     /// <summary>
     /// Validates <paramref name="document"/> against all rules (excluding any listed in
-    /// <see cref="ValidationContext.SkippedRuleIds"/> and Group C rules not in
+    /// <see cref="ValidationContext.SkippedRuleIds"/> and off-by-default rules not in
     /// <see cref="ValidationContext.EnabledRuleIds"/>) and returns the result.
     /// </summary>
     /// <param name="document">The OpenAPI document to validate.</param>
@@ -165,7 +166,7 @@ public sealed class OpenApiValidator
             if (context.SkippedRuleIds.Contains(rule.Id))
                 continue;
 
-            // Group C rules are off by default unless explicitly enabled
+            // Off-by-default rules run only when explicitly enabled
             if (DefaultOffRuleIds.Contains(rule.Id) && !context.EnabledRuleIds.Contains(rule.Id))
                 continue;
 

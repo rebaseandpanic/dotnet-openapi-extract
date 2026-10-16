@@ -8,17 +8,17 @@ using CoreValidator = DotNetOpenApiExtract.Core.Validation.OpenApiValidator;
 namespace DotNetOpenApiExtract.Core.Tests.Validation.Rules;
 
 /// <summary>
-/// Unit tests for Wave 7b Group C — developer experience rules (warning severity, off by default).
-/// Tests: C1 spec.servers-defined, C2 tag.description, C3 component.no-unused,
-///        C4 spec.no-eval-in-markdown, C5 spec.no-script-tags-in-markdown.
+/// Unit tests for the developer experience rules (warning severity, off by default):
+/// spec.servers-defined, tag.description, component.no-unused, spec.no-eval-in-markdown,
+/// spec.no-script-tags-in-markdown.
 /// Also covers: DefaultOffRuleIds list, opt-in mechanism via EnabledRuleIds.
 /// </summary>
-public sealed class NewGroupCRulesTests
+public sealed class DeveloperExperienceRulesTests
 {
     private static readonly ValidationContext DefaultContext = new();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // C1. spec.servers-defined
+    // spec.servers-defined
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class NewGroupCRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // C2. tag.description
+    // tag.description
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class NewGroupCRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // C3. component.no-unused
+    // component.no-unused
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -170,7 +170,7 @@ public sealed class NewGroupCRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // C4. spec.no-eval-in-markdown
+    // spec.no-eval-in-markdown
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -210,7 +210,7 @@ public sealed class NewGroupCRulesTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // C5. spec.no-script-tags-in-markdown
+    // spec.no-script-tags-in-markdown
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -254,17 +254,17 @@ public sealed class NewGroupCRulesTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void DefaultOffRuleIds_ContainsGroupCRules()
+    public void DefaultOffRuleIds_ContainsDeveloperExperienceAndOffByDefaultConventionRules()
     {
-        // Group C rules (5) + Group D off-by-default rules (4) = 9 total
+        // 5 developer experience rules + 4 off-by-default API convention rules = 9 total
         CoreValidator.DefaultOffRuleIds.Should().HaveCount(9,
-            because: "Wave 9 adds 4 more off-by-default rules (R48, R50, R51, R52)");
+            because: "the 5 developer experience rules and 4 API convention rules are off by default");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.servers-defined");
         CoreValidator.DefaultOffRuleIds.Should().Contain("tag.description");
         CoreValidator.DefaultOffRuleIds.Should().Contain("component.no-unused");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.no-eval-in-markdown");
         CoreValidator.DefaultOffRuleIds.Should().Contain("spec.no-script-tags-in-markdown");
-        // Wave 9 additions
+        // API conventions
         CoreValidator.DefaultOffRuleIds.Should().Contain("operation.has-required-response-codes");
         CoreValidator.DefaultOffRuleIds.Should().Contain("operation.operation-id-pascal-case");
         CoreValidator.DefaultOffRuleIds.Should().Contain("schema.additional-properties-explicit");
@@ -275,7 +275,7 @@ public sealed class NewGroupCRulesTests
     public void AllRules_Count_Is58()
     {
         CoreValidator.AllRules.Should().HaveCount(58,
-            because: "Wave 9 adds 5 rules to the 47 from Wave 7b, and the OpenAPI 3.1/3.2 document structure rules 6 more");
+            because: "52 rules apply to every version, and the OpenAPI 3.1/3.2 document structure rules add 6 more");
     }
 
     [Fact]
@@ -287,9 +287,9 @@ public sealed class NewGroupCRulesTests
     }
 
     [Fact]
-    public void GroupCRules_NotRun_WithDefaultContext()
+    public void DeveloperExperienceRules_NotRun_WithDefaultContext()
     {
-        // A document that violates all Group C rules
+        // A document that violates all developer experience rules
         var doc = new OpenApiDocument
         {
             Info = new OpenApiInfo
@@ -311,14 +311,14 @@ public sealed class NewGroupCRulesTests
         var ctx = new ValidationContext(); // default — no EnabledRuleIds
         var result = CoreValidator.Validate(doc, ctx);
 
-        // Group C rules must NOT fire with default context
+        // Developer experience rules must NOT fire with default context
         var groupCIds = CoreValidator.DefaultOffRuleIds;
         result.Violations.Should().NotContain(v => groupCIds.Contains(v.RuleId),
-            because: "Group C rules are off by default");
+            because: "developer experience rules are off by default");
     }
 
     [Fact]
-    public void GroupCRules_Run_WhenEnabledViaEnabledRuleIds()
+    public void DeveloperExperienceRules_Run_WhenEnabledViaEnabledRuleIds()
     {
         // A document that violates spec.servers-defined
         var doc = new OpenApiDocument
@@ -339,9 +339,9 @@ public sealed class NewGroupCRulesTests
     }
 
     [Fact]
-    public void GroupCRules_OnlyEnabled_OthersStillOff()
+    public void DeveloperExperienceRules_OnlyEnabled_OthersStillOff()
     {
-        // Enable only one Group C rule — others should still not fire
+        // Enable only one developer experience rule — others should still not fire
         var doc = new OpenApiDocument
         {
             Info = new OpenApiInfo
@@ -371,7 +371,7 @@ public sealed class NewGroupCRulesTests
     {
         var ctx = new ValidationContext();
         ctx.EnabledRuleIds.Should().BeEmpty(
-            because: "default context has no enabled rules (Group C rules require explicit opt-in)");
+            because: "default context has no enabled rules (developer experience rules require explicit opt-in)");
     }
 
     [Fact]
@@ -383,7 +383,7 @@ public sealed class NewGroupCRulesTests
             Info = new OpenApiInfo { Title = "API", Version = "v1" },
         };
 
-        // Both enable and skip the same Group C rule.
+        // Both enable and skip the same developer experience rule.
         // OpenApiValidator checks SkippedRuleIds BEFORE the EnabledRuleIds gate,
         // so skip must win and the rule must not fire.
         var ctx = new ValidationContext
