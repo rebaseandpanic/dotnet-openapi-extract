@@ -74,9 +74,9 @@ public class NullableElementConformanceTests(NullableElementConformanceFixture f
         IntPage = new Page<int> { Items = [1] },
         Shapes = [new ElementCircle { Radius = 1 }, null],
         Dictionaries = [new Dictionary<string, ElementItem> { ["a"] = Item }, null],
-        // Enum elements are Nullable<T>, the form this class does not cover: a nullable string enum
-        // does not list null among its values.
-        Tints = [StjTint.Red],
+        Tints = [StjTint.Red, null],
+        NumericTints = [Tint.Crimson, null],
+        TintsByName = new() { ["a"] = StjTint.Plain, ["b"] = null },
         NullableJsonObjects = [new JsonObject { ["a"] = 1 }, null],
         NullableJsonArrays = [new JsonArray(1), null],
     };

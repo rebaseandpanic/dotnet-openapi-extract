@@ -335,24 +335,28 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
             At(PropertySchema(document, Model, property), "/propertyNames").Should().BeNull(property);
     }
 
-    // --- The enum element keeps the form of Nullable<T> ----------------------------------------------
+    // --- The enum element is the union of the enum and the null branch ----------------------------------
 
     [Theory]
     [MemberData(nameof(AllForms))]
-    public void NullableEnumElement_KeepsTheNullableValueTypeForm(OpenApiSpecVersion version, DocumentFormat format)
+    public void NullableEnumElement_IsTheUnionOfTheEnumAndTheNullBranch(OpenApiSpecVersion version, DocumentFormat format)
     {
         var items = At(PropertySchema(fixture.Modern[(version, format)], Model, "tints"), "/items")!;
 
-        // Nullable<StjTint>: a string enum in the version's nullable form, not an anyOf.
-        items.AsObject().ContainsKey("anyOf").Should().BeFalse();
+        // Nullable<StjTint>: anyOf of the string enum, which keeps one type, and the version's null branch.
+        items.AsObject().ContainsKey("type").Should().BeFalse();
+        var anyOf = items["anyOf"]!.AsArray();
+        anyOf.Should().HaveCount(2);
+        anyOf[0]!["type"]!.GetValue<string>().Should().Be("string");
+        anyOf[0]!.AsObject().ContainsKey("nullable").Should().BeFalse();
         if (version == OpenApiSpecVersion.OpenApi3_0)
         {
-            items["type"]!.GetValue<string>().Should().Be("string");
-            items["nullable"]!.GetValue<bool>().Should().BeTrue();
+            anyOf[1]!["nullable"]!.GetValue<bool>().Should().BeTrue();
+            ShouldBe(anyOf[1]!["enum"], JsonNode.Parse("[null]"), "tints null branch");
         }
         else
         {
-            ShouldBe(items["type"], JsonNode.Parse("""["string", "null"]"""), "tints items type");
+            anyOf[1]!["type"]!.GetValue<string>().Should().Be("null");
         }
     }
 

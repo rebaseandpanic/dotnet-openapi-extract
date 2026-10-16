@@ -79,6 +79,31 @@ internal static class VersionedSchemaForms
             ? new OpenApiSchema { Type = JsonSchemaType.Object | JsonSchemaType.Null, Enum = [null!] }
             : new OpenApiSchema { Type = JsonSchemaType.Null };
 
+    /// <summary>
+    /// The nullable form of an enum schema, by version: <c>anyOf: [enum schema, null branch]</c>, the form of
+    /// a nullable reference. The enum schema stays as it is — its single <c>type</c>, its <c>enum</c>
+    /// without <c>null</c>, <c>x-enum-varnames</c> / <c>x-enum-descriptions</c> in step with <c>enum</c>.
+    /// A <c>null</c> type (3.1+) or <c>nullable: true</c> (3.0) next to <c>enum</c> would not admit
+    /// <c>null</c>: JSON Schema 2020-12 checks <c>type</c> and <c>enum</c> together, and OpenAPI 3.0.3 asks
+    /// for <c>null</c> among the values of a nullable enum. The union carries the description of the enum
+    /// schema, since an enum place is described by its enum type.
+    /// </summary>
+    public static OpenApiSchema NullableEnum(OpenApiSchema enumSchema, OpenApiSpecVersion version) => new()
+    {
+        Description = enumSchema.Description,
+        AnyOf = [enumSchema, NullBranch(version)],
+    };
+
+    /// <summary>
+    /// The enum schema of <paramref name="schema"/> when <paramref name="schema"/> is the
+    /// <see cref="NullableEnum"/> form of either version, otherwise <see langword="null"/>.
+    /// </summary>
+    public static OpenApiSchema? NullableEnumBranch(IOpenApiSchema? schema) =>
+        schema is OpenApiSchema { Type: null, AllOf: null, AnyOf: [OpenApiSchema { Type: not null, Enum.Count: > 0 } enumSchema, var nullBranch] }
+        && IsNullBranch(nullBranch)
+            ? enumSchema
+            : null;
+
     /// <summary>Whether <paramref name="schema"/> is a <see cref="NullBranch"/> of either version.</summary>
     public static bool IsNullBranch(IOpenApiSchema? schema) => schema switch
     {

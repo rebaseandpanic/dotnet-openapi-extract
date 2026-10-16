@@ -16,7 +16,9 @@ namespace DotNetOpenApiExtract.Core.Schema;
 /// <item><b>P-WRAP</b>: the <c>allOf</c> wrapper of a reference, <c>{allOf: [$ref, constraint?], keywords…}</c>,
 /// where the optional constraint is the <c>{enum}</c> / <c>{const}</c> of <c>[AllowedValues]</c>;</item>
 /// <item><b>P-NULLC</b>: an outer <c>allOf</c> around the nullable form of a reference and an allowed-values
-/// constraint, <c>{allOf: [{anyOf: [$ref, {type: "null"}], keywords…}, {enum|const}], not?, keywords…}</c>.</item>
+/// constraint, <c>{allOf: [{anyOf: [$ref, {type: "null"}], keywords…}, {enum|const}], not?, keywords…}</c>;
+/// the nullable form of an enum, <c>anyOf: [enum schema, {type: "null"}]</c>, takes the place of the
+/// reference's in the same way.</item>
 /// </list>
 /// <para>
 /// <see cref="Finish"/> runs after the last writer and reader of the place. OpenAPI 3.0 ignores the
@@ -215,9 +217,13 @@ internal static class ReferencePlace
         schema is OpenApiSchema { AllOf: null } constraint
         && KeywordsSetOn(constraint).Select(p => p.Name).ToList() is [nameof(OpenApiSchema.Enum)] or [nameof(OpenApiSchema.Const)];
 
-    /// <summary>The 3.1+ nullable form of a reference: an untyped <c>anyOf: [$ref, {type: "null"}]</c>.</summary>
+    /// <summary>
+    /// The 3.1+ nullable form of a reference, an untyped <c>anyOf: [$ref, {type: "null"}]</c>, or of an
+    /// enum, <c>anyOf: [enum schema, {type: "null"}]</c> (<see cref="VersionedSchemaForms.NullableEnum"/>).
+    /// </summary>
     private static bool IsNullableReference(OpenApiSchema schema) =>
-        schema is { Type: null, AllOf: null, AnyOf: [OpenApiSchemaReference, OpenApiSchema { Type: JsonSchemaType.Null }] };
+        schema is { Type: null, AllOf: null, AnyOf: [OpenApiSchemaReference, OpenApiSchema { Type: JsonSchemaType.Null }] }
+        || VersionedSchemaForms.NullableEnumBranch(schema) != null;
 
     private static IEnumerable<PropertyInfo> KeywordsSetOn(OpenApiSchema schema) =>
         SchemaKeywords.Where(p => !Equals(p.GetValue(schema), p.GetValue(Unset)));

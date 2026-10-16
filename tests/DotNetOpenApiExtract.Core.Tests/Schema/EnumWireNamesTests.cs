@@ -70,6 +70,13 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
     private JsonObject Property(OpenApiSpecVersion version, string name) =>
         fixture.Documents[version]["components"]!["schemas"]!["EnumWireNamesModel"]!["properties"]![name]!.AsObject();
 
+    /// <summary>
+    /// The enum schema of a place: the place itself, or the first branch of the <c>anyOf</c> of a nullable
+    /// enum, whose second branch is the null branch of the version.
+    /// </summary>
+    private static JsonObject EnumSchema(JsonObject place) =>
+        place["anyOf"] is JsonArray { Count: 2 } anyOf ? anyOf[0]!.AsObject() : place;
+
     private static string[] Strings(JsonNode? array) =>
         array!.AsArray().Where(n => n != null).Select(n => n!.GetValue<string>()).ToArray();
 
@@ -97,7 +104,7 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
         var expected = Written(enumType, writer);
         expected.Should().NotEqual(Enum.GetNames(enumType), because: "the fixture renames members for this writer");
 
-        Strings(Property(version, property)["enum"]).Should().Equal(expected);
+        Strings(EnumSchema(Property(version, property))["enum"]).Should().Equal(expected);
     }
 
     [Theory]
@@ -142,7 +149,7 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
     [MemberData(nameof(PropertyConverterCases))]
     public void PropertyConverter_KeepsVarnamesAndDescriptions_ParallelToTheWireNames(OpenApiSpecVersion version, string property, Type enumType)
     {
-        var schema = Property(version, property);
+        var schema = EnumSchema(Property(version, property));
 
         Strings(schema["x-enum-varnames"]).Should().Equal(Enum.GetNames(enumType));
         Strings(schema["x-enum-descriptions"]).Should().Equal(
@@ -238,22 +245,24 @@ public class EnumWireNamesTests(EnumWireNamesFixture fixture) : IClassFixture<En
 
         foreach (var name in new[] { "nullablePropertyStj", "nullablePropertyNewtonsoft" })
         {
-            var schema = Property(version, name);
+            // The nullable form of an enum: anyOf of the string enum and the version's null branch.
+            var place = Property(version, name);
+            place.ContainsKey("type").Should().BeFalse(because: name);
+            var anyOf = place["anyOf"]!.AsArray();
+            anyOf[0]!["type"]!.GetValue<string>().Should().Be("string", because: name);
             if (version == OpenApiSpecVersion.OpenApi3_0)
-            {
-                schema["type"]!.GetValue<string>().Should().Be("string", because: name);
-                schema["nullable"]!.GetValue<bool>().Should().BeTrue(because: name);
-            }
+                anyOf[1]!["nullable"]!.GetValue<bool>().Should().BeTrue(because: name);
             else
-            {
-                schema["type"]!.AsArray().Select(t => t!.GetValue<string>()).Should().BeEquivalentTo(["string", "null"], because: name);
-            }
+                anyOf[1]!["type"]!.GetValue<string>().Should().Be("null", because: name);
         }
 
         var stj = Written<Tint>(Writer.StjConverter);
         var constrained = Property(version, "nullableConstrained");
         constrained["default"]!.GetValue<string>().Should().Be(stj[(int)Tint.Crimson]);
-        var allowed = constrained["allOf"]!.AsArray().Select(n => n!.AsObject()).Single(s => s["type"] == null && s["enum"] != null);
+        // The allowed values: an element of the outer allOf in 3.0, beside anyOf in 3.1 and later.
+        var allowed = version == OpenApiSpecVersion.OpenApi3_0
+            ? constrained["allOf"]!.AsArray().Select(n => n!.AsObject()).Single(s => s["anyOf"] == null && s["enum"] != null)
+            : constrained;
         Strings(allowed["enum"]).Should().Equal(stj[(int)Tint.Red], stj[(int)Tint.Plain]);
     }
 }

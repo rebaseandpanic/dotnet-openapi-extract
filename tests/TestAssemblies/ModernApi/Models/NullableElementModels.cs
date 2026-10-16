@@ -129,6 +129,12 @@ public class NullableElementsModel
     /// <summary>Nullable enum values written as strings.</summary>
     public List<StjTint?> Tints { get; set; } = [];
 
+    /// <summary>Nullable enum values written as numbers.</summary>
+    public List<Tint?> NumericTints { get; set; } = [];
+
+    /// <summary>Nullable enum values of a dictionary, written as strings.</summary>
+    public Dictionary<string, StjTint?> TintsByName { get; set; } = [];
+
     /// <summary>Nullable JSON objects.</summary>
     public List<JsonObject?> NullableJsonObjects { get; set; } = [];
 

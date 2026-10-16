@@ -1724,7 +1724,8 @@ public sealed class SchemaGenerator
         }
 
         var isWrapper = schema.AllOf is { Count: > 0 } && schema.AllOf[0] is OpenApiSchemaReference;
-        var jsonType = isWrapper ? null : schema.Type;
+        // A nullable enum's values are those of its enum branch; the union itself has no type.
+        var jsonType = isWrapper ? null : schema.Type ?? VersionedSchemaForms.NullableEnumBranch(schema)?.Type;
         var propertyType = site.MemberType;
         var enumType = propertyType.IsEnum
             ? propertyType
@@ -1744,6 +1745,10 @@ public sealed class SchemaGenerator
             {
                 // The schema's own enum stays whole (and a composite such as the nullable form of a
                 // reference stays as it is); the allowed values are a second schema to satisfy.
+                // The place is now the outer allOf, so the nullable form of an enum drops the copy of
+                // its enum's description it carried as the place (the enum schema keeps its own).
+                if (VersionedSchemaForms.NullableEnumBranch(schema) is { } enumBranch && schema.Description == enumBranch.Description)
+                    schema.Description = null;
                 result = new OpenApiSchema { AllOf = [schema, constraint] };
             }
             else if (constraint.Const != null)
@@ -1772,6 +1777,10 @@ public sealed class SchemaGenerator
     /// </summary>
     private static NumberUnion? NumberUnionBranches(OpenApiSchema schema)
     {
+        // The nullable form of a numeric enum is a union of an integer and null, not a number union.
+        if (VersionedSchemaForms.NullableEnumBranch(schema) != null)
+            return null;
+
         if ((schema.Type.HasValue && schema.Type.Value != JsonSchemaType.Null)
             || schema.AnyOf is not [OpenApiSchema { Type: { } first } number, ..]
             || (first & (JsonSchemaType.Integer | JsonSchemaType.Number)) == 0)
@@ -1943,7 +1952,9 @@ public sealed class SchemaGenerator
         // The JSON type of the value: the schema's own, or the numeric branch of a number union.
         var valueType = schema.Type is { } own && own != JsonSchemaType.Null
             ? own
-            : NumberUnionBranches(schema)?.Number.Type ?? (schema.AllOf is [OpenApiSchema first, ..] ? first.Type : null);
+            : NumberUnionBranches(schema)?.Number.Type
+              ?? VersionedSchemaForms.NullableEnumBranch(schema)?.Type
+              ?? (schema.AllOf is [OpenApiSchema first, ..] ? first.Type ?? VersionedSchemaForms.NullableEnumBranch(first)?.Type : null);
         var result = DefaultValueConverter.FromAttribute(
             attribute, valueType, PropertyEnumNaming(property.PropertyType, attrData) ?? EnumWireNaming.MemberName);
         if (result.HasValue)
@@ -2063,6 +2074,11 @@ public sealed class SchemaGenerator
 
         if (schema.AnyOf is [OpenApiSchemaReference nullableRef, ..] && nullBranch)
             return (schema, ComponentType(nullableRef), true);
+
+        // A nullable enum, alone or as the first element of the allOf of its allowed values.
+        if ((VersionedSchemaForms.NullableEnumBranch(schema)
+             ?? (schema.AllOf is [var first, ..] ? VersionedSchemaForms.NullableEnumBranch(first) : null)) is { } enumBranch)
+            return (schema, WithoutNull(enumBranch.Type), true);
 
         return (schema, WithoutNull(schema.Type), HasNull(schema.Type));
     }
@@ -2780,10 +2796,14 @@ public sealed class SchemaGenerator
     /// Adds <c>JsonSchemaType.Null</c> to the type flags of <paramref name="schema"/> (written as
     /// <c>nullable: true</c> in 3.0). When the schema is an <see cref="OpenApiSchemaReference"/> it is
     /// wrapped in <c>anyOf: [$ref, null branch]</c> with the null branch of <paramref name="version"/>
-    /// (<see cref="VersionedSchemaForms.NullBranch"/>).
+    /// (<see cref="VersionedSchemaForms.NullBranch"/>); an enum schema likewise, in
+    /// <see cref="VersionedSchemaForms.NullableEnum"/>, since a null type beside <c>enum</c> admits no null.
     /// </summary>
     internal static IOpenApiSchema MakeNullable(IOpenApiSchema schema, OpenApiSpecVersion version)
     {
+        if (schema is OpenApiSchema { Type: not null, Enum.Count: > 0 } enumSchema)
+            return VersionedSchemaForms.NullableEnum(enumSchema, version);
+
         if (schema is OpenApiSchema concrete)
         {
             // Truly-any schema ({}) already permits null; don't invent a type.

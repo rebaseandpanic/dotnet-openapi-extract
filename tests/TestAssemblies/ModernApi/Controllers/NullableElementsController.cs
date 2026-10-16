@@ -42,7 +42,15 @@ public class NullableElementsController : ControllerBase
         [FromQuery] List<List<string?>?> nested,
         [FromQuery] Dictionary<string, string?> map) => Ok();
 
+    /// <summary>A nullable enum in the query string.</summary>
+    [HttpGet("query-enum")]
+    public IActionResult QueryEnum([FromQuery] ModernApi.Models.Keywords.StjTint? tint) => Ok();
+
     // Request bodies.
+
+    /// <summary>A body that is a nullable enum.</summary>
+    [HttpPost("body-enum")]
+    public IActionResult BodyEnum([FromBody] ModernApi.Models.Keywords.StjTint? tint) => Ok();
 
     /// <summary>A body of nullable items.</summary>
     [HttpPost("body")]
