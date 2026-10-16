@@ -104,29 +104,11 @@ public sealed class SchemaGenerator
     // FullName for byte[]
     private const string ByteArrayFullName = "System.Byte[]";
 
-    // Generic collection FullNames whose generic definition we match
-    private static readonly HashSet<string> SetGenericDefinitions = new(StringComparer.Ordinal)
+    // The set interfaces: a type that is or implements one holds unique elements (uniqueItems: true).
+    private static readonly HashSet<string> SetInterfaces = new(StringComparer.Ordinal)
     {
-        "System.Collections.Generic.HashSet`1",
         "System.Collections.Generic.ISet`1",
         "System.Collections.Generic.IReadOnlySet`1",
-        "System.Collections.Generic.SortedSet`1",
-    };
-
-    private static readonly HashSet<string> ListGenericDefinitions = new(StringComparer.Ordinal)
-    {
-        "System.Collections.Generic.List`1",
-        "System.Collections.Generic.IList`1",
-        "System.Collections.Generic.ICollection`1",
-        "System.Collections.Generic.IEnumerable`1",
-        "System.Collections.Generic.IReadOnlyList`1",
-        "System.Collections.Generic.IReadOnlyCollection`1",
-        "System.Collections.Generic.Queue`1",
-        "System.Collections.Generic.Stack`1",
-        "System.Collections.Generic.LinkedList`1",
-        "System.Collections.ObjectModel.Collection`1",
-        "System.Collections.ObjectModel.ReadOnlyCollection`1",
-        "System.Collections.ObjectModel.ObservableCollection`1",
     };
 
     /// <summary>
@@ -354,46 +336,19 @@ public sealed class SchemaGenerator
             };
         }
 
-        // --- 6b. Generic collections ---
-        if (type.IsGenericType)
+        // --- 6b. Collections: the element is the T of the IEnumerable<T> the type is or implements,
+        // not the type's own generic argument (class Page<T> : List<Item> holds Item); a type derived
+        // from a set (class Tags : HashSet<string>) holds unique elements like the set itself ---
+        if (EnumerableInterface(type) is { } enumerable)
         {
-            var genericDef = type.GetGenericTypeDefinition();
-            var genericDefFullName = genericDef.FullName ?? string.Empty;
-
-            // Set (uniqueItems: true)
-            if (SetGenericDefinitions.Contains(genericDefFullName))
-            {
-                var itemType = type.GetGenericArguments()[0];
-                return new OpenApiSchema
-                {
-                    Type = JsonSchemaType.Array,
-                    Items = ElementSchema(itemType, positions?.Argument(0)),
-                    UniqueItems = true,
-                };
-            }
-
-            // List / collection
-            if (ListGenericDefinitions.Contains(genericDefFullName)
-                || ImplementsEnumerableInterface(type))
-            {
-                var itemType = type.GetGenericArguments()[0];
-                return new OpenApiSchema
-                {
-                    Type = JsonSchemaType.Array,
-                    Items = ElementSchema(itemType, positions?.Argument(0)),
-                };
-            }
-        }
-
-        // --- 6c. A collection type that is not generic itself but implements IEnumerable<T>
-        // (class Items : List<Item>) → array of T, the element of the implemented interface ---
-        if (!type.IsGenericType && EnumerableInterface(type) is { } enumerable)
-        {
-            return new OpenApiSchema
+            var array = new OpenApiSchema
             {
                 Type = JsonSchemaType.Array,
                 Items = ElementSchema(enumerable.GetGenericArguments()[0], positions?.Implemented(enumerable).Argument(0)),
             };
+            if (IsSet(type))
+                array.UniqueItems = true;
+            return array;
         }
 
         // --- 7. Non-generic IEnumerable (e.g. ArrayList, IEnumerable) → array of any ---
@@ -2606,24 +2561,28 @@ public sealed class SchemaGenerator
     private const string IEnumerableFullName = "System.Collections.IEnumerable";
 
     /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="type"/> implements
-    /// <c>IEnumerable&lt;T&gt;</c> by walking its implemented interfaces.
-    /// </summary>
-    private static bool ImplementsEnumerableInterface(Type type) => EnumerableInterface(type) != null;
-
-    /// <summary>
-    /// The <c>IEnumerable&lt;T&gt;</c> that <paramref name="type"/> implements (the first one, when it
-    /// implements several), or <see langword="null"/>.
+    /// The <c>IEnumerable&lt;T&gt;</c> that <paramref name="type"/> is or implements (the first one, when
+    /// it implements several), or <see langword="null"/>.
     /// </summary>
     private static Type? EnumerableInterface(Type type)
     {
-        foreach (var i in type.GetInterfaces())
+        var candidates = type.IsInterface ? type.GetInterfaces().Prepend(type) : type.GetInterfaces();
+        foreach (var candidate in candidates)
         {
-            if (!i.IsGenericType) continue;
-            if ((i.GetGenericTypeDefinition().FullName ?? string.Empty) == IEnumerableGenericFullName)
-                return i;
+            if (candidate.IsGenericType && (candidate.GetGenericTypeDefinition().FullName ?? string.Empty) == IEnumerableGenericFullName)
+                return candidate;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> is or implements <c>ISet&lt;T&gt;</c> or <c>IReadOnlySet&lt;T&gt;</c>:
+    /// <c>HashSet&lt;T&gt;</c>, <c>SortedSet&lt;T&gt;</c> and the types derived from them.
+    /// </summary>
+    private static bool IsSet(Type type)
+    {
+        var candidates = type.IsInterface ? type.GetInterfaces().Prepend(type) : type.GetInterfaces();
+        return candidates.Any(c => c.IsGenericType && SetInterfaces.Contains(c.GetGenericTypeDefinition().FullName ?? string.Empty));
     }
 
     private static readonly HashSet<string> DictionaryInterfaces = new(StringComparer.Ordinal)

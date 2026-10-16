@@ -184,6 +184,12 @@ public class FixedItemMap : Dictionary<int, KeyedItem>;
 /// <summary>A list type of its own that is not generic.</summary>
 public class FixedItemList : List<KeyedItem>;
 
+/// <summary>A generic list type whose type argument is not its element: it holds items.</summary>
+public class TaggedItemList<TTag> : List<KeyedItem>;
+
+/// <summary>A set type of its own: its tags are unique.</summary>
+public class TagSet : HashSet<string>;
+
 /// <summary>A key type written by a converter of its own.</summary>
 [System.Text.Json.Serialization.JsonConverter(typeof(RegionCodeConverter))]
 public readonly record struct RegionCode(string Value);
@@ -240,6 +246,12 @@ public class DictionaryModel
 
     /// <summary>Items in a list type of its own that is not generic.</summary>
     public FixedItemList FixedList { get; set; } = [];
+
+    /// <summary>Items in a generic list type whose type argument is not the element.</summary>
+    public TaggedItemList<int> TaggedList { get; set; } = [];
+
+    /// <summary>Tags in a set type of its own.</summary>
+    public TagSet Tags { get; set; } = [];
 
     /// <summary>A dictionary with a size range.</summary>
     [MinLength(1)]

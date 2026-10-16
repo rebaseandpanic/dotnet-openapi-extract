@@ -273,5 +273,52 @@ public class DictionaryKeySchemaTests(DictionaryKeyFixture fixture) : IClassFixt
             .IsValid.Should().BeFalse(because: "the element is a KeyedItem, whose name is a string");
     }
 
+    /// <summary>
+    /// <c>TaggedItemList&lt;int&gt;</c> derives from <c>List&lt;KeyedItem&gt;</c>: System.Text.Json writes it as
+    /// an array of the items, whatever its own type argument; the element is not an integer.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void GenericListType_IsAnArrayOfTheImplementedElement(OpenApiSpecVersion version)
+    {
+        var schema = Property(fixture.Builds[version].Document, "taggedList");
+
+        schema["type"]!.GetValue<string>().Should().Be("array");
+        schema["items"]!["$ref"]!.GetValue<string>().Should().Be(KeyedItemRef);
+    }
+
+    /// <summary>A type derived from <c>HashSet&lt;string&gt;</c> holds unique elements, as the set does.</summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void SetTypeOfItsOwn_HasUniqueItems(OpenApiSpecVersion version)
+    {
+        var schema = Property(fixture.Builds[version].Document, "tags");
+
+        schema["type"]!.GetValue<string>().Should().Be("array");
+        schema["uniqueItems"]!.GetValue<bool>().Should().BeTrue();
+        schema["items"]!["type"]!.GetValue<string>().Should().Be("string");
+    }
+
+    [Theory]
+    [MemberData(nameof(SchemaVersions))]
+    public void GenericListAndSetTypes_StjWrites_PassTheSchema_AndAWrongValueFails(OpenApiSpecVersion version)
+    {
+        var document = fixture.Builds[version].Document;
+        var conformance = SchemaConformance.For(document);
+        var list = StjWire.Serialize(new ModernApi.Models.Keywords.TaggedItemList<int> { new() { Name = "a" } }, StjWire.Mvc())!;
+        var tags = StjWire.Serialize(new ModernApi.Models.Keywords.TagSet { "a", "b" }, StjWire.Mvc())!;
+
+        foreach (var (property, value) in new[] { ("taggedList", list), ("tags", tags) })
+        {
+            var result = conformance.ValidateSchema(Property(document, property), value);
+            result.IsValid.Should().BeTrue(because: $"{property}: {string.Join("; ", result.Errors)}");
+        }
+
+        conformance.ValidateSchema(Property(document, "taggedList"), JsonNode.Parse("[1]"))
+            .IsValid.Should().BeFalse(because: "the element is a KeyedItem, not the type argument");
+        conformance.ValidateSchema(Property(document, "tags"), JsonNode.Parse("[\"a\",\"a\"]"))
+            .IsValid.Should().BeFalse(because: "a set holds every tag once");
+    }
+
     public static TheoryData<OpenApiSpecVersion> SchemaVersions => [OpenApiSpecVersion.OpenApi3_1, OpenApiSpecVersion.OpenApi3_2];
 }
