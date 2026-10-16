@@ -57,7 +57,7 @@ The tool itself runs on .NET 10. References of the target assembly are resolved 
 | `--license-name <string>` | no | `SwaggerDoc` `License.Name` | `info.license.name` |
 | `--license-url <url>` | no | `SwaggerDoc` `License.Url` | `info.license.url` |
 | `--license-identifier <spdx>` | no | `SwaggerDoc` `License.Identifier` | `info.license.identifier` (OpenAPI 3.1+; `x-oai-license-identifier` with a warning for 3.0); needs `--license-name`, excludes `--license-url` |
-| `--default-security-scheme <name>` | no | — | The scheme (a name from `AddSecurityDefinition`) that `[Authorize]` without `AuthenticationSchemes` stands for — the application's default authentication scheme, when it is configured outside `Program.cs`. Such operations get a requirement of this scheme (with their roles); `[AllowAnonymous]` keeps `security: []`, an explicit `AuthenticationSchemes` its own. A name the document does not define is an error (exit 2) |
+| `--default-security-scheme <name>` | no | — | The scheme (a name from `AddSecurityDefinition`) that `[Authorize]` without `AuthenticationSchemes` stands for — the application's default authentication scheme, when it is configured outside `Program.cs`. Such operations get a requirement of this scheme (with their roles), in place of the document's requirements; `[AllowAnonymous]` keeps `security: []`, an explicit `AuthenticationSchemes` its own. A name the document does not define is an error (exit 2) |
 | `--summary <text>` | no | `SwaggerDoc` `Summary` | `info.summary` (OpenAPI 3.1+; omitted with a warning for 3.0); wins over `OpenApiInfo.Summary` in Program.cs |
 | `--terms-of-service <url>` | no | `SwaggerDoc` `TermsOfService` | `info.termsOfService` |
 | `--server <url>` | no | — | Server URL in `servers[]` (repeatable) |
