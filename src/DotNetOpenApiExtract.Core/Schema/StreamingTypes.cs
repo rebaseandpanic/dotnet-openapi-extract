@@ -14,9 +14,26 @@ internal static class StreamingTypes
     /// </summary>
     public static bool TryGetAsyncEnumerableElementType(Type type, out Type elementType)
     {
+        if (TryGetAsyncEnumerableInterface(type, out var sequence))
+        {
+            elementType = sequence.GetGenericArguments()[0];
+            return true;
+        }
+
+        elementType = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// When <paramref name="type"/> is <c>IAsyncEnumerable&lt;T&gt;</c> or implements it, returns
+    /// <see langword="true"/> and that <c>IAsyncEnumerable&lt;T&gt;</c>: the type itself, or the
+    /// interface it implements.
+    /// </summary>
+    public static bool TryGetAsyncEnumerableInterface(Type type, out Type sequence)
+    {
         if (IsAsyncEnumerable(type))
         {
-            elementType = type.GetGenericArguments()[0];
+            sequence = type;
             return true;
         }
 
@@ -24,12 +41,12 @@ internal static class StreamingTypes
         {
             if (IsAsyncEnumerable(implemented))
             {
-                elementType = implemented.GetGenericArguments()[0];
+                sequence = implemented;
                 return true;
             }
         }
 
-        elementType = null!;
+        sequence = null!;
         return false;
     }
 

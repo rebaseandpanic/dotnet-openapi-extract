@@ -4,6 +4,14 @@ All notable changes to this project.
 
 ## [Unreleased]
 
+### Changes to OpenAPI 3.0 output
+
+- [BEHAVIOR] A collection element, array element or dictionary value of a DTO property annotated `?` (`List<string?>`, `Item?[]`, `Dictionary<string, Item?>`, `List<List<Item?>?>`) is nullable in the document: a schema with a type gets `nullable: true` in 3.0 and `"null"` among its types in 3.1 and 3.2; a reference becomes `anyOf: [$ref, null branch]`. Only the annotated positions change: the collection, the dictionary key and positions without `?` keep their schemas, as do value types (`List<int?>` already was nullable) and `{}` for `object`. Code without nullable annotations (`#nullable disable`, or an assembly built without nullable reference types) gives no nullable elements, unlike the property itself, which stays nullable there. `?` on a type parameter applies only where it is closed by a reference type (`List<T?>` in `Page<int>` stays `integer`). *SDK:* element and value types of these collections become nullable (`List<String?>`, `Map<String, Item?>`); clients must accept `null` items.
+
+### All changes
+
+- [BEHAVIOR] The nullable elements and dictionary values of the section above, in 3.0, 3.1 and 3.2.
+
 - [BEHAVIOR] OpenAPI 3.1 and 3.2: a schema that references a component and carries keywords of its own — a DTO property, a path, query or header parameter, a request body, a form field — has the keywords next to `$ref` instead of the `allOf: [$ref]` wrapper: `{$ref, description: …}` in place of `{allOf: [$ref], description: …}`. All keywords move, with the same values: `description`, `title`, `default`, `examples`, `deprecated`, `readOnly` / `writeOnly`, lengths, `pattern`, `format`, and the `enum` / `const` of `[AllowedValues]` with the `not` of `[DeniedValues]`, which was a second element of `allOf`. A nullable reference stays `anyOf: [$ref, {type: "null"}]` with its keywords beside it; with `[AllowedValues]` the values now stand beside `anyOf` as well, without an outer `allOf`. JSON Schema 2020-12 applies the siblings of `$ref` together with it, so the set of valid values does not change, and the referenced component is untouched. `type` never stands next to `$ref`. OpenAPI 3.0 output does not change: 3.0 ignores the siblings of `$ref` and keeps the wrapper. *SDK:* generators that modelled the wrapper as an anonymous composite type now see the referenced type directly.
 
 ## [0.17.1] - 2026-10-11

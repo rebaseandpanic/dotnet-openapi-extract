@@ -205,12 +205,21 @@ public sealed class SchemaGenerator
     /// An <see cref="IOpenApiSchema"/> that is either an inline <see cref="OpenApiSchema"/>
     /// or an <see cref="OpenApiSchemaReference"/>.
     /// </returns>
-    public IOpenApiSchema GenerateSchema(Type type)
+    public IOpenApiSchema GenerateSchema(Type type) => GenerateSchema(type, null);
+
+    /// <summary>
+    /// <see cref="GenerateSchema(Type)"/> with the NRT positions of the place <paramref name="type"/> is
+    /// declared at (a property, a parameter, a return value): each element of a collection or array and
+    /// each dictionary value whose position is annotated nullable (<see cref="TypeNullability.IsNullable"/>)
+    /// gets the nullable form of the version. The positions stop at a complex type: its members are
+    /// places of their own. <see langword="null"/> marks no position.
+    /// </summary>
+    internal IOpenApiSchema GenerateSchema(Type type, TypeNullability? positions)
     {
         _generationDepth++;
         try
         {
-            var schema = GenerateSchemaCore(type);
+            var schema = GenerateSchemaCore(type, positions);
             if (_generationDepth == 1 && _pendingLosses.Count > 0)
             {
                 // Direct generation (no document build): deliver this call's warnings for what
@@ -251,7 +260,7 @@ public sealed class SchemaGenerator
         }
     }
 
-    private IOpenApiSchema GenerateSchemaCore(Type type)
+    private IOpenApiSchema GenerateSchemaCore(Type type, TypeNullability? positions)
     {
         // --- 1. byte[] → base64 binary string (before the array check below) ---
         if (type.IsArray && type.GetElementType()?.FullName == "System.Byte")
@@ -269,17 +278,14 @@ public sealed class SchemaGenerator
             return new OpenApiSchema
             {
                 Type = JsonSchemaType.Array,
-                Items = GenerateSchema(elementType),
+                Items = ElementSchema(elementType, positions?.Element()),
             };
         }
 
         // --- 3. Nullable<T> → unwrap, generate for T, add Null to type flags ---
         if (IsNullableValueType(type))
         {
-            var inner = GenerateSchema(type.GetGenericArguments()[0]);
-            return inner is OpenApiSchema { Type: null, AnyOf.Count: > 0 } union
-                ? VersionedSchemaForms.NullableUnion(union, _options.OpenApiVersion)
-                : MakeNullable(inner, _options.OpenApiVersion);
+            return NullableForm(GenerateSchema(type.GetGenericArguments()[0], positions?.Argument(0)));
         }
 
         // --- 3b. BCL JSON container types (JsonElement, JsonNode, JObject, etc.) ---
@@ -333,12 +339,12 @@ public sealed class SchemaGenerator
         // --- 5b. IAsyncEnumerable<T> (or a type implementing it) → array of T ---
         // System.Text.Json writes an asynchronous sequence as a JSON array; there is no object
         // of the sequence type on the wire, so no component is created for it.
-        if (StreamingTypes.TryGetAsyncEnumerableElementType(type, out var asyncElementType))
+        if (StreamingTypes.TryGetAsyncEnumerableInterface(type, out var sequence))
         {
             return new OpenApiSchema
             {
                 Type = JsonSchemaType.Array,
-                Items = GenerateSchema(asyncElementType),
+                Items = ElementSchema(sequence.GetGenericArguments()[0], positions?.Implemented(sequence).Argument(0)),
             };
         }
 
@@ -351,12 +357,12 @@ public sealed class SchemaGenerator
             // Dictionary: key and value from the actual IDictionary<TKey, TValue> implementation,
             // not from the position of the type's own generic arguments.
             if ((DictionaryGenericDefinitions.Contains(genericDefFullName) || ImplementsDictionaryInterface(type))
-                && DictionaryKeyValue(type) is var (keyType, valueType))
+                && DictionaryKeyValue(type) is var (dictionary, keyType, valueType))
             {
                 return new OpenApiSchema
                 {
                     Type = JsonSchemaType.Object,
-                    AdditionalProperties = GenerateSchema(valueType),
+                    AdditionalProperties = ElementSchema(valueType, positions?.Implemented(dictionary).Argument(1)),
                     PropertyNames = KeySchema(keyType),
                 };
             }
@@ -368,7 +374,7 @@ public sealed class SchemaGenerator
                 return new OpenApiSchema
                 {
                     Type = JsonSchemaType.Array,
-                    Items = GenerateSchema(itemType),
+                    Items = ElementSchema(itemType, positions?.Argument(0)),
                     UniqueItems = true,
                 };
             }
@@ -381,7 +387,7 @@ public sealed class SchemaGenerator
                 return new OpenApiSchema
                 {
                     Type = JsonSchemaType.Array,
-                    Items = GenerateSchema(itemType),
+                    Items = ElementSchema(itemType, positions?.Argument(0)),
                 };
             }
         }
@@ -880,7 +886,7 @@ public sealed class SchemaGenerator
                 (_hasNumberHandlingScope, _numberHandlingScope) = (true, handling.Value);
             try
             {
-                propSchema = GenerateSchema(propType);
+                propSchema = GenerateSchema(propType, TypeNullability.ForProperty(propInfo));
             }
             finally
             {
@@ -2614,10 +2620,10 @@ public sealed class SchemaGenerator
     };
 
     /// <summary>
-    /// The key and value types of the <c>IDictionary&lt;TKey, TValue&gt;</c> (or
-    /// <c>IReadOnlyDictionary&lt;TKey, TValue&gt;</c>) that <paramref name="type"/> is or implements.
+    /// The <c>IDictionary&lt;TKey, TValue&gt;</c> (or <c>IReadOnlyDictionary&lt;TKey, TValue&gt;</c>) that
+    /// <paramref name="type"/> is or implements, with its key and value types.
     /// </summary>
-    private static (Type Key, Type Value)? DictionaryKeyValue(Type type)
+    private static (Type Dictionary, Type Key, Type Value)? DictionaryKeyValue(Type type)
     {
         var candidates = type.IsInterface ? type.GetInterfaces().Prepend(type) : type.GetInterfaces();
         foreach (var candidate in candidates)
@@ -2625,7 +2631,7 @@ public sealed class SchemaGenerator
             if (candidate.IsGenericType && DictionaryInterfaces.Contains(candidate.GetGenericTypeDefinition().FullName ?? string.Empty))
             {
                 var args = candidate.GetGenericArguments();
-                return (args[0], args[1]);
+                return (candidate, args[0], args[1]);
             }
         }
 
@@ -2747,6 +2753,26 @@ public sealed class SchemaGenerator
 
     /// <summary>The OpenAPI version this generator builds schemas for.</summary>
     internal OpenApiSpecVersion OpenApiVersion => _options.OpenApiVersion;
+
+    /// <summary>
+    /// The schema of an element of a collection or array, or of a dictionary value, at
+    /// <paramref name="position"/>: in the nullable form of the version when the position is annotated
+    /// nullable (P-NRT2), as generated otherwise. The other positions of the place keep their schemas.
+    /// </summary>
+    private IOpenApiSchema ElementSchema(Type type, TypeNullability? position)
+    {
+        var schema = GenerateSchema(type, position);
+        return position is { IsNullable: true } ? NullableForm(schema) : schema;
+    }
+
+    /// <summary>
+    /// The nullable form of a generated schema: an inline <c>anyOf</c> union gets the null branch of the
+    /// version (<see cref="VersionedSchemaForms.NullableUnion"/>), anything else <see cref="MakeNullable"/>.
+    /// </summary>
+    private IOpenApiSchema NullableForm(IOpenApiSchema schema) =>
+        schema is OpenApiSchema { Type: null, AnyOf.Count: > 0 } union
+            ? VersionedSchemaForms.NullableUnion(union, _options.OpenApiVersion)
+            : MakeNullable(schema, _options.OpenApiVersion);
 
     /// <summary>
     /// Adds <c>JsonSchemaType.Null</c> to the type flags of <paramref name="schema"/> (written as
