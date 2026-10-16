@@ -231,7 +231,7 @@ public class SequentialMediaTypeTests(SequentialMediaTypeFixture fixture) : ICla
         diagnostics.Should().NotContain(d => d.Location == "#/components/schemas/Parcel");
     }
 
-    // ── Row: SC-003, JSON Lines items written by System.Text.Json ───────────
+    // ── JSON Lines items written by System.Text.Json pass the item schema ───
 
     [Theory]
     [InlineData("/sequential/jsonl", "application/jsonl")]

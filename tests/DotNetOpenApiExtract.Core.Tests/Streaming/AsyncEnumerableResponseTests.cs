@@ -127,7 +127,7 @@ public class AsyncEnumerableResponseTests(AsyncEnumerableResponseFixture fixture
         items["nullable"].Should().BeNull();
     }
 
-    // ── SC-003: what System.Text.Json writes for the sequence passes the response schema ──
+    // ── What System.Text.Json writes for the sequence passes the response schema ──
 
     private static async Task<JsonNode?> WriteAsync<T>(IAsyncEnumerable<T> sequence)
     {
