@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using ModernApi.Models.NullableElements;
 using ModernApi.Models.Streaming;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace ModernApi.Controllers;
 
@@ -120,6 +121,11 @@ public class NullableElementsController : ControllerBase
     [HttpGet("response-attribute")]
     [ProducesResponseType(typeof(List<ElementItem>), StatusCodes.Status200OK)]
     public List<ElementItem?> ResponseAttribute() => Items;
+
+    /// <summary>[SwaggerResponse] declares the body type; the signature's nullable elements do not apply to it.</summary>
+    [HttpGet("response-swagger-attribute")]
+    [SwaggerResponse(StatusCodes.Status200OK, "Items", typeof(List<ElementItem>))]
+    public List<ElementItem?> ResponseSwaggerAttribute() => Items;
 
     /// <summary>The attribute declares the sequence type; the signature's nullable elements do not apply to it.</summary>
     [HttpGet("response-attribute-stream")]

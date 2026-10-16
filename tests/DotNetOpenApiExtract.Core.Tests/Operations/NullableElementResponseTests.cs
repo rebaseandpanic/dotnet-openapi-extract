@@ -139,6 +139,7 @@ public class NullableElementResponseTests(NullableElementResponseFixture fixture
 
         // A body type given by an attribute carries no annotations, whatever the signature says.
         new("/nullable-elements/response-attribute", "get", "200", ArrayOf(Ref(ItemRef))),
+        new("/nullable-elements/response-swagger-attribute", "get", "200", ArrayOf(Ref(ItemRef))),
     ];
 
     public static TheoryData<OpenApiSpecVersion, int> SignatureCases()
