@@ -68,6 +68,44 @@ public sealed class NullableElementSchemaFixture
     public Dictionary<(OpenApiSpecVersion Version, DocumentFormat Format), JsonNode> Legacy { get; } = [];
 
     public Dictionary<OpenApiSpecVersion, IReadOnlyList<ExtractionDiagnostic>> Diagnostics { get; } = [];
+
+    /// <summary>
+    /// Precondition of the case: no member, type or the assembly of LegacyNoNrtApi carries a
+    /// <c>NullableAttribute</c> or <c>NullableContextAttribute</c>, so no position has NRT data at all.
+    /// </summary>
+    public static void LegacyAssemblyHasNoNullableMetadata()
+    {
+        using var stream = File.OpenRead(TestPaths.LegacyNoNrtApiDll);
+        using var pe = new PEReader(stream);
+        var reader = pe.GetMetadataReader();
+
+        var attributeTypes = reader.CustomAttributes
+            .Select(h => AttributeTypeName(reader, reader.GetCustomAttribute(h)))
+            .ToHashSet(StringComparer.Ordinal);
+
+        attributeTypes.Should().NotContain(
+            ["System.Runtime.CompilerServices.NullableAttribute", "System.Runtime.CompilerServices.NullableContextAttribute"],
+            "LegacyNoNrtApi is compiled without nullable reference types");
+    }
+
+    private static string AttributeTypeName(MetadataReader reader, CustomAttribute attribute)
+    {
+        EntityHandle type = attribute.Constructor.Kind switch
+        {
+            HandleKind.MethodDefinition => reader.GetMethodDefinition((MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            HandleKind.MemberReference => reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent,
+            _ => default,
+        };
+        return type.Kind switch
+        {
+            HandleKind.TypeDefinition => Name(reader, reader.GetTypeDefinition((TypeDefinitionHandle)type).Namespace, reader.GetTypeDefinition((TypeDefinitionHandle)type).Name),
+            HandleKind.TypeReference => Name(reader, reader.GetTypeReference((TypeReferenceHandle)type).Namespace, reader.GetTypeReference((TypeReferenceHandle)type).Name),
+            _ => string.Empty,
+        };
+    }
+
+    private static string Name(MetadataReader reader, StringHandle ns, StringHandle name) =>
+        $"{reader.GetString(ns)}.{reader.GetString(name)}";
 }
 
 /// <summary>
@@ -432,7 +470,7 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
     [MemberData(nameof(LegacyPositions))]
     public void AssemblyWithoutNrt_HasNoNullableElementsOrValues(string property, string pointer)
     {
-        LegacyAssemblyHasNoNullableMetadata();
+        NullableElementSchemaFixture.LegacyAssemblyHasNoNullableMetadata();
 
         foreach (var version in VersionedDocumentHarness.Versions)
         foreach (var format in Formats)
@@ -445,44 +483,6 @@ public class NullableElementSchemaTests(NullableElementSchemaFixture fixture) : 
             position["type"]?.ToJsonString().Should().NotContain("null", because);
         }
     }
-
-    /// <summary>
-    /// Precondition of the case: no member, type or the assembly of LegacyNoNrtApi carries a
-    /// <c>NullableAttribute</c> or <c>NullableContextAttribute</c>, so no position has NRT data at all.
-    /// </summary>
-    private static void LegacyAssemblyHasNoNullableMetadata()
-    {
-        using var stream = File.OpenRead(TestPaths.LegacyNoNrtApiDll);
-        using var pe = new PEReader(stream);
-        var reader = pe.GetMetadataReader();
-
-        var attributeTypes = reader.CustomAttributes
-            .Select(h => AttributeTypeName(reader, reader.GetCustomAttribute(h)))
-            .ToHashSet(StringComparer.Ordinal);
-
-        attributeTypes.Should().NotContain(
-            ["System.Runtime.CompilerServices.NullableAttribute", "System.Runtime.CompilerServices.NullableContextAttribute"],
-            "LegacyNoNrtApi is compiled without nullable reference types");
-    }
-
-    private static string AttributeTypeName(MetadataReader reader, CustomAttribute attribute)
-    {
-        EntityHandle type = attribute.Constructor.Kind switch
-        {
-            HandleKind.MethodDefinition => reader.GetMethodDefinition((MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
-            HandleKind.MemberReference => reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent,
-            _ => default,
-        };
-        return type.Kind switch
-        {
-            HandleKind.TypeDefinition => Name(reader, reader.GetTypeDefinition((TypeDefinitionHandle)type).Namespace, reader.GetTypeDefinition((TypeDefinitionHandle)type).Name),
-            HandleKind.TypeReference => Name(reader, reader.GetTypeReference((TypeReferenceHandle)type).Namespace, reader.GetTypeReference((TypeReferenceHandle)type).Name),
-            _ => string.Empty,
-        };
-    }
-
-    private static string Name(MetadataReader reader, StringHandle ns, StringHandle name) =>
-        $"{reader.GetString(ns)}.{reader.GetString(name)}";
 
     // --- No diagnostics for the places ---------------------------------------------------------------
 
