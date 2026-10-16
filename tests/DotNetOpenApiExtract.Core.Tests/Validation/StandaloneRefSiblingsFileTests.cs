@@ -174,6 +174,119 @@ public class StandaloneRefSiblingsFileTests
         }
         """;
 
+    /// <summary>
+    /// A 3.0 document whose extensible maps — Paths, Responses and a Callback (OAS 3.0: "This object MAY
+    /// be extended with Specification Extensions") — carry an extension whose value is an object with
+    /// <c>$ref</c> and other keys, also deeper inside: extension values are data. Entries of plain maps
+    /// whose name only starts with <c>x-</c> — a component schema, a component response, a property — are
+    /// real objects, and their siblings next to <c>$ref</c> are errors.
+    /// </summary>
+    private const string ExtensionsAndXNames30 = """
+        {
+          "openapi": "3.0.4",
+          "info": { "title": "Extensions", "version": "1", "description": "Extensions of maps." },
+          "paths": {
+            "x-meta": { "$ref": "literal", "note": "extension data", "inner": { "$ref": "literal", "other": 1 } },
+            "/items": {
+              "get": {
+                "operationId": "ListItems",
+                "responses": {
+                  "200": { "description": "Items." },
+                  "x-payload": { "$ref": "literal", "note": "extension data" }
+                },
+                "callbacks": {
+                  "onEvent": {
+                    "{$request.body#/url}": { "post": { "responses": { "200": { "description": "Received." } } } },
+                    "x-hook": { "$ref": "literal", "note": "extension data" }
+                  }
+                }
+              }
+            }
+          },
+          "components": {
+            "responses": {
+              "x-shared": { "$ref": "#/components/responses/Plain", "description": "Local text." },
+              "Plain": { "description": "Plain." }
+            },
+            "schemas": {
+              "Target": { "type": "object", "description": "Target." },
+              "x-alias": { "$ref": "#/components/schemas/Target", "description": "Local text." },
+              "Holder": {
+                "type": "object",
+                "properties": { "x-prop": { "$ref": "#/components/schemas/Target", "description": "Local text." } }
+              }
+            }
+          }
+        }
+        """;
+
+    private const string ExtensionsAndXNames30Yaml = """
+        openapi: 3.0.4
+        info:
+          title: Extensions
+          version: '1'
+          description: Extensions of maps.
+        paths:
+          x-meta:
+            $ref: literal
+            note: extension data
+            inner: { $ref: literal, other: 1 }
+          /items:
+            get:
+              operationId: ListItems
+              responses:
+                '200':
+                  description: Items.
+                x-payload:
+                  $ref: literal
+                  note: extension data
+              callbacks:
+                onEvent:
+                  '{$request.body#/url}':
+                    post:
+                      responses:
+                        '200': { description: Received. }
+                  x-hook: { $ref: literal, note: extension data }
+        components:
+          responses:
+            x-shared:
+              $ref: '#/components/responses/Plain'
+              description: Local text.
+            Plain: { description: Plain. }
+          schemas:
+            Target: { type: object, description: Target. }
+            x-alias:
+              $ref: '#/components/schemas/Target'
+              description: Local text.
+            Holder:
+              type: object
+              properties:
+                x-prop: { $ref: '#/components/schemas/Target', description: Local text. }
+        """;
+
+    /// <summary>The entries named <c>x-…</c> of plain maps, each a reference with a sibling.</summary>
+    private static readonly string[] XNamedPlaces =
+    [
+        "#/components/responses/x-shared",
+        "#/components/schemas/x-alias",
+        "#/components/schemas/Holder/properties/x-prop",
+    ];
+
+    public static TheoryData<string, string> ExtensionFiles => new()
+    {
+        { "extensions.json", ExtensionsAndXNames30 },
+        { "extensions.yaml", ExtensionsAndXNames30Yaml },
+    };
+
+    [Theory]
+    [MemberData(nameof(ExtensionFiles))]
+    public async Task File30_ExtensionsOfExtensibleMapsAreData_AndXNamedEntriesOfPlainMapsAreChecked(string fileName, string content)
+    {
+        var (_, violations) = await ValidateAsync(fileName, content);
+
+        violations.Select(v => v["jsonPointer"]!.GetValue<string>()).Should().BeEquivalentTo(XNamedPlaces);
+    }
+
     private const string WithSiblings31 = """
         {
           "openapi": "3.1.1",

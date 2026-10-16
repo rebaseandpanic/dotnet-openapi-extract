@@ -26,7 +26,8 @@ public sealed record RefSiblingOccurrence(string JsonPointer, IReadOnlyList<stri
 /// reference: a Path Item Object (its <c>$ref</c> field stands next to its other fields), the key of a
 /// map of names (a property named <c>$ref</c> in <c>properties</c>, an entry of <c>responses</c>,
 /// <c>content</c>, the maps of <c>components</c> and the like), and data — the values of
-/// <c>example</c>, <c>default</c>, <c>enum</c>, specification extensions (<c>x-…</c>), the
+/// <c>example</c>, <c>default</c>, <c>enum</c>, specification extensions (<c>x-…</c> fields of an
+/// object, and <c>x-…</c> entries of the maps that may be extended: Paths, Responses, Callback), the
 /// <c>value</c> of an Example Object and the <c>parameters</c> and <c>requestBody</c> of a Link Object.
 /// The keys of a reported object are not searched further: a 3.0 reader ignores all of them.
 /// </para>
@@ -52,7 +53,18 @@ public static class RefSiblingScanner
 
         /// <summary>A Callback Object (or a reference to one): a map of expressions to Path Items.</summary>
         Callback,
+
+        /// <summary>The Components Object: its maps are plain maps of component names.</summary>
+        Components,
     }
+
+    /// <summary>
+    /// The maps that may be extended (OAS 3.0: the Paths, Responses and Callback Objects "MAY be extended
+    /// with Specification Extensions"): an entry named <c>x-…</c> is an extension, data with all it holds.
+    /// The other maps of names are plain: an entry named <c>x-…</c> there is a real object (a component, a
+    /// property, a media type). <c>responses</c> of the Components Object is a plain map of components.
+    /// </summary>
+    private static readonly HashSet<string> ExtensibleMapFields = new(StringComparer.Ordinal) { "paths", "responses" };
 
     /// <summary>Field values that are data, not objects of the document.</summary>
     private static readonly HashSet<string> DataFields = new(StringComparer.Ordinal) { "example", "default", "enum" };
@@ -104,7 +116,7 @@ public static class RefSiblingScanner
 
         if (kind == Kind.Callback)
         {
-            WalkMap(obj, Kind.PathItem, pointer, found);
+            WalkMap(obj, Kind.PathItem, extensible: true, pointer, found);
             return;
         }
 
@@ -121,11 +133,15 @@ public static class RefSiblingScanner
                 // Security Requirement Objects: maps of scheme names to scope lists.
                 for (var i = 0; i < requirements.Count; i++)
                     if (requirements[i] is JsonObject requirement)
-                        WalkMap(requirement, Kind.Object, $"{child}/{i}", found);
+                        WalkMap(requirement, Kind.Object, extensible: false, $"{child}/{i}", found);
             }
             else if (value is JsonObject map && MapFields.TryGetValue(key, out var entryKind))
             {
-                WalkMap(map, entryKind, child, found);
+                WalkMap(map, entryKind, extensible: kind != Kind.Components && ExtensibleMapFields.Contains(key), child, found);
+            }
+            else if (key == "components" && kind == Kind.Object && pointer == "#" && value is JsonObject components)
+            {
+                Walk(components, Kind.Components, child, found);
             }
             else
             {
@@ -134,10 +150,13 @@ public static class RefSiblingScanner
         }
     }
 
-    private static void WalkMap(JsonObject map, Kind entryKind, string pointer, List<RefSiblingOccurrence> found)
+    private static void WalkMap(JsonObject map, Kind entryKind, bool extensible, string pointer, List<RefSiblingOccurrence> found)
     {
         foreach (var (name, entry) in map)
         {
+            if (extensible && name.StartsWith("x-", StringComparison.Ordinal))
+                continue; // a specification extension of the map: data
+
             if (entry is JsonObject entryObject)
                 Walk(entryObject, entryKind, $"{pointer}/{JsonPointerHelper.EncodeSegment(name)}", found);
         }
