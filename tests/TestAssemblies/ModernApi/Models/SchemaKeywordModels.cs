@@ -153,6 +153,19 @@ public class RangeModel
 public class SwappedMap<TValue, TKey> : Dictionary<TKey, TValue>
     where TKey : notnull;
 
+/// <summary>An item held by a dictionary or a list of a type of its own.</summary>
+public class KeyedItem
+{
+    /// <summary>Name of the item.</summary>
+    public string Name { get; set; } = "";
+}
+
+/// <summary>A dictionary type of its own that is not generic, keyed by integer.</summary>
+public class FixedItemMap : Dictionary<int, KeyedItem>;
+
+/// <summary>A list type of its own that is not generic.</summary>
+public class FixedItemList : List<KeyedItem>;
+
 /// <summary>A key type written by a converter of its own.</summary>
 [System.Text.Json.Serialization.JsonConverter(typeof(RegionCodeConverter))]
 public readonly record struct RegionCode(string Value);
@@ -203,6 +216,12 @@ public class DictionaryModel
 
     /// <summary>Keyed by a type with its own converter.</summary>
     public Dictionary<RegionCode, int> ByRegion { get; set; } = [];
+
+    /// <summary>Keyed by integer, a dictionary type of its own that is not generic.</summary>
+    public FixedItemMap FixedMap { get; set; } = [];
+
+    /// <summary>Items in a list type of its own that is not generic.</summary>
+    public FixedItemList FixedList { get; set; } = [];
 
     /// <summary>A dictionary with a size range.</summary>
     [MinLength(1)]

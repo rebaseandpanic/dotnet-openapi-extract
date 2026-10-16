@@ -129,15 +129,6 @@ public sealed class SchemaGenerator
         "System.Collections.ObjectModel.ObservableCollection`1",
     };
 
-    private static readonly HashSet<string> DictionaryGenericDefinitions = new(StringComparer.Ordinal)
-    {
-        "System.Collections.Generic.Dictionary`2",
-        "System.Collections.Generic.IDictionary`2",
-        "System.Collections.Generic.IReadOnlyDictionary`2",
-        "System.Collections.Generic.SortedDictionary`2",
-        "System.Collections.Generic.SortedList`2",
-    };
-
     /// <summary>
     /// Initializes a new <see cref="SchemaGenerator"/> with optional configuration.
     /// </summary>
@@ -349,24 +340,25 @@ public sealed class SchemaGenerator
             };
         }
 
-        // --- 6. Generic collections and dictionaries ---
+        // --- 6. Dictionaries: key and value from the actual IDictionary<TKey, TValue> (or
+        // IReadOnlyDictionary<TKey, TValue>) implementation, not from the position of the type's own
+        // generic arguments; a type derived from a dictionary need not be generic itself
+        // (class Fixed : Dictionary<string, Item>), System.Text.Json writes it as an object all the same.
+        if (DictionaryKeyValue(type) is var (dictionary, keyType, valueType))
+        {
+            return new OpenApiSchema
+            {
+                Type = JsonSchemaType.Object,
+                AdditionalProperties = ElementSchema(valueType, positions?.Implemented(dictionary).Argument(1)),
+                PropertyNames = KeySchema(keyType),
+            };
+        }
+
+        // --- 6b. Generic collections ---
         if (type.IsGenericType)
         {
             var genericDef = type.GetGenericTypeDefinition();
             var genericDefFullName = genericDef.FullName ?? string.Empty;
-
-            // Dictionary: key and value from the actual IDictionary<TKey, TValue> implementation,
-            // not from the position of the type's own generic arguments.
-            if ((DictionaryGenericDefinitions.Contains(genericDefFullName) || ImplementsDictionaryInterface(type))
-                && DictionaryKeyValue(type) is var (dictionary, keyType, valueType))
-            {
-                return new OpenApiSchema
-                {
-                    Type = JsonSchemaType.Object,
-                    AdditionalProperties = ElementSchema(valueType, positions?.Implemented(dictionary).Argument(1)),
-                    PropertyNames = KeySchema(keyType),
-                };
-            }
 
             // Set (uniqueItems: true)
             if (SetGenericDefinitions.Contains(genericDefFullName))
@@ -391,6 +383,17 @@ public sealed class SchemaGenerator
                     Items = ElementSchema(itemType, positions?.Argument(0)),
                 };
             }
+        }
+
+        // --- 6c. A collection type that is not generic itself but implements IEnumerable<T>
+        // (class Items : List<Item>) → array of T, the element of the implemented interface ---
+        if (!type.IsGenericType && EnumerableInterface(type) is { } enumerable)
+        {
+            return new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Items = ElementSchema(enumerable.GetGenericArguments()[0], positions?.Implemented(enumerable).Argument(0)),
+            };
         }
 
         // --- 7. Non-generic IEnumerable (e.g. ArrayList, IEnumerable) → array of any ---
@@ -2585,33 +2588,23 @@ public sealed class SchemaGenerator
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="type"/> implements
-    /// <c>IDictionary&lt;TKey,TValue&gt;</c> by walking its implemented interfaces
-    /// using FullName comparison.
-    /// </summary>
-    private static bool ImplementsDictionaryInterface(Type type)
-    {
-        foreach (var i in type.GetInterfaces())
-        {
-            if (!i.IsGenericType) continue;
-            var defName = i.GetGenericTypeDefinition().FullName ?? string.Empty;
-            if (DictionaryGenericDefinitions.Contains(defName)) return true;
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="type"/> implements
     /// <c>IEnumerable&lt;T&gt;</c> by walking its implemented interfaces.
     /// </summary>
-    private static bool ImplementsEnumerableInterface(Type type)
+    private static bool ImplementsEnumerableInterface(Type type) => EnumerableInterface(type) != null;
+
+    /// <summary>
+    /// The <c>IEnumerable&lt;T&gt;</c> that <paramref name="type"/> implements (the first one, when it
+    /// implements several), or <see langword="null"/>.
+    /// </summary>
+    private static Type? EnumerableInterface(Type type)
     {
         foreach (var i in type.GetInterfaces())
         {
             if (!i.IsGenericType) continue;
             if ((i.GetGenericTypeDefinition().FullName ?? string.Empty) == IEnumerableGenericFullName)
-                return true;
+                return i;
         }
-        return false;
+        return null;
     }
 
     private static readonly HashSet<string> DictionaryInterfaces = new(StringComparer.Ordinal)

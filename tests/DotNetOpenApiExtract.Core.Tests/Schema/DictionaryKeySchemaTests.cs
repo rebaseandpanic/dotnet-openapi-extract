@@ -86,6 +86,7 @@ public class DictionaryKeySchemaTests(DictionaryKeyFixture fixture) : IClassFixt
                 data.Add(version, "byLong", null, v30 ? null : Signed);
                 data.Add(version, "byUint", null, v30 ? null : Unsigned);
                 data.Add(version, "swapped", null, v30 ? null : Signed);
+                data.Add(version, "fixedMap", null, v30 ? null : Signed);
                 data.Add(version, "byName", null, null);
                 data.Add(version, "byDay", null, null);
             }
@@ -217,6 +218,59 @@ public class DictionaryKeySchemaTests(DictionaryKeyFixture fixture) : IClassFixt
             var result = conformance.ValidateSchema(Property(document, property), value);
             result.IsValid.Should().BeTrue(because: $"{property}: {string.Join("; ", result.Errors)}");
         }
+    }
+
+    // ── Collection types of their own that are not generic ──────────────────
+
+    private const string KeyedItemRef = "#/components/schemas/KeyedItem";
+
+    /// <summary>
+    /// System.Text.Json writes a type derived from <c>Dictionary&lt;int, KeyedItem&gt;</c> as an object of
+    /// items and one derived from <c>List&lt;KeyedItem&gt;</c> as an array of items, whether the derived
+    /// type is generic or not: the schema is the one of the implemented dictionary or list.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void NonGenericDictionaryType_IsAnObjectOfItsValues(OpenApiSpecVersion version)
+    {
+        var schema = Property(fixture.Builds[version].Document, "fixedMap");
+
+        schema["type"]!.GetValue<string>().Should().Be("object");
+        schema["additionalProperties"]!["$ref"]!.GetValue<string>().Should().Be(KeyedItemRef);
+        schema.Should().NotContainKey("items");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void NonGenericListType_IsAnArrayOfItsElements(OpenApiSpecVersion version)
+    {
+        var schema = Property(fixture.Builds[version].Document, "fixedList");
+
+        schema["type"]!.GetValue<string>().Should().Be("array");
+        schema["items"]!["$ref"]!.GetValue<string>().Should().Be(KeyedItemRef);
+    }
+
+    [Theory]
+    [MemberData(nameof(SchemaVersions))]
+    public void NonGenericCollectionTypes_StjWrites_PassTheSchema_AndAWrongValueFails(OpenApiSpecVersion version)
+    {
+        var document = fixture.Builds[version].Document;
+        var conformance = SchemaConformance.For(document);
+        var map = StjWire.Serialize(new ModernApi.Models.Keywords.FixedItemMap { [3] = new() { Name = "a" } }, StjWire.Mvc())!;
+        var list = StjWire.Serialize(new ModernApi.Models.Keywords.FixedItemList { new() { Name = "a" } }, StjWire.Mvc())!;
+        map.Should().BeOfType<JsonObject>(because: "STJ writes a dictionary type as an object");
+        list.Should().BeOfType<JsonArray>(because: "STJ writes a list type as an array");
+
+        foreach (var (property, value) in new[] { ("fixedMap", map), ("fixedList", list) })
+        {
+            var result = conformance.ValidateSchema(Property(document, property), value);
+            result.IsValid.Should().BeTrue(because: $"{property}: {string.Join("; ", result.Errors)}");
+        }
+
+        conformance.ValidateSchema(Property(document, "fixedMap"), JsonNode.Parse("{\"3\":{\"name\":5}}"))
+            .IsValid.Should().BeFalse(because: "the value is a KeyedItem, whose name is a string");
+        conformance.ValidateSchema(Property(document, "fixedList"), JsonNode.Parse("[{\"name\":5}]"))
+            .IsValid.Should().BeFalse(because: "the element is a KeyedItem, whose name is a string");
     }
 
     public static TheoryData<OpenApiSpecVersion> SchemaVersions => [OpenApiSpecVersion.OpenApi3_1, OpenApiSpecVersion.OpenApi3_2];
