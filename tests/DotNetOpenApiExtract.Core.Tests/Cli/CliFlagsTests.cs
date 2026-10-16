@@ -135,6 +135,54 @@ public class CliFlagsTests
         written.Should().BeNull();
     }
 
+    /// <summary>
+    /// <c>--security-scheme-map</c> reaches the build, the roles path included: <c>[Authorize(Roles = "A,B",
+    /// AuthenticationSchemes = "key")]</c> requires the mapped definition.
+    /// </summary>
+    [Fact]
+    public async Task SecuritySchemeMap_NamesTheMappedDefinition()
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), """
+            builder.Services.AddSwaggerGen(c => c.AddSecurityDefinition("ApiKeyDefinition", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.ApiKey, In = ParameterLocation.Header, Name = "X-Key"
+            }));
+            """);
+
+        var (result, document) = await Run(directory, "--source-root", directory.Path, "--security-scheme-map", "key=ApiKeyDefinition");
+
+        result.ExitCode.Should().Be(0, result.StdErr);
+        document!["paths"]!["/roles/or"]!["get"]!["security"]!.AsArray()
+            .Select(r => r!.AsObject().Single().Key).Distinct().Should().Equal(["ApiKeyDefinition"]);
+    }
+
+    [Theory]
+    [InlineData("key")]
+    [InlineData("=ApiKeyDefinition")]
+    [InlineData("key=")]
+    public async Task SecuritySchemeMap_Malformed_ExitsWithTwo(string entry)
+    {
+        using var directory = new TempDirectory();
+
+        var (result, document) = await Run(directory, "--security-scheme-map", entry);
+
+        result.ExitCode.Should().Be(2);
+        result.StdErr.Should().Contain("--security-scheme-map");
+        document.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SecuritySchemeMap_OneSchemeToTwoDefinitions_ExitsWithTwo()
+    {
+        using var directory = new TempDirectory();
+
+        var (result, _) = await Run(directory, "--security-scheme-map", "key=A", "--security-scheme-map", "key=B");
+
+        result.ExitCode.Should().Be(2);
+        result.StdErr.Should().Contain("'A'").And.Contain("'B'");
+    }
+
     [Fact]
     public async Task ServerUrlWithEquals_IsReadWhole_WithoutAName()
     {

@@ -226,6 +226,14 @@ var defaultSecuritySchemeOption = new Option<string?>("--default-security-scheme
                   "cannot read it. Such operations get a requirement of this scheme; [AllowAnonymous] keeps none",
 };
 
+var securitySchemeMapOption = new Option<string[]>("--security-scheme-map")
+{
+    Description = "Map an authentication scheme to its security definition, as <scheme>=<definition>, when the name in " +
+                  "[Authorize(AuthenticationSchemes = ...)] differs from the name given to AddSecurityDefinition " +
+                  "(repeatable). A definition the document does not define is an error",
+    AllowMultipleArgumentsPerToken = false,
+};
+
 var summaryOption = new Option<string?>("--summary")
 {
     Description = "Short summary of the API (info.summary, OpenAPI 3.1+; omitted with a warning for 3.0). " +
@@ -323,6 +331,7 @@ rootCommand.Options.Add(licenseUrlOption);
 rootCommand.Options.Add(licenseIdentifierOption);
 rootCommand.Options.Add(summaryOption);
 rootCommand.Options.Add(defaultSecuritySchemeOption);
+rootCommand.Options.Add(securitySchemeMapOption);
 rootCommand.Options.Add(serverNameOption);
 rootCommand.Options.Add(selfUrlOption);
 rootCommand.Options.Add(jsonSchemaDialectOption);
@@ -367,6 +376,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var licenseId    = parseResult.GetValue(licenseIdentifierOption);
     var summary      = parseResult.GetValue(summaryOption);
     var defaultSecurityScheme = parseResult.GetValue(defaultSecuritySchemeOption);
+    var securitySchemeMapEntries = parseResult.GetValue(securitySchemeMapOption);
     var serverNames  = parseResult.GetValue(serverNameOption);
     var selfUrl      = parseResult.GetValue(selfUrlOption);
     var dialect      = parseResult.GetValue(jsonSchemaDialectOption);
@@ -417,6 +427,13 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
 
     // ── Parse --rule-min-length entries ───────────────────────────────────────
     var parsedRuleMinLengths = ParseRuleMinLengths(ruleMinLengths);
+
+    // ── Parse --security-scheme-map entries ───────────────────────────────────
+    if (!TryParseSecuritySchemeMap(securitySchemeMapEntries, out var securitySchemeMap, out var securitySchemeMapError))
+    {
+        Console.Error.WriteLine($"Error: {securitySchemeMapError}");
+        return 2;
+    }
 
     // ── Resolve naming policy ─────────────────────────────────────────────────
     JsonNamingPolicy? resolvedNamingPolicy = null;
@@ -508,6 +525,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             LicenseIdentifier   = licenseId,
             Summary             = summary,
             DefaultSecurityScheme = string.IsNullOrWhiteSpace(defaultSecurityScheme) ? null : defaultSecurityScheme,
+            SecuritySchemeMap   = securitySchemeMap.Count > 0 ? securitySchemeMap : null,
             TermsOfService      = termsOfSvc,
             Servers             = servers is { Length: > 0 } ? servers : null,
             ServerNames         = serverNames is { Length: > 0 } ? serverNames : null,
@@ -1037,6 +1055,35 @@ static void WarnUnknownRuleIds(string[]? ruleIds, string flagName)
 /// Parses <c>METHOD:CODE</c> entries from the <c>--require-response-code</c> flag.
 /// Writes warnings to stderr for invalid entries and skips them.
 /// </summary>
+// Parses --security-scheme-map entries "<scheme>=<definition>". A malformed entry, or one scheme mapped
+// to two definitions, is an error: a mapping that is silently dropped leaves the requirement unwritten.
+static bool TryParseSecuritySchemeMap(string[]? entries, out Dictionary<string, string> map, out string? error)
+{
+    map = new Dictionary<string, string>(StringComparer.Ordinal);
+    error = null;
+    foreach (var entry in entries ?? [])
+    {
+        var separator = entry.IndexOf('=', StringComparison.Ordinal);
+        var scheme = separator < 0 ? "" : entry[..separator].Trim();
+        var definition = separator < 0 ? "" : entry[(separator + 1)..].Trim();
+        if (scheme.Length == 0 || definition.Length == 0)
+        {
+            error = $"--security-scheme-map '{entry}' is invalid: expected <scheme>=<definition>.";
+            return false;
+        }
+
+        if (map.TryGetValue(scheme, out var mapped) && mapped != definition)
+        {
+            error = $"--security-scheme-map maps '{scheme}' to both '{mapped}' and '{definition}'.";
+            return false;
+        }
+
+        map[scheme] = definition;
+    }
+
+    return true;
+}
+
 static List<(string MethodFilter, int Code)> ParseRequireResponseCodes(string[]? entries)
 {
     var result = new List<(string MethodFilter, int Code)>();

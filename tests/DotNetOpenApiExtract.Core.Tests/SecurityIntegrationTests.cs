@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core;
+using DotNetOpenApiExtract.Core.Diagnostics;
 using DotNetOpenApiExtract.Core.Tests.SourceAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.OpenApi;
@@ -605,5 +606,88 @@ public class SecurityIntegrationTests
 
         build.Should().Throw<OpenApiConfigurationException>()
             .Which.Message.Should().Contain("'WebSession'").And.Contain("omitted");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Authentication scheme mapped to a security definition of another name
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A Program.cs whose only security definition, "WebSession", is not named like the authentication scheme "Bearer".</summary>
+    private static TempDirectory WebSessionOnlySource()
+    {
+        var tempDir = new TempDirectory();
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Program.cs"),
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("WebSession", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Cookie,
+                    Name = "session"
+                });
+            });
+            builder.Build().Run();
+            """);
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        return tempDir;
+    }
+
+    /// <summary>
+    /// <c>[Authorize(AuthenticationSchemes = "Bearer")]</c> with no definition named "Bearer": unmapped,
+    /// the requirement is omitted with a warning that names <c>--security-scheme-map</c>; mapped
+    /// <c>Bearer=WebSession</c>, the operation requires WebSession and nothing is omitted.
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
+    public async Task SecuritySchemeMap_NamesTheDefinitionOfTheAuthenticationScheme(OpenApiSpecVersion version)
+    {
+        using var tempDir = WebSessionOnlySource();
+        async Task<(System.Text.Json.Nodes.JsonNode? Security, List<ExtractionDiagnostic> Diagnostics)> Admin(IReadOnlyDictionary<string, string>? map)
+        {
+            var diagnostics = new List<ExtractionDiagnostic>();
+            var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+            {
+                AssemblyPath      = TestPaths.SampleApiDll,
+                XmlPath           = TestPaths.SampleApiXml,
+                SourceRoot        = tempDir.Path,
+                OpenApiVersion    = version,
+                SecuritySchemeMap = map,
+                OnDiagnostic      = diagnostics.Add,
+            });
+            var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
+            return (System.Text.Json.Nodes.JsonNode.Parse(json)!["paths"]!["/api/secure/admin"]!["get"]!["security"], diagnostics);
+        }
+
+        var (unmapped, unmappedDiagnostics) = await Admin(null);
+        unmapped.Should().BeNull(because: "no definition is named Bearer");
+        unmappedDiagnostics.Should().ContainSingle(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme)
+            .Which.Message.Should().Contain("--security-scheme-map");
+
+        var (mapped, mappedDiagnostics) = await Admin(new Dictionary<string, string> { ["Bearer"] = "WebSession" });
+        mapped!.AsArray().SelectMany(r => r!.AsObject().Select(kv => kv.Key)).Should().Equal(["WebSession"]);
+        mappedDiagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme);
+    }
+
+    [Fact]
+    public void SecuritySchemeMap_ToAnUndefinedDefinition_IsAConfigurationError()
+    {
+        using var tempDir = WebSessionOnlySource();
+        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath      = TestPaths.SampleApiDll,
+            XmlPath           = TestPaths.SampleApiXml,
+            SourceRoot        = tempDir.Path,
+            SecuritySchemeMap = new Dictionary<string, string> { ["Bearer"] = "Session" },
+        });
+
+        build.Should().Throw<OpenApiConfigurationException>()
+            .Which.Message.Should().Contain("'Session'").And.Contain("'Bearer'").And.Contain("'WebSession'");
     }
 }

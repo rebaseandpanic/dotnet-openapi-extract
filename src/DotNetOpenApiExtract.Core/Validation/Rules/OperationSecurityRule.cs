@@ -50,9 +50,10 @@ public sealed class OperationSecurityRule : IValidationRule
                     op.Pointer,
                     resolver.ForOperation(key),
                     "Operation is protected by [Authorize] but has no security requirement declared and no global security is defined. " +
-                    "Name the scheme in [Authorize(AuthenticationSchemes = \"...\")] with the name given to AddSecurityDefinition, " +
-                    "declare a global AddSecurityRequirement in Program.cs, or pass --default-security-scheme <name> " +
-                    "when the default authentication scheme is configured outside Program.cs.");
+                    "Pass --default-security-scheme <definition> when the default authentication scheme is configured outside " +
+                    "Program.cs, or declare a global AddSecurityRequirement in Program.cs. An authentication scheme named in " +
+                    "[Authorize(AuthenticationSchemes = ...)] whose security definition has another name is mapped with " +
+                    "--security-scheme-map <scheme>=<definition>; renaming the scheme in the attribute would change authentication.");
             }
         }
     }

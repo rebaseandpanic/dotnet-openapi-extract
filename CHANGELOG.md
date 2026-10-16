@@ -2,6 +2,11 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [FEATURE] `--security-scheme-map <scheme>=<definition>` (repeatable; `OpenApiDocumentOptions.SecuritySchemeMap`): the security definition an authentication scheme named in `[Authorize(AuthenticationSchemes = ...)]` stands for, when the name given to `AddSecurityDefinition` differs from the scheme's (a cookie scheme `app.cookie` described as `CookieSession`). The requirement read from the attribute names the definition, with the roles of `[Authorize(Roles)]`; a scheme without an entry keeps its own name, as before. A malformed entry or one scheme mapped to two definitions exits with 2; a definition the document does not define, or one declared but omitted as not static, is a configuration error. The warning for a requirement on an undeclared scheme names the flag.
+- [DOCS] The advice of `operation.security` and of the README no longer tells to write the security definition's name in `AuthenticationSchemes`: the attribute names an authentication scheme, and renaming it changes authentication. The message names `--default-security-scheme`, a global `AddSecurityRequirement` and `--security-scheme-map`.
+
 ## [0.18.0] - 2026-10-16
 
 ### Changes to OpenAPI 3.0 output
