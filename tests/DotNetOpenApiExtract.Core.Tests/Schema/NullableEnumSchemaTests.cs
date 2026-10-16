@@ -178,6 +178,25 @@ public class NullableEnumSchemaTests(NullableElementConformanceFixture fixture) 
             place.Should().NotContainKey("allOf", because: "3.1 and later fold the outer allOf");
     }
 
+    /// <summary>
+    /// With <c>[AllowedValues]</c> the place is the outer schema — the <c>allOf</c> in 3.0, the folded
+    /// <c>anyOf</c> in 3.1 and later — and it is described by the property's own documentation (its XML
+    /// summary), as a nullable reference with allowed values is; the enum type's description stays on the
+    /// enum schema.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void NullableEnumWithAllowedValues_IsDescribedByThePropertyInEveryVersion(OpenApiSpecVersion version)
+    {
+        var place = Schemas(fixture.Documents[version])["EnumWireNamesModel"]!["properties"]!["nullableConstrained"]!.AsObject();
+        var union = version == OpenApiSpecVersion.OpenApi3_0 ? place["allOf"]![0]!.AsObject() : place;
+
+        place["description"]!.GetValue<string>().Should().Be("Nullable, converter on the property, with a default and allowed values.");
+        union["anyOf"]![0]!["description"]!.GetValue<string>().Should().StartWith("A tint without a converter of its own.");
+        if (version == OpenApiSpecVersion.OpenApi3_0)
+            union.Should().NotContainKey("description", because: "the place is the outer allOf");
+    }
+
     [Theory]
     [MemberData(nameof(SchemaVersions))]
     public void NullableEnumWithAllowedValues_AdmitsOnlyTheAllowedValues(OpenApiSpecVersion version)
