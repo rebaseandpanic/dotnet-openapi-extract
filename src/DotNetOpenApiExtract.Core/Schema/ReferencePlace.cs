@@ -43,13 +43,15 @@ internal static class ReferencePlace
         .ToDictionary(p => p.Name, StringComparer.Ordinal);
 
     /// <summary>
-    /// The keyword fields of a reference, each with the schema keyword of the same name: the fields of
-    /// <see cref="BaseOpenApiReference"/> (<c>Id</c>, <c>Type</c>, …) say what the reference points to and
-    /// are not siblings of <c>$ref</c>.
+    /// The keyword fields a reference may carry next to <c>$ref</c> in a document read from a file, each
+    /// with the schema keyword of the same name, <c>allOf</c> included: what a place reads as its own
+    /// keywords. The fields of <see cref="BaseOpenApiReference"/> (<c>Id</c>, <c>Type</c>, …) say what the
+    /// reference points to and are not siblings of <c>$ref</c>.
     /// </summary>
     private static readonly (PropertyInfo Field, PropertyInfo Keyword)[] SiblingFields = ReferenceFields.Values
         .Where(field => field.DeclaringType != typeof(BaseOpenApiReference))
-        .Select(field => (Field: field, Keyword: SchemaKeywords.FirstOrDefault(k => k.Name == field.Name)))
+        .Select(field => (Field: field, Keyword: typeof(OpenApiSchema).GetProperty(field.Name, BindingFlags.Public | BindingFlags.Instance)))
+        .Where(pair => pair.Keyword is { CanRead: true, CanWrite: true })
         .Where(pair => pair.Keyword is not null && ValueType(pair.Keyword).IsAssignableFrom(ValueType(pair.Field)))
         .Select(pair => (pair.Field, pair.Keyword!))
         .ToArray();
@@ -112,7 +114,8 @@ internal static class ReferencePlace
     /// The keywords a place itself carries, in one form whatever version wrote it, for the rules that
     /// check a place: an <see cref="OpenApiSchema"/> (the 3.0 <c>allOf</c> wrapper included) as it is; a
     /// reference with keywords of its own beside <c>$ref</c> (3.1+) as the equivalent wrapper
-    /// <c>{allOf: [$ref], keywords…}</c> built from <c>Reference.*</c>; a bare reference as <c>null</c>,
+    /// <c>{allOf: [$ref], keywords…}</c> built from <c>Reference.*</c> (an <c>allOf</c> of its own joins the
+    /// wrapper's elements after <c>$ref</c>); a bare reference as <c>null</c>,
     /// since it has no keywords of its own.
     /// </summary>
     /// <remarks>
@@ -132,7 +135,11 @@ internal static class ReferencePlace
                 {
                     if (field.GetValue(reference.Reference) is not { } value) continue;
                     wrapper ??= new OpenApiSchema { AllOf = [reference] };
-                    keyword.SetValue(wrapper, value);
+                    if (keyword.Name == nameof(OpenApiSchema.AllOf))
+                        // An allOf of the reference's own applies together with $ref, as the elements of the wrapper do.
+                        wrapper.AllOf = [reference, .. (IList<IOpenApiSchema>)value];
+                    else
+                        keyword.SetValue(wrapper, value);
                 }
                 return wrapper;
 

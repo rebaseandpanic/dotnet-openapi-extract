@@ -88,6 +88,8 @@ public sealed class RefSiblingsPlaceRulesTests
             () => PropertyDocument(Wrapper(s => s.Description = "Place description."), StringTarget()), [], [])),
         Each("description: $ref with maxLength and no description, described component", SiblingVersions, v => new Case("schema.property-description", v,
             () => PropertyDocument(Siblings(r => r.MaxLength = 5), DescribedTarget()), [Place], [Place])),
+        Each("description: $ref with only an allOf of its own, described component", SiblingVersions, v => new Case("schema.property-description", v,
+            () => PropertyDocument(Siblings(r => r.AllOf = [new OpenApiSchema { MaxLength = 5 }]), DescribedTarget()), [Place], [Place])),
         Each("description: $ref with its own description, undescribed component", SiblingVersions, v => new Case("schema.property-description", v,
             () => PropertyDocument(Siblings(r => r.Description = "Place description."), StringTarget()), [], [])),
         Each("description: bare $ref, undescribed component", AllVersions, v => new Case("schema.property-description", v,
