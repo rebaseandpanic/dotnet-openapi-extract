@@ -42,6 +42,18 @@ internal static class ReferencePlace
         .Where(p => p.CanRead && p.CanWrite && p.GetIndexParameters().Length == 0)
         .ToDictionary(p => p.Name, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The keyword fields of a reference, each with the schema keyword of the same name: the fields of
+    /// <see cref="BaseOpenApiReference"/> (<c>Id</c>, <c>Type</c>, …) say what the reference points to and
+    /// are not siblings of <c>$ref</c>.
+    /// </summary>
+    private static readonly (PropertyInfo Field, PropertyInfo Keyword)[] SiblingFields = ReferenceFields.Values
+        .Where(field => field.DeclaringType != typeof(BaseOpenApiReference))
+        .Select(field => (Field: field, Keyword: SchemaKeywords.FirstOrDefault(k => k.Name == field.Name)))
+        .Where(pair => pair.Keyword is not null && ValueType(pair.Keyword).IsAssignableFrom(ValueType(pair.Field)))
+        .Select(pair => (pair.Field, pair.Keyword!))
+        .ToArray();
+
     /// <summary>An untouched schema: a keyword is set when its value differs from this one's.</summary>
     private static readonly OpenApiSchema Unset = new();
 
@@ -94,6 +106,39 @@ internal static class ReferencePlace
         }
 
         return schema;
+    }
+
+    /// <summary>
+    /// The keywords a place itself carries, in one form whatever version wrote it, for the rules that
+    /// check a place: an <see cref="OpenApiSchema"/> (the 3.0 <c>allOf</c> wrapper included) as it is; a
+    /// reference with keywords of its own beside <c>$ref</c> (3.1+) as the equivalent wrapper
+    /// <c>{allOf: [$ref], keywords…}</c> built from <c>Reference.*</c>; a bare reference as <c>null</c>,
+    /// since it has no keywords of its own.
+    /// </summary>
+    /// <remarks>
+    /// The referenced component is never read: an <see cref="OpenApiSchemaReference"/> falls back to its
+    /// target for a keyword it does not set, so only the fields of <c>Reference</c> are taken.
+    /// </remarks>
+    public static OpenApiSchema? OwnSiblings(IOpenApiSchema schema)
+    {
+        switch (schema)
+        {
+            case OpenApiSchema place:
+                return place;
+
+            case OpenApiSchemaReference reference:
+                OpenApiSchema? wrapper = null;
+                foreach (var (field, keyword) in SiblingFields)
+                {
+                    if (field.GetValue(reference.Reference) is not { } value) continue;
+                    wrapper ??= new OpenApiSchema { AllOf = [reference] };
+                    keyword.SetValue(wrapper, value);
+                }
+                return wrapper;
+
+            default:
+                return null;
+        }
     }
 
     /// <summary>

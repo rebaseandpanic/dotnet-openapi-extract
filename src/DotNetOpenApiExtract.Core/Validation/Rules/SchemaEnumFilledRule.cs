@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Schema;
 using Microsoft.OpenApi;
 
 namespace DotNetOpenApiExtract.Core.Validation.Rules;
@@ -5,6 +6,11 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// <summary>
 /// Rule: <c>schema.enum-filled</c>
 /// If a property's schema has an enum type declaration, the <c>enum</c> array must be non-empty.
+/// <para>
+/// A property that is a reference is read by its own keywords (<see cref="ReferencePlace.OwnSiblings"/>):
+/// the 3.0 <c>allOf</c> wrapper and the siblings of <c>$ref</c> in 3.1+ alike; the referenced component
+/// is not read, and a bare reference is skipped.
+/// </para>
 /// </summary>
 public sealed class SchemaEnumFilledRule : IValidationRule
 {
@@ -35,7 +41,7 @@ public sealed class SchemaEnumFilledRule : IValidationRule
             if (s.Properties == null) continue;
             foreach (var (propName, propSchema) in s.Properties.OrderBy(kv => kv.Key))
             {
-                if (propSchema is not OpenApiSchema prop) continue;
+                if (ReferencePlace.OwnSiblings(propSchema) is not { } prop) continue;
 
                 // Enum on property schema (inline enum)
                 if (prop.Enum != null && prop.Enum.Count == 0)

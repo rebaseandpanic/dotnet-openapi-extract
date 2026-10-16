@@ -29,6 +29,11 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// <para>
 /// Skipped in standalone mode (no CLR bindings available).
 /// </para>
+/// <para>
+/// A property that is a reference is read by its own keywords (<see cref="ReferencePlace.OwnSiblings"/>):
+/// the 3.0 <c>allOf</c> wrapper and the siblings of <c>$ref</c> in 3.1+ alike; the referenced component
+/// is not read, and a bare reference is skipped.
+/// </para>
 /// </summary>
 public sealed class SchemaPropertyConstraintsRule : IValidationRule
 {
@@ -48,7 +53,7 @@ public sealed class SchemaPropertyConstraintsRule : IValidationRule
 
             foreach (var (propName, propSchema) in s.Properties.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             {
-                if (propSchema is not OpenApiSchema prop) continue;
+                if (ReferencePlace.OwnSiblings(propSchema) is not { } prop) continue;
 
                 // Find CLR property (case-insensitive fallback)
                 var clrProp = clrType.GetProperties(BindingFlags.Public | BindingFlags.Instance)

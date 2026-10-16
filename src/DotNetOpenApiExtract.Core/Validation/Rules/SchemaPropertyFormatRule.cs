@@ -1,3 +1,4 @@
+using DotNetOpenApiExtract.Core.Schema;
 using Microsoft.OpenApi;
 
 namespace DotNetOpenApiExtract.Core.Validation.Rules;
@@ -19,6 +20,11 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// of the <c>anyOf</c>.
 /// <para>
 /// Skipped in standalone mode (no CLR bindings).
+/// </para>
+/// <para>
+/// A property that is a reference is read by its own keywords (<see cref="ReferencePlace.OwnSiblings"/>):
+/// the 3.0 <c>allOf</c> wrapper and the siblings of <c>$ref</c> in 3.1+ alike; the referenced component
+/// is not read, and a bare reference is skipped.
 /// </para>
 /// </summary>
 public sealed class SchemaPropertyFormatRule : IValidationRule
@@ -49,7 +55,7 @@ public sealed class SchemaPropertyFormatRule : IValidationRule
 
             foreach (var (propName, propSchema) in s.Properties.OrderBy(kv => kv.Key))
             {
-                if (propSchema is not OpenApiSchema prop) continue;
+                if (ReferencePlace.OwnSiblings(propSchema) is not { } prop) continue;
 
                 // Find the CLR property
                 var clrProp = clrType.GetProperties(
