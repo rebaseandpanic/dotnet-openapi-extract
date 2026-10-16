@@ -109,6 +109,11 @@ public class NullableElementsController : ControllerBase
     [HttpGet("response-nested")]
     public List<List<ElementItem?>?> ResponseNested() => [Items, null];
 
+    /// <summary>A 200 response declared without a type: its body is the return type of nullable items.</summary>
+    [HttpGet("response-declared")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public List<ElementItem?> ResponseDeclared() => Items;
+
     // Responses whose body type is declared by an attribute.
 
     /// <summary>The attribute declares the body type; the signature's nullable elements do not apply to it.</summary>

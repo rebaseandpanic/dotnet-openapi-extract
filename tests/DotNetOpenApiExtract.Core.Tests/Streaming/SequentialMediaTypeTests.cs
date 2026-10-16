@@ -270,4 +270,27 @@ public class SequentialMediaTypeTests(SequentialMediaTypeFixture fixture) : ICla
             && (d.Location.Contains("/api/v1/events", StringComparison.Ordinal)
                 || d.Location.Contains("~1api~1v1~1events", StringComparison.Ordinal)));
     }
+
+    // ── Nullable positions inside the item of a sequential media type ───────────────────────
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void SequenceOfListsOfNullableItems_OnJsonLines_HasNullableItemsInsideTheItemSchema(OpenApiSpecVersion version)
+    {
+        var media = Content(fixture.ModernApi[version].Document, "/nullable-elements/response-stream-jsonl")["application/jsonl"]!.AsObject();
+        var itemKey = version == OpenApiSpecVersion.OpenApi3_2 ? "itemSchema" : "x-oai-itemSchema";
+
+        media.Select(p => p.Key).Should().BeEquivalentTo([itemKey], because: "a sequential media type has the item schema and no schema");
+        var nullBranch = JsonNode.Parse(version == OpenApiSpecVersion.OpenApi3_0
+            ? """{"type": "object", "nullable": true, "enum": [null]}"""
+            : """{"type": "null"}""");
+        // The item is the list; its annotated element is nullable.
+        var expected = new JsonObject
+        {
+            ["type"] = "array",
+            ["items"] = new JsonObject { ["anyOf"] = new JsonArray(new JsonObject { ["$ref"] = "#/components/schemas/ElementItem" }, nullBranch) },
+        };
+        JsonNode.DeepEquals(media[itemKey], expected).Should().BeTrue(
+            $"{version}: must be {expected.ToJsonString()}, got {media[itemKey]!.ToJsonString()}");
+    }
 }

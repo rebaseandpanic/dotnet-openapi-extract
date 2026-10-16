@@ -268,4 +268,43 @@ public class AsyncEnumerableResponseTests(AsyncEnumerableResponseFixture fixture
         else
             anyOf[1]!["type"]!.GetValue<string>().Should().Be("null");
     }
+
+    // ── Nullable positions inside the element and a sequence type from an attribute ─────────
+
+    private const string ElementItemRef = "#/components/schemas/ElementItem";
+
+    /// <summary>The null branch of a nullable reference in <paramref name="version"/>.</summary>
+    private static JsonNode NullBranch(OpenApiSpecVersion version) => JsonNode.Parse(version == OpenApiSpecVersion.OpenApi3_0
+        ? """{"type": "object", "nullable": true, "enum": [null]}"""
+        : """{"type": "null"}""")!;
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void SequenceOfListsOfNullableItems_OnJson_HasNullableItemsInsideTheElement(OpenApiSpecVersion version)
+    {
+        var schema = Schema(version, "/nullable-elements/response-stream");
+
+        // The sequence and its list element keep their schemas; the annotated item of the list is nullable.
+        var expected = new JsonObject
+        {
+            ["type"] = "array",
+            ["items"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject { ["anyOf"] = new JsonArray(new JsonObject { ["$ref"] = ElementItemRef }, NullBranch(version)) },
+            },
+        };
+        JsonNode.DeepEquals(schema, expected).Should().BeTrue($"{version}: must be {expected.ToJsonString()}, got {schema.ToJsonString()}");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void SequenceTypeFromAnAttribute_HasNoNullableItems_EvenWhenTheSignatureAnnotatesThem(OpenApiSpecVersion version)
+    {
+        var schema = Schema(version, "/nullable-elements/response-attribute-stream");
+
+        // [Produces(typeof(IAsyncEnumerable<StreamItem>))] on IAsyncEnumerable<StreamItem?>: the attribute's type, without the ?.
+        var expected = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["$ref"] = StreamItemRef } };
+        JsonNode.DeepEquals(schema, expected).Should().BeTrue($"{version}: must be {expected.ToJsonString()}, got {schema.ToJsonString()}");
+    }
 }
