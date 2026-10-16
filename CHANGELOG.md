@@ -2,7 +2,7 @@
 
 All notable changes to this project.
 
-## [Unreleased]
+## [0.18.0] - 2026-10-16
 
 ### Changes to OpenAPI 3.0 output
 
