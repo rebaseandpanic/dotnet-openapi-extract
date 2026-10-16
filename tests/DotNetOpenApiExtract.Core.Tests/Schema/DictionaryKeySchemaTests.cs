@@ -141,7 +141,7 @@ public class DictionaryKeySchemaTests(DictionaryKeyFixture fixture) : IClassFixt
         diagnostics.Where(d => d.Code == KeyConverterCode).Select(d => d.Subjects[0]).Should().Contain("System.Int32");
     }
 
-    // ── D14 ─────────────────────────────────────────────────────────────────
+    // ── Length attributes on a dictionary bound its number of properties ────
 
     [Theory]
     [MemberData(nameof(AllVersions))]

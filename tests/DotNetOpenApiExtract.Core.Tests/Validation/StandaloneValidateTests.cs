@@ -29,7 +29,7 @@ public sealed class StandaloneValidateTests
     {
         var doc = BuildWellFormedDocument();
 
-        // Skip rules that require enum descriptions (task 6.1 feature) and CLR bindings
+        // Skip rules that require the x-enum-descriptions extension and CLR bindings
         var ctx = new ValidationContext
         {
             SkippedRuleIds = new HashSet<string>

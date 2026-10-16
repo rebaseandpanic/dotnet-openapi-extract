@@ -86,10 +86,10 @@ public sealed class ValidationContext
 
     /// <summary>
     /// Required HTTP response codes per HTTP method filter, used by the
-    /// <c>operation.has-required-response-codes</c> rule (R48).
+    /// <c>operation.has-required-response-codes</c> rule.
     /// Each entry specifies a method filter (e.g. <c>"POST"</c>, <c>"mutating"</c>, <c>"*"</c>)
     /// and a required HTTP status code (e.g. 422, 401).
-    /// When null or empty, R48 emits no violations.
+    /// When null or empty, that rule emits no violations.
     /// </summary>
     public IReadOnlyList<(string MethodFilter, int Code)>? RequiredResponseCodes { get; init; }
 

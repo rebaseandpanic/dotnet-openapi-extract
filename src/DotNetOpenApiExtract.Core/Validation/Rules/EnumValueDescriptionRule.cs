@@ -5,10 +5,10 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 
 /// <summary>
 /// Rule: <c>enum.value-description</c>
-/// Enum schemas must carry the <c>x-enum-descriptions</c> extension (added by Task 6.1),
-/// and every entry in the array must be a non-empty string.
+/// Enum schemas must carry the <c>x-enum-descriptions</c> extension, which the generator writes from
+/// the documentation of the enum members, and every entry in the array must be a non-empty string.
 /// <para>
-/// Contract (Task 6.1): <c>x-enum-descriptions</c> is a <c>JsonNodeExtension</c> wrapping a
+/// Contract of the extension: <c>x-enum-descriptions</c> is a <c>JsonNodeExtension</c> wrapping a
 /// <c>JsonArray</c> of strings. Length matches <c>enum[]</c>. Empty strings mean "no doc".
 /// </para>
 /// </summary>
