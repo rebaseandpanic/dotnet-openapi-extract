@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace ModernApi.Models.Keywords;
 
@@ -169,6 +170,10 @@ public class NullableEnumRangeModel
     /// <summary>A level from 1 to 2, or none.</summary>
     [Range(1, 2)]
     public Level? Level { get; set; }
+
+    /// <summary>A level with a format of its own, or none.</summary>
+    [SwaggerSchema(Format = "level-code")]
+    public Level? CodedLevel { get; set; }
 }
 
 /// <summary>An item held by a dictionary or a list of a type of its own.</summary>

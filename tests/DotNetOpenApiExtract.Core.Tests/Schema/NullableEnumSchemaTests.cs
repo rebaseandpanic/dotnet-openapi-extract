@@ -269,6 +269,23 @@ public class NullableEnumSchemaTests(NullableElementConformanceFixture fixture) 
     }
 
     /// <summary>
+    /// A declared format on <c>Level?</c> describes the enum's values: it stands on the enum branch of
+    /// the union, beside the type's own keywords, and neither on the union nor on the null branch.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void FormatOnANullableEnum_StandsOnTheEnumBranch(OpenApiSpecVersion version)
+    {
+        var schema = Schemas(fixture.Documents[version])["NullableEnumRangeModel"]!["properties"]!["codedLevel"]!.AsObject();
+        var anyOf = schema["anyOf"]!.AsArray();
+
+        anyOf[0]!["format"]!.GetValue<string>().Should().Be("level-code");
+        anyOf[0]!["enum"]!.AsArray().Select(v => v!.GetValue<int>()).Should().Equal([0, 2]);
+        anyOf[1]!.AsObject().Should().NotContainKey("format");
+        schema.Should().NotContainKey("format");
+    }
+
+    /// <summary>
     /// <c>schema.property-constraints</c> finds the bounds of <c>[Range]</c> on the enum branch of the
     /// property: the build with validation reports nothing for the property.
     /// </summary>

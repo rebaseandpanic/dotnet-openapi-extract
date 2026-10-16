@@ -1424,6 +1424,10 @@ public sealed class SchemaGenerator
     /// </summary>
     private static void ApplyConstraintAttributes(OpenApiSchema schema, IList<CustomAttributeData> attrData, Type memberType)
     {
+        // A nullable enum is the anyOf of its enum and null: the constraints bound the enum's values.
+        if (VersionedSchemaForms.NullableEnumBranch(schema) is { } enumBranch)
+            schema = enumBranch;
+
         // [StringLength(maxLength, MinimumLength = minLength)]
         var stringLength = AttributeHelper.GetAttribute(attrData, AttributeHelper.Names.StringLength);
         if (stringLength != null)
