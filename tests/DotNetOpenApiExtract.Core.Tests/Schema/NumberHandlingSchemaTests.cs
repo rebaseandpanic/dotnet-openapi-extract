@@ -205,7 +205,7 @@ public class NumberHandlingSchemaTests(NumberHandlingDocumentFixture fixture) : 
         v30.AnyOf!.Cast<OpenApiSchema>().Should().Contain(b => b.Type == (JsonSchemaType.Object | JsonSchemaType.Null) && b.Enum!.Count == 1 && b.Enum[0] == null);
     }
 
-    // ── SC-003: what STJ writes and reads passes the schema ─────────────────
+    // ── What STJ writes and reads passes the schema ─────────────────────────
 
     private static SchemaConformance ConformanceFor(IOpenApiSchema root, OpenApiSpecVersion version)
     {

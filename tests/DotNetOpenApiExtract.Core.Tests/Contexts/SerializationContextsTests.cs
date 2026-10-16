@@ -357,7 +357,7 @@ public class SerializationContextsTests(SplitContextsFixture fixture) : IClassFi
         build.Diagnostics.Should().NotContain(d => d.Code == SharedTypesCode);
     }
 
-    // ── Row: SC-003 in both contexts ────────────────────────────────────────
+    // ── A body STJ writes in each context passes that context's own schema ─
 
     private static readonly CustomerProfile Customer = new() { DisplayName = "Ann", LoyaltyPoints = 5 };
 

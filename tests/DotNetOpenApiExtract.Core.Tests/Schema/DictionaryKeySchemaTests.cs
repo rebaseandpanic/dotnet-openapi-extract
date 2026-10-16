@@ -155,7 +155,7 @@ public class DictionaryKeySchemaTests(DictionaryKeyFixture fixture) : IClassFixt
 
     public static TheoryData<OpenApiSpecVersion> AllVersions => [.. VersionedDocumentHarness.Versions];
 
-    // ── SC-003: keys STJ writes and accepts pass, keys it rejects fail ───────
+    // ── Keys STJ writes and accepts pass the schema, keys it rejects fail ───
 
     /// <summary>
     /// Key inputs: whether STJ 10 accepts them (measured in the test) and whether the schema does. The

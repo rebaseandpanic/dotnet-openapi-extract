@@ -12,7 +12,7 @@ namespace DotNetOpenApiExtract.Core.Tests.Polymorphism;
 /// <summary>
 /// The <c>discriminator</c> object by version: always for an abstract base or interface; for a
 /// concrete base only in 3.2, with <c>defaultMapping</c> on the base branch, and a warning instead
-/// in 3.0/3.1; never for an <c>anyOf</c> union. The last test checks the whole US-10 table at once.
+/// in 3.0/3.1; never for an <c>anyOf</c> union. The last test checks all three base shapes at once.
 /// </summary>
 public class DiscriminatorVersionTests(PolymorphismAlternativesFixture fixture) : IClassFixture<PolymorphismAlternativesFixture>
 {
@@ -116,25 +116,25 @@ public class DiscriminatorVersionTests(PolymorphismAlternativesFixture fixture) 
 
     [Theory]
     [MemberData(nameof(Versions))]
-    public void UsTenTable_AllRowsTogether(OpenApiSpecVersion version)
+    public void AllBaseShapes_Together(OpenApiSpecVersion version)
     {
         var schemas = Schemas(version);
 
-        // Row 1: abstract base, every derived type with a value.
+        // Abstract base, every derived type with a value.
         var tree = schemas[Component(version, "/polymorphism-alt/tree")]!.AsObject();
         tree.ContainsKey("oneOf").Should().BeTrue();
         tree.ContainsKey("anyOf").Should().BeFalse();
         tree["discriminator"]!.AsObject().ContainsKey("defaultMapping").Should().BeFalse();
         tree["oneOf"]!.AsArray().Should().HaveCount(2);
 
-        // Row 2: a derived type without a value.
+        // A derived type without a value.
         var message = schemas[Component(version, "/polymorphism-excluded/message")]!.AsObject();
         message.ContainsKey("anyOf").Should().BeTrue();
         message.ContainsKey("oneOf").Should().BeFalse();
         message.ContainsKey("discriminator").Should().BeFalse();
         message["anyOf"]!.AsArray().Should().HaveCount(3);
 
-        // Row 3: concrete base declared with a value.
+        // Concrete base declared with a value.
         var pet = schemas[Component(version, "/polymorphism-alt/pet")]!.AsObject();
         pet.ContainsKey("oneOf").Should().BeTrue();
         pet["oneOf"]!.AsArray().Should().HaveCount(3);

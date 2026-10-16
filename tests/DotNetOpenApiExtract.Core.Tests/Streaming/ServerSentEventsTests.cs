@@ -154,7 +154,7 @@ public class ServerSentEventsTests(ServerSentEventsFixture fixture) : IClassFixt
             JsonReferences.Resolve(document, reference).Should().NotBeNull(because: reference);
     }
 
-    // ── Row: SC-003, events written by the real ServerSentEventsResult ──────
+    // ── Events written by the real ServerSentEventsResult pass the schema ───
 
     private static async IAsyncEnumerable<T> Sequence<T>(params T[] items)
     {

@@ -190,7 +190,7 @@ public class ExtensionDataSchemaTests(ExtensionDataFixture fixture) : IClassFixt
         error.MemberName.Should().Be(member);
     }
 
-    // ── SC-003 ──────────────────────────────────────────────────────────────
+    // ── An object STJ writes with extension members passes its schema ───────
 
     [Theory]
     [MemberData(nameof(SchemaVersions))]
