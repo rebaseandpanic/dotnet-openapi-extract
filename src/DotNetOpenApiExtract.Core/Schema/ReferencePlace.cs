@@ -112,7 +112,8 @@ internal static class ReferencePlace
 
     /// <summary>
     /// The keywords a place itself carries, in one form whatever version wrote it, for the rules that
-    /// check a place: an <see cref="OpenApiSchema"/> (the 3.0 <c>allOf</c> wrapper included) as it is; a
+    /// check a place: an <see cref="OpenApiSchema"/> as it is, except that the allowed values a 3.0 wrapper
+    /// keeps in an element of its <c>allOf</c> are read beside its other keywords; a
     /// reference with keywords of its own beside <c>$ref</c> (3.1+) as the equivalent wrapper
     /// <c>{allOf: [$ref], keywords…}</c> built from <c>Reference.*</c> (an <c>allOf</c> of its own joins the
     /// wrapper's elements after <c>$ref</c>); a bare reference as <c>null</c>,
@@ -127,7 +128,7 @@ internal static class ReferencePlace
         switch (schema)
         {
             case OpenApiSchema place:
-                return place;
+                return WithAllowedValues(place);
 
             case OpenApiSchemaReference reference:
                 OpenApiSchema? wrapper = null;
@@ -147,6 +148,36 @@ internal static class ReferencePlace
                 return null;
         }
     }
+
+    /// <summary>
+    /// A place in a working form read with the allowed values beside its other keywords, as
+    /// <see cref="Finish"/> sets them in 3.1+: the <c>enum</c> / <c>const</c> of <c>[AllowedValues]</c>, which
+    /// the 3.0 output keeps as an element of <c>allOf</c> after the reference (or after its nullable
+    /// <c>anyOf</c>), is taken onto a shallow copy; <paramref name="place"/> itself is not changed. A keyword
+    /// the place already sets keeps its value. Any other schema is returned as it is.
+    /// </summary>
+    private static OpenApiSchema WithAllowedValues(OpenApiSchema place)
+    {
+        if (place.AllOf is not { Count: > 1 } allOf || !IsReferenceForm(allOf[0]))
+            return place;
+
+        var constraints = allOf.Skip(1).Where(IsValueConstraint).Cast<OpenApiSchema>().ToList();
+        if (constraints.Count == 0)
+            return place;
+
+        var view = (OpenApiSchema)place.CreateShallowCopy();
+        foreach (var constraint in constraints)
+        {
+            if (constraint.Enum is not null && view.Enum is null) view.Enum = constraint.Enum;
+            if (constraint.Const is not null && view.Const is null) view.Const = constraint.Const;
+        }
+        return view;
+    }
+
+    /// <summary>The first element of a working form: the reference, or the <c>anyOf</c> of its nullable form.</summary>
+    private static bool IsReferenceForm(IOpenApiSchema schema) =>
+        schema is OpenApiSchemaReference
+        || schema is OpenApiSchema { AnyOf: { } anyOf } && anyOf.Any(branch => branch is OpenApiSchemaReference);
 
     /// <summary>
     /// Writes the XML <c>&lt;summary&gt;</c> <paramref name="description"/> to a finished place and returns

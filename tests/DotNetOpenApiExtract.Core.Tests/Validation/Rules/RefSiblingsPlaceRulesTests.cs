@@ -100,8 +100,8 @@ public sealed class RefSiblingsPlaceRulesTests
         // the negative side of the rule is checked on the model only.
         Each("enum-filled: inline empty enum", AllVersions, v => new Case("schema.enum-filled", v,
             () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Enum = [] }, StringTarget()), [Place], [])),
-        Each("enum-filled: wrapper with an empty enum", [V30], v => new Case("schema.enum-filled", v,
-            () => PropertyDocument(Wrapper(s => s.Enum = []), StringTarget()), [Place], [])),
+        Each("enum-filled: wrapper with an empty enum of allowed values", [V30], v => new Case("schema.enum-filled", v,
+            () => PropertyDocument(AllowedWrapper([]), StringTarget()), [Place], [])),
         Each("enum-filled: $ref with an empty enum", SiblingVersions, v => new Case("schema.enum-filled", v,
             () => PropertyDocument(Siblings(r => r.Enum = []), StringTarget()), [Place], [])),
         Each("enum-filled: $ref with its own enum, component with an empty enum", SiblingVersions, v => new Case("schema.enum-filled", v,
@@ -112,8 +112,8 @@ public sealed class RefSiblingsPlaceRulesTests
         // schema.no-duplicate-enum: duplicates of the place and of the component are reported apart.
         Each("no-duplicate-enum: inline duplicates", AllVersions, v => new Case("schema.no-duplicate-enum", v,
             () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Enum = [Json("a"), Json("a")] }, StringTarget()), [Place + "/enum"], [Place + "/enum"])),
-        Each("no-duplicate-enum: wrapper with duplicates", [V30], v => new Case("schema.no-duplicate-enum", v,
-            () => PropertyDocument(Wrapper(s => s.Enum = [Json("a"), Json("a")]), StringTarget()), [Place + "/enum"], [Place + "/enum"])),
+        Each("no-duplicate-enum: wrapper with duplicated allowed values", [V30], v => new Case("schema.no-duplicate-enum", v,
+            () => PropertyDocument(AllowedWrapper([Json("a"), Json("a")]), StringTarget()), [Place + "/enum"], [Place + "/enum"])),
         Each("no-duplicate-enum: $ref with duplicates", SiblingVersions, v => new Case("schema.no-duplicate-enum", v,
             () => PropertyDocument(Siblings(r => r.Enum = [Json("a"), Json("a")]), StringTarget()), [Place + "/enum"], [Place + "/enum"])),
         Each("no-duplicate-enum: $ref with its own distinct enum, component with duplicates", SiblingVersions, v => new Case("schema.no-duplicate-enum", v,
@@ -396,6 +396,13 @@ public sealed class RefSiblingsPlaceRulesTests
         keywords(wrapper);
         return wrapper;
     }
+
+    /// <summary>
+    /// The 3.0 form the generator writes for <c>[AllowedValues]</c>: the values as a second element of
+    /// the wrapper's <c>allOf</c>, <c>{allOf: [$ref, {enum}]}</c>.
+    /// </summary>
+    private static OpenApiSchema AllowedWrapper(List<JsonNode> values) =>
+        new() { AllOf = [Reference(), new OpenApiSchema { Enum = values }] };
 
     /// <summary>The 3.1+ form: the keywords in the reference's own fields, next to <c>$ref</c>.</summary>
     private static OpenApiSchemaReference Siblings(Action<JsonSchemaReference> keywords)
