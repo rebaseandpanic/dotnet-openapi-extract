@@ -156,10 +156,22 @@ internal static class ReferencePlace
     /// <see cref="Finish"/> sets them in 3.1+: the <c>enum</c> / <c>const</c> of <c>[AllowedValues]</c>, which
     /// the 3.0 output keeps as an element of <c>allOf</c> after the reference (or after its nullable
     /// <c>anyOf</c>), is taken onto a shallow copy; <paramref name="place"/> itself is not changed. A keyword
-    /// the place already sets keeps its value. Any other schema is returned as it is.
+    /// the place already sets keeps its value. A nullable enum without values of its own is read with the
+    /// values of its enum branch. Any other schema is returned as it is.
     /// </summary>
     private static OpenApiSchema WithAllowedValues(OpenApiSchema place)
     {
+        // A nullable enum: the values of the place are those of its enum branch, unless the place has
+        // values of its own (the allowed values beside anyOf in 3.1+).
+        if (VersionedSchemaForms.NullableEnumBranch(place) is { } enumBranch)
+        {
+            if (place.Enum is not null || place.Const is not null)
+                return place;
+            var values = (OpenApiSchema)place.CreateShallowCopy();
+            values.Enum = enumBranch.Enum;
+            return values;
+        }
+
         if (place.AllOf is not { Count: > 1 } allOf || !IsReferenceForm(allOf[0]))
             return place;
 
@@ -176,10 +188,14 @@ internal static class ReferencePlace
         return view;
     }
 
-    /// <summary>The first element of a working form: the reference, or the <c>anyOf</c> of its nullable form.</summary>
+    /// <summary>
+    /// The first element of a working form: the reference, the <c>anyOf</c> of its nullable form, or the
+    /// <c>anyOf</c> of a nullable enum, which stands where the nullable reference stands.
+    /// </summary>
     private static bool IsReferenceForm(IOpenApiSchema schema) =>
         schema is OpenApiSchemaReference
-        || schema is OpenApiSchema { AnyOf: { } anyOf } && anyOf.Any(branch => branch is OpenApiSchemaReference);
+        || schema is OpenApiSchema { AnyOf: { } anyOf } && anyOf.Any(branch => branch is OpenApiSchemaReference)
+        || VersionedSchemaForms.NullableEnumBranch(schema) != null;
 
     /// <summary>
     /// Writes the XML <c>&lt;summary&gt;</c> <paramref name="description"/> to a finished place and returns

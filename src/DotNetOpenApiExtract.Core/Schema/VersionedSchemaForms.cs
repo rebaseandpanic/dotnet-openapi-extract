@@ -96,19 +96,24 @@ internal static class VersionedSchemaForms
 
     /// <summary>
     /// The enum schema of <paramref name="schema"/> when <paramref name="schema"/> is the
-    /// <see cref="NullableEnum"/> form of either version, otherwise <see langword="null"/>.
+    /// <see cref="NullableEnum"/> form of either version, otherwise <see langword="null"/>. An empty
+    /// <c>enum</c> counts too: the generator never writes one, but a rule reads a document as it is.
     /// </summary>
     public static OpenApiSchema? NullableEnumBranch(IOpenApiSchema? schema) =>
-        schema is OpenApiSchema { Type: null, AllOf: null, AnyOf: [OpenApiSchema { Type: not null, Enum.Count: > 0 } enumSchema, var nullBranch] }
+        schema is OpenApiSchema { Type: null, AllOf: null, AnyOf: [OpenApiSchema { Type: not null, Enum: not null } enumSchema, var nullBranch] }
         && IsNullBranch(nullBranch)
             ? enumSchema
             : null;
 
-    /// <summary>Whether <paramref name="schema"/> is a <see cref="NullBranch"/> of either version.</summary>
+    /// <summary>
+    /// Whether <paramref name="schema"/> is a <see cref="NullBranch"/> of either version, built or read
+    /// from a file (the reader holds a <c>null</c> of <c>enum</c> as <see cref="JsonNullSentinel.JsonNull"/>).
+    /// </summary>
     public static bool IsNullBranch(IOpenApiSchema? schema) => schema switch
     {
         OpenApiSchema { Type: JsonSchemaType.Null } => true,
-        OpenApiSchema { Type: { } type, Enum: [null] } => (type & JsonSchemaType.Null) != 0,
+        OpenApiSchema { Type: { } type, Enum: [var only] } => (type & JsonSchemaType.Null) != 0
+            && (only is null || JsonNullSentinel.IsJsonNullSentinel(only)),
         _ => false,
     };
 }

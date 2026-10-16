@@ -120,6 +120,17 @@ public sealed class RefSiblingsPlaceRulesTests
             () => PropertyDocument(Siblings(r => r.Enum = [Json("a"), Json("b")]), DuplicateEnumTarget()), [Component + "/enum"], [Component + "/enum"])),
         Each("no-duplicate-enum: bare $ref, component with duplicates", AllVersions, v => new Case("schema.no-duplicate-enum", v,
             () => PropertyDocument(Bare(), DuplicateEnumTarget()), [Component + "/enum"], [Component + "/enum"])),
+
+        // A nullable enum, anyOf of the enum schema and the null branch: the values of the place are
+        // those of its enum branch, as the values of a reference place are its own.
+        Each("no-duplicate-enum: nullable enum with duplicates", AllVersions, v => new Case("schema.no-duplicate-enum", v,
+            () => PropertyDocument(NullableEnum(v, Json("a"), Json("a")), StringTarget()), [Place + "/enum"], [Place + "/enum"])),
+        Each("no-duplicate-enum: nullable enum with distinct values", AllVersions, v => new Case("schema.no-duplicate-enum", v,
+            () => PropertyDocument(NullableEnum(v, Json("a"), Json("b")), StringTarget()), [], [])),
+        Each("enum-filled: nullable enum with an empty enum", AllVersions, v => new Case("schema.enum-filled", v,
+            () => PropertyDocument(NullableEnum(v), StringTarget()), [Place], [])),
+        Each("enum-filled: nullable enum with values", AllVersions, v => new Case("schema.enum-filled", v,
+            () => PropertyDocument(NullableEnum(v, Json("a")), StringTarget()), [], [])),
     }.SelectMany(c => c).ToDictionary(c => c.Key, c => c.Value);
 
     // ── Rules that compare a place with its CLR property (TypeBySchemaId) ────────────────────
@@ -439,6 +450,11 @@ public sealed class RefSiblingsPlaceRulesTests
     // ── Case tables ───────────────────────────────────────────────────────────────────────────
 
     private static JsonNode Json(string value) => JsonValue.Create(value);
+
+    /// <summary>The generator's nullable form of a string enum with <paramref name="values"/>, for <paramref name="version"/>.</summary>
+    private static OpenApiSchema NullableEnum(OpenApiSpecVersion version, params JsonNode[] values) =>
+        Core.Schema.VersionedSchemaForms.NullableEnum(
+            new OpenApiSchema { Type = JsonSchemaType.String, Enum = [.. values], Description = "A tint." }, version);
 
     private static IEnumerable<KeyValuePair<string, Case>> Each(
         string name, OpenApiSpecVersion[] versions, Func<OpenApiSpecVersion, Case> create) =>
