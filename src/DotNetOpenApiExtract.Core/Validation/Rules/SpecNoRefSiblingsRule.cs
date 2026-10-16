@@ -18,6 +18,13 @@ namespace DotNetOpenApiExtract.Core.Validation.Rules;
 /// raw-JSON walker would but covers the representable cases.
 /// </para>
 /// <para>
+/// A 3.0 document read from a file has no such holders: the reader drops the keys next to
+/// <c>$ref</c> without a diagnostic. When <see cref="ValidationContext.SourceRefSiblings"/> is set
+/// (the source tree of the file was searched, as <c>validate --spec</c> does), the rule reports those
+/// objects, each at its own pointer and with the same id and severity, and does not search the model,
+/// so an object is never reported twice.
+/// </para>
+/// <para>
 /// Version gating: when <see cref="ValidationContext.OpenApiSpecVersion"/> is
 /// <see cref="Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_1"/> or
 /// <see cref="Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_2"/> the rule emits no violations.
@@ -38,6 +45,20 @@ public sealed class SpecNoRefSiblingsRule : IValidationRule
         if (context.OpenApiSpecVersion == Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_1
             || context.OpenApiSpecVersion == Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_2)
         {
+            yield break;
+        }
+
+        // The source tree of a file: what the reader dropped from the model.
+        if (context.SourceRefSiblings is { } source)
+        {
+            foreach (var occurrence in source)
+            {
+                yield return new ValidationViolation(
+                    Id, DefaultSeverity, occurrence.JsonPointer, null,
+                    $"$ref with sibling properties ({string.Join(", ", occurrence.Siblings)}), not allowed in OpenAPI 3.0: " +
+                    "a 3.0 reader ignores them.");
+            }
+
             yield break;
         }
 

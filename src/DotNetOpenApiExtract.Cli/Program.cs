@@ -745,6 +745,7 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
     // ── Parse the spec file ───────────────────────────────────────────────────
     OpenApiDocument document;
     OpenApiSpecVersion? loadedSpecVersion = null;
+    IReadOnlyList<RefSiblingOccurrence>? sourceRefSiblings = null;
     try
     {
         var readSettings = new OpenApiReaderSettings { BaseUrl = new Uri(specFile.FullName) };
@@ -774,6 +775,11 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         // Capture the spec version from the diagnostic for version-conditional rules
         // (e.g. spec.no-ref-siblings skips on 3.1/3.2 where $ref siblings are legal).
         loadedSpecVersion = readResult.Diagnostic?.SpecificationVersion;
+
+        // A 3.0 reader drops the keys next to $ref without a diagnostic: spec.no-ref-siblings
+        // reads them from the source tree of the same snapshot instead of the model.
+        if (loadedSpecVersion == OpenApiSpecVersion.OpenApi3_0)
+            sourceRefSiblings = RefSiblingScanner.Scan(ReadSourceTree(specBytes, readResult.Diagnostic?.Format ?? specFormat));
 
         // The reader gives a document without a paths object an empty one, the same as
         // `paths: {}`; spec.paths-or-webhooks-or-components tells the two apart, so a missing
@@ -814,6 +820,7 @@ validateCommand.SetAction(async (parseResult, cancellationToken) =>
         OpenApiSpecVersion   = loadedSpecVersion,
         RequiredResponseCodes = parsedRequiredCodes.Count > 0 ? parsedRequiredCodes : null,
         MinDescriptionLengthPerRule = parsedRuleMinLengths.Count > 0 ? parsedRuleMinLengths : null,
+        SourceRefSiblings = sourceRefSiblings,
     };
 
     var result = CoreValidator.Validate(document, validationContext);
@@ -900,6 +907,69 @@ static bool HasTopLevelKey(byte[] content, string format, string key)
     }
 
     return false;
+}
+
+// The document the loader read, as a JSON tree: the bytes and the format are the loader's, read as
+// HasTopLevelKey reads them — JSON through System.Text.Json, YAML through the YAML event parser and only
+// its first document, the one the YAML reader loads. A YAML alias stands for a copy of its anchored
+// node, as in the document the reader builds. Scalars are strings: only the structure and the keys
+// are searched.
+static System.Text.Json.Nodes.JsonNode? ReadSourceTree(byte[] content, string format)
+{
+    using var text = new StreamReader(new MemoryStream(content, writable: false), detectEncodingFromByteOrderMarks: true);
+
+    if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
+    {
+        return System.Text.Json.Nodes.JsonNode.Parse(text.ReadToEnd(), documentOptions: new System.Text.Json.JsonDocumentOptions
+        {
+            CommentHandling     = System.Text.Json.JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+    }
+
+    var events = new SharpYaml.EventReader(SharpYaml.Parser.CreateParser(text));
+    events.Expect<SharpYaml.Events.StreamStart>();
+    events.Expect<SharpYaml.Events.DocumentStart>();
+    return ReadYamlNode(events, new Dictionary<string, System.Text.Json.Nodes.JsonNode?>(StringComparer.Ordinal));
+}
+
+static System.Text.Json.Nodes.JsonNode? ReadYamlNode(
+    SharpYaml.EventReader events, Dictionary<string, System.Text.Json.Nodes.JsonNode?> anchors)
+{
+    if (events.Allow<SharpYaml.Events.AnchorAlias>() is { } alias)
+        return anchors.TryGetValue(alias.Value, out var anchored) ? anchored?.DeepClone() : null;
+
+    if (events.Allow<SharpYaml.Events.Scalar>() is { } scalar)
+        return Anchor(scalar.Anchor, System.Text.Json.Nodes.JsonValue.Create(scalar.Value));
+
+    if (events.Allow<SharpYaml.Events.SequenceStart>() is { } sequence)
+    {
+        var array = new System.Text.Json.Nodes.JsonArray();
+        while (!events.Accept<SharpYaml.Events.SequenceEnd>())
+            array.Add(ReadYamlNode(events, anchors));
+        events.Expect<SharpYaml.Events.SequenceEnd>();
+        return Anchor(sequence.Anchor, array);
+    }
+
+    var mapping = events.Expect<SharpYaml.Events.MappingStart>();
+    var obj = new System.Text.Json.Nodes.JsonObject();
+    while (!events.Accept<SharpYaml.Events.MappingEnd>())
+    {
+        var key = ReadYamlNode(events, anchors);
+        var name = key is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var keyText)
+            ? keyText
+            : key?.ToJsonString() ?? "";
+        obj[name] = ReadYamlNode(events, anchors);
+    }
+    events.Expect<SharpYaml.Events.MappingEnd>();
+    return Anchor(mapping.Anchor, obj);
+
+    System.Text.Json.Nodes.JsonNode? Anchor(string? anchor, System.Text.Json.Nodes.JsonNode? node)
+    {
+        if (!string.IsNullOrEmpty(anchor))
+            anchors[anchor] = node;
+        return node;
+    }
 }
 
 static IReadOnlyDictionary<string, ValidationSeverity>? BuildSeverityOverrides(

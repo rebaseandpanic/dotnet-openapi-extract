@@ -102,6 +102,19 @@ public sealed class ValidationContext
     public IReadOnlyDictionary<string, int>? MinDescriptionLengthPerRule { get; init; }
 
     /// <summary>
+    /// The objects with keys next to <c>$ref</c> in the source tree of the document being validated
+    /// (<see cref="RefSiblingScanner.Scan"/> of the file as read, before the object model is built),
+    /// or <see langword="null"/> when the source tree was not read. A 3.0 reader drops such keys from
+    /// the model without a diagnostic, so for a 3.0 document read from a file
+    /// <c>spec.no-ref-siblings</c> reports these objects instead of searching the model.
+    /// <para>
+    /// It describes one source file: a document built in memory (the <c>generate --validate</c> path)
+    /// has none, and <see cref="WithBindings"/> does not carry it over.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<RefSiblingOccurrence>? SourceRefSiblings { get; init; }
+
+    /// <summary>
     /// Copy of this context with every user option kept and the CLR bindings and the spec
     /// version replaced. The one place that lists the options, so a new option cannot be dropped
     /// by a caller that rebuilds the context (the <c>generate --validate</c> path).
