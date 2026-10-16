@@ -272,10 +272,10 @@ public sealed class DeveloperExperienceRulesTests
     }
 
     [Fact]
-    public void AllRules_Count_Is58()
+    public void AllRules_Count_Is60()
     {
-        CoreValidator.AllRules.Should().HaveCount(58,
-            because: "52 rules apply to every version, and the OpenAPI 3.1/3.2 document structure rules add 6 more");
+        CoreValidator.AllRules.Should().HaveCount(60,
+            because: "54 rules apply to every version, and the OpenAPI 3.1/3.2 document structure rules add 6 more");
     }
 
     [Fact]

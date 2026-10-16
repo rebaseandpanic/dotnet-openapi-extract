@@ -70,7 +70,7 @@ public sealed class SeverityInfrastructureTests
             because: $"{ruleId} should default to Error");
     }
 
-    // Warning rules (6)
+    // Warning rules (8)
     [Theory]
     [InlineData("operation.has-error-response")]
     [InlineData("parameter.optional-has-default")]
@@ -78,6 +78,8 @@ public sealed class SeverityInfrastructureTests
     [InlineData("enum.value-description")]
     [InlineData("security.scheme-description")]
     [InlineData("spec.info-description")]
+    [InlineData("schema.external-description")]
+    [InlineData("schema.external-property-description")]
     public void Rule_DefaultSeverity_IsWarning(string ruleId)
     {
         var rule = CoreValidator.AllRules.Single(r => r.Id == ruleId);
@@ -86,17 +88,17 @@ public sealed class SeverityInfrastructureTests
     }
 
     [Fact]
-    public void AllRules_SeverityCounts_33ErrorsAnd25Warnings()
+    public void AllRules_SeverityCounts_33ErrorsAnd27Warnings()
     {
-        // 47 base rules (26 errors, 21 warnings), 5 API convention rules (1 error, 4 warnings),
-        // 6 OpenAPI 3.1/3.2 document structure rules (6 errors).
-        // Total: 47 + 5 + 6 = 58 rules.
+        // 49 base rules (26 errors, 23 warnings — the two descriptions of external types among them),
+        // 5 API convention rules (1 error, 4 warnings), 6 OpenAPI 3.1/3.2 document structure rules (6 errors).
+        // Total: 49 + 5 + 6 = 60 rules.
         // Errors: 26 + 1 + 6 = 33.
-        // Warnings: 21 + 4 = 25.
+        // Warnings: 23 + 4 = 27.
         var errors = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Error);
         var warnings = CoreValidator.AllRules.Count(r => r.DefaultSeverity == ValidationSeverity.Warning);
         errors.Should().Be(33, because: "33 rules should default to Error (26 base rules + 1 API convention rule + 6 document structure rules)");
-        warnings.Should().Be(25, because: "25 rules should default to Warning (21 base rules + 4 API convention rules)");
+        warnings.Should().Be(27, because: "27 rules should default to Warning (23 base rules + 4 API convention rules)");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

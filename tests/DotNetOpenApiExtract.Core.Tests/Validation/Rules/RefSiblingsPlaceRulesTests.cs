@@ -55,6 +55,11 @@ public sealed class RefSiblingsPlaceRulesTests
         [MaxLength(5)] public PlaceTarget? Place { get; set; }
     }
 
+    private sealed class RequiredHolder
+    {
+        [Required] public PlaceTarget? Place { get; set; }
+    }
+
     private sealed class FormattedHolder
     {
         [DataType(DataType.Date)] public PlaceTarget? Place { get; set; }
@@ -151,6 +156,19 @@ public sealed class RefSiblingsPlaceRulesTests
         Each("constraints: bare $ref is skipped", AllVersions, v => new Case("schema.property-constraints", v,
             () => PropertyDocument(Bare(), WeakTarget()), [], [], typeof(ConstrainedHolder))),
 
+        // schema.required-consistency: [Required] needs the place in the holder's required, in any form of
+        // the place; a place without a declaration needs nothing, whatever its type.
+        Each("required-consistency: inline place declared required, not listed", AllVersions, v => new Case("schema.required-consistency", v,
+            () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Description = "Place description." }, StringTarget()), [Place], [Place], typeof(RequiredHolder))),
+        Each("required-consistency: wrapper declared required, not listed", [V30], v => new Case("schema.required-consistency", v,
+            () => PropertyDocument(Wrapper(s => s.Description = "Place description."), StringTarget()), [Place], [Place], typeof(RequiredHolder))),
+        Each("required-consistency: $ref with siblings declared required, not listed", SiblingVersions, v => new Case("schema.required-consistency", v,
+            () => PropertyDocument(Siblings(r => r.Description = "Place description."), StringTarget()), [Place], [Place], typeof(RequiredHolder))),
+        Each("required-consistency: bare $ref declared required, not listed", AllVersions, v => new Case("schema.required-consistency", v,
+            () => PropertyDocument(Bare(), StringTarget()), [Place], [Place], typeof(RequiredHolder))),
+        Each("required-consistency: inline string without a declaration", AllVersions, v => new Case("schema.required-consistency", v,
+            () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Description = "Place description." }, StringTarget()), [], [], typeof(FormattedHolder))),
+
         // schema.property-format: [DataType(DataType.Date)] needs format date on the place.
         Each("format: inline format other than the attribute's", AllVersions, v => new Case("schema.property-format", v,
             () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Format = "date-time" }, DateTarget()), [Place], [Place], typeof(FormattedHolder))),
@@ -179,16 +197,6 @@ public sealed class RefSiblingsPlaceRulesTests
             () => PropertyDocument(Siblings(r => r.Enum = [Json("x")]), IntegerTarget()), [], [])),
         Each("typed-enum: bare $ref", AllVersions, v => new Case("schema.typed-enum", v,
             () => PropertyDocument(Bare(), IntegerTarget()), [], [])),
-
-        // schema.required-consistency: a string component does not make the place a non-nullable string.
-        Each("required-consistency: inline string not required", AllVersions, v => new Case("schema.required-consistency", v,
-            () => PropertyDocument(new OpenApiSchema { Type = JsonSchemaType.String, Description = "Place description." }, StringTarget()), [Place], [Place])),
-        Each("required-consistency: wrapper, string component", [V30], v => new Case("schema.required-consistency", v,
-            () => PropertyDocument(Wrapper(s => s.Description = "Place description."), StringTarget()), [], [])),
-        Each("required-consistency: $ref with siblings, string component", SiblingVersions, v => new Case("schema.required-consistency", v,
-            () => PropertyDocument(Siblings(r => r.Description = "Place description."), StringTarget()), [], [])),
-        Each("required-consistency: bare $ref, string component", AllVersions, v => new Case("schema.required-consistency", v,
-            () => PropertyDocument(Bare(), StringTarget()), [], [])),
 
         // parameter.optional-has-default: an integer component does not make the parameter a value type.
         Each("optional-has-default: inline optional integer without a default", AllVersions, v => new Case("parameter.optional-has-default", v,

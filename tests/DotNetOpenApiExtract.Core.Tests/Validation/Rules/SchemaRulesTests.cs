@@ -1,3 +1,5 @@
+using RequiredAttribute = System.ComponentModel.DataAnnotations.RequiredAttribute;
+using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using DotNetOpenApiExtract.Core.Validation;
 using DotNetOpenApiExtract.Core.Validation.Rules;
@@ -97,143 +99,79 @@ public sealed class SchemaRulesTests
     // schema.required-consistency
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void SchemaRequiredConsistency_WhenValueTypeInRequired_NoViolation()
+    /// <summary>The CLR model of <c>RequiredDto</c>: three declarations of a requirement and two members without one.</summary>
+    private sealed class RequiredDto
     {
-        var doc = new OpenApiDocument
+        [Required] public string? Name { get; set; }
+        [JsonRequired] public int Count { get; set; }
+        public required string Code { get; set; }
+        [Required, JsonPropertyName("display_name")] public string? Display { get; set; }
+        public int Plain { get; set; }
+        public string Text { get; set; } = "";
+    }
+
+    private static OpenApiDocument RequiredDocument(params string[] required) => new()
+    {
+        Info = new OpenApiInfo { Title = "T", Version = "v1" },
+        Components = new OpenApiComponents
         {
-            Info = new OpenApiInfo { Title = "T", Version = "v1" },
-            Components = new OpenApiComponents
+            Schemas = new Dictionary<string, IOpenApiSchema>
             {
-                Schemas = new Dictionary<string, IOpenApiSchema>
+                ["RequiredDto"] = new OpenApiSchema
                 {
-                    ["TestDto"] = new OpenApiSchema
+                    Type = JsonSchemaType.Object,
+                    Properties = new Dictionary<string, IOpenApiSchema>
                     {
-                        Type = JsonSchemaType.Object,
-                        Properties = new Dictionary<string, IOpenApiSchema>
-                        {
-                            ["count"] = new OpenApiSchema { Type = JsonSchemaType.Integer }
-                        },
-                        Required = new HashSet<string> { "count" },
-                    }
-                }
-            }
-        };
-        var rule = new SchemaRequiredConsistencyRule();
-        rule.Validate(doc, DefaultContext).Should().BeEmpty();
+                        ["name"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null },
+                        ["count"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
+                        ["code"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                        ["display_name"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null },
+                        ["plain"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
+                        ["text"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                    },
+                    Required = new HashSet<string>(required),
+                },
+            },
+        },
+    };
+
+    private static readonly ValidationContext RequiredContext = new()
+    {
+        TypeBySchemaId = new Dictionary<string, Type> { ["RequiredDto"] = typeof(RequiredDto) },
+    };
+
+    /// <summary>
+    /// <c>[Required]</c>, <c>[JsonRequired]</c> and the <c>required</c> modifier declare a requirement the
+    /// schema must list; a non-nullable value type or reference type declares none (System.Text.Json
+    /// reads a default for an absent <c>int</c>), so <c>plain</c> and <c>text</c> are not reported.
+    /// </summary>
+    [Fact]
+    public void SchemaRequiredConsistency_DeclaredRequiredNotListed_IsReported_AndUndeclaredIsNot()
+    {
+        var violations = new SchemaRequiredConsistencyRule().Validate(RequiredDocument(), RequiredContext).ToList();
+
+        violations.Select(v => v.JsonPointer).Should().BeEquivalentTo(
+        [
+            "#/components/schemas/RequiredDto/properties/code",
+            "#/components/schemas/RequiredDto/properties/count",
+            "#/components/schemas/RequiredDto/properties/display_name",
+            "#/components/schemas/RequiredDto/properties/name",
+        ]);
+        violations.Should().OnlyContain(v => v.RuleId == "schema.required-consistency");
     }
 
     [Fact]
-    public void SchemaRequiredConsistency_WhenValueTypeNotInRequired_OneViolation()
+    public void SchemaRequiredConsistency_DeclaredRequiredListed_NoViolation()
     {
-        var doc = new OpenApiDocument
-        {
-            Info = new OpenApiInfo { Title = "T", Version = "v1" },
-            Components = new OpenApiComponents
-            {
-                Schemas = new Dictionary<string, IOpenApiSchema>
-                {
-                    ["TestDto"] = new OpenApiSchema
-                    {
-                        Type = JsonSchemaType.Object,
-                        Properties = new Dictionary<string, IOpenApiSchema>
-                        {
-                            ["count"] = new OpenApiSchema { Type = JsonSchemaType.Integer }
-                        },
-                        Required = new HashSet<string>(),
-                    }
-                }
-            }
-        };
-        var rule = new SchemaRequiredConsistencyRule();
-        var violations = rule.Validate(doc, DefaultContext).ToList();
-        violations.Should().HaveCount(1);
-        violations[0].RuleId.Should().Be("schema.required-consistency");
+        new SchemaRequiredConsistencyRule().Validate(RequiredDocument("name", "count", "code", "display_name"), RequiredContext)
+            .Should().BeEmpty();
     }
 
-    // Fix I2: non-nullable string (NRT, type=String only) must also be in required
+    /// <summary>Without CLR bindings a schema does not say what the code declares: nothing is reported.</summary>
     [Fact]
-    public void SchemaRequiredConsistency_WhenNonNullableStringNotInRequired_OneViolation()
+    public void SchemaRequiredConsistency_Standalone_NoViolation()
     {
-        // String with type=String only (no Null flag) = NRT non-nullable → must be in required.
-        var doc = new OpenApiDocument
-        {
-            Info = new OpenApiInfo { Title = "T", Version = "v1" },
-            Components = new OpenApiComponents
-            {
-                Schemas = new Dictionary<string, IOpenApiSchema>
-                {
-                    ["TestDto"] = new OpenApiSchema
-                    {
-                        Type = JsonSchemaType.Object,
-                        Properties = new Dictionary<string, IOpenApiSchema>
-                        {
-                            ["name"] = new OpenApiSchema { Type = JsonSchemaType.String }
-                        },
-                        Required = new HashSet<string>(),
-                    }
-                }
-            }
-        };
-        var rule = new SchemaRequiredConsistencyRule();
-        var violations = rule.Validate(doc, DefaultContext).ToList();
-        violations.Should().HaveCount(1);
-        violations[0].RuleId.Should().Be("schema.required-consistency");
-        violations[0].JsonPointer.Should().Contain("name");
-    }
-
-    [Fact]
-    public void SchemaRequiredConsistency_WhenNullableStringNotInRequired_NoViolation()
-    {
-        // String | Null = nullable reference type → allowed to be absent from required.
-        var doc = new OpenApiDocument
-        {
-            Info = new OpenApiInfo { Title = "T", Version = "v1" },
-            Components = new OpenApiComponents
-            {
-                Schemas = new Dictionary<string, IOpenApiSchema>
-                {
-                    ["TestDto"] = new OpenApiSchema
-                    {
-                        Type = JsonSchemaType.Object,
-                        Properties = new Dictionary<string, IOpenApiSchema>
-                        {
-                            ["name"] = new OpenApiSchema { Type = JsonSchemaType.String | JsonSchemaType.Null }
-                        },
-                        Required = new HashSet<string>(),
-                    }
-                }
-            }
-        };
-        var rule = new SchemaRequiredConsistencyRule();
-        rule.Validate(doc, DefaultContext).Should().BeEmpty();
-    }
-
-    [Fact]
-    public void SchemaRequiredConsistency_WhenNonNullableStringInRequired_NoViolation()
-    {
-        // Non-nullable string that IS listed in required → no violation.
-        var doc = new OpenApiDocument
-        {
-            Info = new OpenApiInfo { Title = "T", Version = "v1" },
-            Components = new OpenApiComponents
-            {
-                Schemas = new Dictionary<string, IOpenApiSchema>
-                {
-                    ["TestDto"] = new OpenApiSchema
-                    {
-                        Type = JsonSchemaType.Object,
-                        Properties = new Dictionary<string, IOpenApiSchema>
-                        {
-                            ["name"] = new OpenApiSchema { Type = JsonSchemaType.String }
-                        },
-                        Required = new HashSet<string> { "name" },
-                    }
-                }
-            }
-        };
-        var rule = new SchemaRequiredConsistencyRule();
-        rule.Validate(doc, DefaultContext).Should().BeEmpty();
+        new SchemaRequiredConsistencyRule().Validate(RequiredDocument(), DefaultContext).Should().BeEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

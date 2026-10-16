@@ -469,4 +469,110 @@ public class SecurityIntegrationTests
         var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
         return System.Text.Json.Nodes.JsonNode.Parse(json)!;
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Default security scheme for [Authorize] without AuthenticationSchemes
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A Program.cs with two schemes, "Bearer" (AddJwtBearer) and "WebSession" (AddSecurityDefinition),
+    /// and no global requirement — the default authentication scheme is configured elsewhere.
+    /// </summary>
+    private static TempDirectory TwoSchemeSource()
+    {
+        var tempDir = new TempDirectory();
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Program.cs"),
+            """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddAuthentication().AddJwtBearer(o => { });
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.AddSecurityDefinition("WebSession", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Cookie,
+                    Name = "session"
+                });
+            });
+            builder.Build().Run();
+            """);
+        File.WriteAllText(
+            Path.Combine(tempDir.Path, "Dummy.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        return tempDir;
+    }
+
+    /// <summary>
+    /// With <c>DefaultSecurityScheme = "WebSession"</c>, <c>[Authorize]</c> without schemes on the
+    /// controller requires WebSession; <c>[AllowAnonymous]</c> keeps an empty list and
+    /// <c>[Authorize(AuthenticationSchemes = "Bearer")]</c> keeps Bearer.
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
+    public async Task DefaultSecurityScheme_AuthorizeWithoutScheme_RequiresTheDefault(OpenApiSpecVersion version)
+    {
+        using var tempDir = TwoSchemeSource();
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath          = TestPaths.SampleApiDll,
+            XmlPath               = TestPaths.SampleApiXml,
+            SourceRoot            = tempDir.Path,
+            OpenApiVersion        = version,
+            DefaultSecurityScheme = "WebSession",
+        });
+
+        var json = await document.SerializeAsJsonAsync(version, TestContext.Current.CancellationToken);
+        var paths = System.Text.Json.Nodes.JsonNode.Parse(json)!["paths"]!;
+
+        string[] Schemes(string path) => paths[path]!["get"]!["security"]!.AsArray()
+            .SelectMany(r => r!.AsObject().Select(kv => kv.Key)).ToArray();
+
+        Schemes("/api/secure").Should().Equal(["WebSession"]);
+        paths["/api/secure/public"]!["get"]!["security"]!.AsArray().Should().BeEmpty();
+        Schemes("/api/secure/admin").Should().Equal(["Bearer"]);
+    }
+
+    /// <summary>
+    /// <c>operation.security</c> reports <c>[Authorize]</c> without schemes when nothing names the scheme,
+    /// and is satisfied once the default scheme does.
+    /// </summary>
+    [Fact]
+    public void DefaultSecurityScheme_SatisfiesOperationSecurity()
+    {
+        using var tempDir = TwoSchemeSource();
+        OpenApiDocumentOptions Options(string? scheme) => new()
+        {
+            AssemblyPath          = TestPaths.SampleApiDll,
+            XmlPath               = TestPaths.SampleApiXml,
+            SourceRoot            = tempDir.Path,
+            DefaultSecurityScheme = scheme,
+        };
+        bool Reported(string? scheme)
+        {
+            OpenApiDocumentBuilder.BuildWithValidation(Options(scheme), new Core.Validation.ValidationContext(), out var result);
+            return result.Violations.Any(v => v.RuleId == "operation.security" && v.JsonPointer == "#/paths/~1api~1secure/get");
+        }
+
+        Reported(null).Should().BeTrue(because: "no global requirement and no scheme on [Authorize]");
+        Reported("WebSession").Should().BeFalse(because: "the default scheme gives the operation its requirement");
+    }
+
+    [Fact]
+    public void DefaultSecurityScheme_NotDefined_IsAConfigurationError()
+    {
+        using var tempDir = TwoSchemeSource();
+        var build = () => OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath          = TestPaths.SampleApiDll,
+            XmlPath               = TestPaths.SampleApiXml,
+            SourceRoot            = tempDir.Path,
+            DefaultSecurityScheme = "Cookie",
+        });
+
+        build.Should().Throw<OpenApiConfigurationException>()
+            .Which.Message.Should().Contain("'Cookie'").And.Contain("'WebSession'");
+    }
 }

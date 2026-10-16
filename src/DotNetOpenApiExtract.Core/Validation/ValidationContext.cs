@@ -115,6 +115,17 @@ public sealed class ValidationContext
     public IReadOnlyList<RefSiblingOccurrence>? SourceRefSiblings { get; init; }
 
     /// <summary>
+    /// The simple names of the assemblies the application builds itself — the application and its
+    /// project references, from its <c>*.deps.json</c>. A component whose CLR type is declared in any
+    /// other assembly (a NuGet package, the shared framework) is not the author's to document: the
+    /// description rules report it as <c>schema.external-description</c> /
+    /// <c>schema.external-property-description</c> (warnings) instead of
+    /// <c>schema.description</c> / <c>schema.property-description</c>.
+    /// <para>Null when unknown (standalone mode, no <c>*.deps.json</c>): every type counts as the project's.</para>
+    /// </summary>
+    public IReadOnlySet<string>? ProjectAssemblyNames { get; init; }
+
+    /// <summary>
     /// Copy of this context with every user option kept and the CLR bindings and the spec
     /// version replaced. The one place that lists the options, so a new option cannot be dropped
     /// by a caller that rebuilds the context (the <c>generate --validate</c> path).
@@ -123,7 +134,8 @@ public sealed class ValidationContext
         IReadOnlyDictionary<string, (ControllerInfo Controller, ActionInfo Action)>? actionByOperationKey,
         IReadOnlyDictionary<string, Type>? typeBySchemaId,
         SourceAnalysisContext? sourceContext,
-        OpenApiSpecVersion? openApiSpecVersion) => new()
+        OpenApiSpecVersion? openApiSpecVersion,
+        IReadOnlySet<string>? projectAssemblyNames = null) => new()
     {
         MinDescriptionLength        = MinDescriptionLength,
         ExcludedPathPrefixes        = ExcludedPathPrefixes,
@@ -136,6 +148,7 @@ public sealed class ValidationContext
         TypeBySchemaId              = typeBySchemaId,
         SourceContext               = sourceContext,
         OpenApiSpecVersion          = openApiSpecVersion,
+        ProjectAssemblyNames        = projectAssemblyNames,
     };
 
     /// <summary>

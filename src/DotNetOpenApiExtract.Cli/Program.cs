@@ -219,6 +219,13 @@ var licenseIdentifierOption = new Option<string?>("--license-identifier")
                   "with a warning for 3.0). Needs --license-name; cannot be combined with --license-url",
 };
 
+var defaultSecuritySchemeOption = new Option<string?>("--default-security-scheme")
+{
+    Description = "Security scheme (a name from AddSecurityDefinition) that [Authorize] without AuthenticationSchemes " +
+                  "stands for: the application's default authentication scheme, when it is configured where the tool " +
+                  "cannot read it. Such operations get a requirement of this scheme; [AllowAnonymous] keeps none",
+};
+
 var summaryOption = new Option<string?>("--summary")
 {
     Description = "Short summary of the API (info.summary, OpenAPI 3.1+; omitted with a warning for 3.0). " +
@@ -315,6 +322,7 @@ rootCommand.Options.Add(licenseNameOption);
 rootCommand.Options.Add(licenseUrlOption);
 rootCommand.Options.Add(licenseIdentifierOption);
 rootCommand.Options.Add(summaryOption);
+rootCommand.Options.Add(defaultSecuritySchemeOption);
 rootCommand.Options.Add(serverNameOption);
 rootCommand.Options.Add(selfUrlOption);
 rootCommand.Options.Add(jsonSchemaDialectOption);
@@ -358,6 +366,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var licenseUrl   = parseResult.GetValue(licenseUrlOption);
     var licenseId    = parseResult.GetValue(licenseIdentifierOption);
     var summary      = parseResult.GetValue(summaryOption);
+    var defaultSecurityScheme = parseResult.GetValue(defaultSecuritySchemeOption);
     var serverNames  = parseResult.GetValue(serverNameOption);
     var selfUrl      = parseResult.GetValue(selfUrlOption);
     var dialect      = parseResult.GetValue(jsonSchemaDialectOption);
@@ -498,6 +507,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             LicenseUrl          = licenseUrl,
             LicenseIdentifier   = licenseId,
             Summary             = summary,
+            DefaultSecurityScheme = string.IsNullOrWhiteSpace(defaultSecurityScheme) ? null : defaultSecurityScheme,
             TermsOfService      = termsOfSvc,
             Servers             = servers is { Length: > 0 } ? servers : null,
             ServerNames         = serverNames is { Length: > 0 } ? serverNames : null,

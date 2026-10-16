@@ -208,6 +208,20 @@ public sealed class OpenApiDocumentOptions
     public string? LicenseIdentifier { get; init; }
 
     /// <summary>
+    /// The security scheme an <c>[Authorize]</c> without <c>AuthenticationSchemes</c> stands for — the
+    /// application's default authentication scheme, which ASP.NET Core sets at run time and the tool
+    /// cannot read when it is configured outside <c>Program.cs</c>. Such an operation gets a requirement
+    /// of this scheme (with the roles of <c>[Authorize(Roles)]</c> as usual); <c>[AllowAnonymous]</c> and
+    /// an explicit <c>AuthenticationSchemes</c> keep theirs. The name is the one in
+    /// <c>components/securitySchemes</c> (<c>AddSecurityDefinition</c>). <see langword="null"/>: such an
+    /// operation inherits the document's requirements, if any.
+    /// </summary>
+    /// <exception cref="OpenApiConfigurationException">
+    /// From <see cref="OpenApiDocumentBuilder.Build"/> when the document defines no scheme of this name.
+    /// </exception>
+    public string? DefaultSecurityScheme { get; init; }
+
+    /// <summary>
     /// Optional names of the <see cref="Servers"/>, by position: none, or exactly one non-empty, unique
     /// name per server (<c>servers[].name</c>, OpenAPI 3.2; <c>x-oai-name</c> with a warning before).
     /// The server a <see cref="PathBaseEmission.ServersEntry"/> path base adds gets no name.
@@ -371,7 +385,8 @@ public sealed class OpenApiDocumentBuilder
             core.SchemaTypes, StringComparer.Ordinal);
 
         var enrichedContext = validationContext.WithBindings(
-            actionByKey, typeBySchemaId, core.SourceContext, validationVersion);
+            actionByKey, typeBySchemaId, core.SourceContext, validationVersion,
+            ProjectAssemblies.Read(options.AssemblyPath));
 
         validationResult = Validation.OpenApiValidator.Validate(core.Document, enrichedContext);
         return core.Document;
@@ -489,6 +504,12 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Security extraction (Roslyn, best-effort, before operation loop) ──
         var securityResult = SecuritySchemeExtractor.Extract(sourceContext, diagnostics.Report);
+        if (options.DefaultSecurityScheme is { } defaultScheme && !securityResult.Schemes.ContainsKey(defaultScheme))
+            throw new OpenApiConfigurationException(
+                $"The default security scheme '{defaultScheme}' is not defined: the document defines " +
+                (securityResult.Schemes.Count == 0
+                    ? "no security schemes."
+                    : string.Join(", ", securityResult.Schemes.Keys.Order(StringComparer.Ordinal).Select(k => $"'{k}'")) + "."));
 
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
@@ -780,7 +801,7 @@ public sealed class OpenApiDocumentBuilder
                 var actionAttrs     = action.Method.GetCustomAttributesData();
                 var controllerAttrs = action.Controller.Type.GetCustomAttributesData();
 
-                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, document, ledger, httpSlots);
+                var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, options.DefaultSecurityScheme, document, ledger, httpSlots);
                 ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
                 ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
@@ -1093,6 +1114,7 @@ public sealed class OpenApiDocumentBuilder
         DocumentationResolver docResolver,
         SchemaGenerator schemaGenerator,
         SecuritySchemeExtractionResult securityResult,
+        string? defaultSecurityScheme,
         OpenApiDocument document,
         LossLedger ledger,
         List<Action<SchemaGenerator>> httpSlots)
@@ -1365,7 +1387,7 @@ public sealed class OpenApiDocumentBuilder
             RecordUnknownResultStatus(ledger, operation, action.Method.ReturnType, unknownResults);
 
         // ── Per-operation security ────────────────────────────────────────────
-        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, document, ledger);
+        ApplyOperationSecurity(operation, actionAttrs, controllerAttrs, securityResult, defaultSecurityScheme, document, ledger);
 
         return operation;
     }
@@ -2116,6 +2138,8 @@ public sealed class OpenApiDocumentBuilder
     /// <list type="bullet">
     ///   <item><c>[AllowAnonymous]</c> → <c>security: []</c> (empty list, overrides global requirement).</item>
     ///   <item><c>[Authorize(AuthenticationSchemes = "Bearer")]</c> → explicit security requirement.</item>
+    ///   <item><c>[Authorize]</c> without schemes and a <paramref name="defaultSecurityScheme"/> → a
+    ///   requirement of that scheme, as if it were named in <c>AuthenticationSchemes</c>.</item>
     ///   <item>No override → nothing set (inherits global security if present).</item>
     /// </list>
     /// </remarks>
@@ -2124,10 +2148,15 @@ public sealed class OpenApiDocumentBuilder
         IList<System.Reflection.CustomAttributeData> actionAttrs,
         IList<System.Reflection.CustomAttributeData> controllerAttrs,
         SecuritySchemeExtractionResult securityResult,
+        string? defaultSecurityScheme,
         OpenApiDocument document,
         LossLedger ledger)
     {
         var auth = AuthorizationExtractor.Extract(actionAttrs, controllerAttrs);
+
+        // [Authorize] without schemes authenticates with the application's default scheme.
+        if (auth is { RequiresAuthorization: true, AuthenticationSchemes: null } && defaultSecurityScheme != null)
+            auth = auth.WithAuthenticationSchemes([defaultSecurityScheme]);
 
         if (auth.IsAnonymous)
         {

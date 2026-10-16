@@ -52,6 +52,8 @@ public sealed class OpenApiValidator
         // Schema-level rules
         new SchemaDescriptionRule(),
         new SchemaPropertyDescriptionRule(),
+        new SchemaExternalDescriptionRule(),
+        new SchemaExternalPropertyDescriptionRule(),
         new SchemaPropertyFormatRule(),
         new SchemaRequiredConsistencyRule(),
         new SchemaPropertyConstraintsRule(),

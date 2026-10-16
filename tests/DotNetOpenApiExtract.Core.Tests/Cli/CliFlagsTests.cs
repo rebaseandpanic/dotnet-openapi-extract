@@ -106,6 +106,35 @@ public class CliFlagsTests
         result.StdErr.Should().Contain("Flows");
     }
 
+    /// <summary>
+    /// <c>--default-security-scheme</c> reaches the build: <c>[Authorize(Roles)]</c> without schemes gets a
+    /// requirement of the named scheme, and a name the document does not define is a configuration error.
+    /// </summary>
+    [Fact]
+    public async Task DefaultSecurityScheme_RequiresTheScheme_AndAnUndefinedNameExitsWithTwo()
+    {
+        using var directory = new TempDirectory();
+        File.WriteAllText(Path.Combine(directory.Path, "Program.cs"), """
+            builder.Services.AddSwaggerGen(c => c.AddSecurityDefinition("key", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.ApiKey, In = ParameterLocation.Header, Name = "X-Key"
+            }));
+            """);
+
+        var (result, document) = await Run(directory, "--source-root", directory.Path, "--default-security-scheme", "key");
+
+        result.ExitCode.Should().Be(0, result.StdErr);
+        document!["paths"]!["/roles/inherited"]!["get"]!["security"]!.AsArray()
+            .Select(r => r!.AsObject().Single().Key).Should().Equal(["key"]);
+
+        File.Delete(Path.Combine(directory.Path, "openapi.json"));
+        var (undefined, written) = await Run(directory, "--source-root", directory.Path, "--default-security-scheme", "cookie");
+
+        undefined.ExitCode.Should().Be(2);
+        undefined.StdErr.Should().Contain("'cookie'");
+        written.Should().BeNull();
+    }
+
     [Fact]
     public async Task ServerUrlWithEquals_IsReadWhole_WithoutAName()
     {

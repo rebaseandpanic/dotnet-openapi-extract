@@ -12,6 +12,8 @@
     <Project Path="tests/TestAssemblies/LegacyNoNrtApi/LegacyNoNrtApi.csproj" />
     <Project Path="tests/TestAssemblies/MinimalProductApi/MinimalProductApi.csproj" />
     <Project Path="tests/TestAssemblies/ModernApi/ModernApi.csproj" />
+    <Project Path="tests/TestAssemblies/PackageTypesApi/PackageTypesApi.csproj" />
+    <Project Path="tests/TestAssemblies/PackageTypesContracts/PackageTypesContracts.csproj" />
     <Project Path="tests/TestAssemblies/SampleApi/SampleApi.csproj" />
     <Project Path="tests/TestAssemblies/StrayEntryApi/StrayEntryApi.csproj" />
     <Project Path="tests/TestAssemblies/SwaggerSetupApi/SwaggerSetupApi.csproj" />

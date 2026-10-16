@@ -57,6 +57,7 @@ The tool itself runs on .NET 10. References of the target assembly are resolved 
 | `--license-name <string>` | no | `SwaggerDoc` `License.Name` | `info.license.name` |
 | `--license-url <url>` | no | `SwaggerDoc` `License.Url` | `info.license.url` |
 | `--license-identifier <spdx>` | no | `SwaggerDoc` `License.Identifier` | `info.license.identifier` (OpenAPI 3.1+; `x-oai-license-identifier` with a warning for 3.0); needs `--license-name`, excludes `--license-url` |
+| `--default-security-scheme <name>` | no | — | The scheme (a name from `AddSecurityDefinition`) that `[Authorize]` without `AuthenticationSchemes` stands for — the application's default authentication scheme, when it is configured outside `Program.cs`. Such operations get a requirement of this scheme (with their roles); `[AllowAnonymous]` keeps `security: []`, an explicit `AuthenticationSchemes` its own. A name the document does not define is an error (exit 2) |
 | `--summary <text>` | no | `SwaggerDoc` `Summary` | `info.summary` (OpenAPI 3.1+; omitted with a warning for 3.0); wins over `OpenApiInfo.Summary` in Program.cs |
 | `--terms-of-service <url>` | no | `SwaggerDoc` `TermsOfService` | `info.termsOfService` |
 | `--server <url>` | no | — | Server URL in `servers[]` (repeatable) |
@@ -102,7 +103,7 @@ openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate
 openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --strict
 
 # Skip a noisy rule
-openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule schema.required-consistency
+openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate --skip-rule operation.has-error-response
 
 # Enforce 422 on mutating endpoints (your org convention)
 openapi-extract --assembly bin/Debug/net9.0/MyApi.dll --validate \
@@ -128,6 +129,12 @@ openapi-extract validate --spec openapi.json --validation-report report.json
 Rules run for the version of the document: the `--openapi-version` of the build, or the `openapi:` field of a standalone file. Some levels depend on it — `response.description` is an error for 3.0/3.1 and a warning for 3.2, where a response description is optional (`--strict` promotes it like any other warning). `response.schema-when-body` accepts `itemSchema` (3.2) and `x-oai-itemSchema` (3.0/3.1) as the schema of a streaming response, and a `text/event-stream` media type without a schema is not a violation.
 
 Rules for the document structure of newer versions: `spec.license-identifier-or-url` (3.1+: a license has an identifier or a url, not both), `spec.paths-or-webhooks-or-components` (3.0: `paths` is required; 3.1/3.2: at least one of `paths`, `webhooks`, `components` — an empty object counts as present, a missing one does not), `tag.parent-defined` and `tag.no-parent-cycle` (3.2: a tag's `parent` names a declared tag, and parents never form a cycle), `spec.server-names-unique` (3.2: top-level server names are unique), `discriminator.default-mapping-when-optional` (3.2: a discriminator whose property an instance may lack — required-ness followed through `allOf`, `oneOf`, `anyOf` and `$ref` — has a `defaultMapping`; the tool's own polymorphism output always passes it). A rule for one version does not run for another.
+
+`schema.description` and `schema.property-description` are errors for the application's own types: those of the assembly and of the libraries it references as projects (by its `*.deps.json`). A component whose type comes from a NuGet package or the framework is reported by `schema.external-description` / `schema.external-property-description` instead — warnings that name the assembly, since its author cannot document it. Its description comes from the package's XML documentation, which the build does not copy next to the assembly by default: set `<CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>` in the project file, or pass the file with `--xml`. `--error-rule schema.external-property-description` makes them errors. Without a `*.deps.json` every type counts as the application's.
+
+`schema.required-consistency` reports a property the code declares required — `[Required]`, `[JsonRequired]` or the C# `required` modifier — that the schema's `required` does not list. A non-nullable value type without such a declaration is optional, as the generator writes it (System.Text.Json reads its default when the member is absent); in standalone validation the rule does not run.
+
+`operation.security` reports an `[Authorize]` operation without a requirement when the document has no global one. Name the scheme in `[Authorize(AuthenticationSchemes = "...")]` with the name given to `AddSecurityDefinition`, declare a global `AddSecurityRequirement` in `Program.cs`, or pass `--default-security-scheme`.
 
 `schema.property-constraints` checks the schema against the validation attributes the way the generator applies them: lengths by shape (string, array, dictionary) and at least as tight as the attribute, `[Range]` for every constructor with inclusive and exclusive bounds on their own keywords (on the numeric branch when number handling makes the property an `anyOf`). `component.no-unused` (off by default) counts references through `itemSchema`, `contentSchema`, `propertyNames`, compositions and discriminator mappings.
 

@@ -685,9 +685,9 @@ public sealed class ApiConventionRulesTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void AllRuleIds_Count_Is58()
+    public void AllRuleIds_Count_Is60()
     {
-        CoreValidator.AllRuleIds.Should().HaveCount(58);
+        CoreValidator.AllRuleIds.Should().HaveCount(60);
     }
 
     [Fact]

@@ -63,6 +63,12 @@ internal static class TestPaths
     public static string SwaggerSetupApiDll  => FindFixtureDll("SwaggerSetupApi");
 
     /// <summary>
+    /// Path to the PackageTypesApi test fixture DLL: a component of its own, one of a library it references
+    /// as a project (PackageTypesContracts) and one of a NuGet package without its XML documentation in bin.
+    /// </summary>
+    public static string PackageTypesApiDll  => FindFixtureDll("PackageTypesApi");
+
+    /// <summary>
     /// Path to the built CLI (<c>src/DotNetOpenApiExtract.Cli/bin/**/DotNetOpenApiExtract.Cli.dll</c>),
     /// resolved by the same convention as the fixtures.
     /// </summary>

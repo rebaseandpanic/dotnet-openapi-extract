@@ -42,6 +42,16 @@ public sealed class AuthorizationInfo
     /// the attributes' role lists, written in full.
     /// </summary>
     public IReadOnlyList<IReadOnlyList<string>>? RoleAlternatives { get; init; }
+
+    /// <summary>A copy of this information with <see cref="AuthenticationSchemes"/> replaced.</summary>
+    internal AuthorizationInfo WithAuthenticationSchemes(IReadOnlyList<string> schemes) => new()
+    {
+        IsAnonymous           = IsAnonymous,
+        RequiresAuthorization = RequiresAuthorization,
+        AuthenticationSchemes = schemes,
+        Policies              = Policies,
+        RoleAlternatives      = RoleAlternatives,
+    };
 }
 
 /// <summary>
