@@ -690,4 +690,51 @@ public class SecurityIntegrationTests
         build.Should().Throw<OpenApiConfigurationException>()
             .Which.Message.Should().Contain("'Session'").And.Contain("'Bearer'").And.Contain("'WebSession'");
     }
+
+    /// <summary>
+    /// A map key that no <c>[Authorize]</c> names is reported (a misspelt scheme would otherwise leave its
+    /// operations unmapped without a word); a key that is used is not.
+    /// </summary>
+    [Fact]
+    public void SecuritySchemeMap_UnusedKey_IsReported()
+    {
+        using var tempDir = WebSessionOnlySource();
+        var diagnostics = new List<ExtractionDiagnostic>();
+        OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath      = TestPaths.SampleApiDll,
+            XmlPath           = TestPaths.SampleApiXml,
+            SourceRoot        = tempDir.Path,
+            SecuritySchemeMap = new Dictionary<string, string> { ["Bearer"] = "WebSession", ["Barer"] = "WebSession" },
+            OnDiagnostic      = diagnostics.Add,
+        });
+
+        diagnostics.Where(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeMapUnused).Select(d => d.Subjects.Single())
+            .Should().Equal(["Barer"]);
+    }
+
+    /// <summary>
+    /// The default scheme may be given as an authentication scheme of the map: <c>[Authorize]</c> without
+    /// schemes then requires the definition the map names for it.
+    /// </summary>
+    [Fact]
+    public async Task DefaultSecurityScheme_ThroughTheMap_RequiresTheMappedDefinition()
+    {
+        using var tempDir = WebSessionOnlySource();
+        var diagnostics = new List<ExtractionDiagnostic>();
+        var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
+        {
+            AssemblyPath          = TestPaths.SampleApiDll,
+            XmlPath               = TestPaths.SampleApiXml,
+            SourceRoot            = tempDir.Path,
+            DefaultSecurityScheme = "app.cookie",
+            SecuritySchemeMap     = new Dictionary<string, string> { ["app.cookie"] = "WebSession" },
+            OnDiagnostic          = diagnostics.Add,
+        });
+
+        var json = await document.SerializeAsJsonAsync(OpenApiSpecVersion.OpenApi3_1, TestContext.Current.CancellationToken);
+        var security = System.Text.Json.Nodes.JsonNode.Parse(json)!["paths"]!["/api/secure"]!["get"]!["security"]!;
+        security.AsArray().SelectMany(r => r!.AsObject().Select(kv => kv.Key)).Should().Equal(["WebSession"]);
+        diagnostics.Should().NotContain(d => d.Code == ExtractionDiagnosticCodes.SecuritySchemeMapUnused);
+    }
 }

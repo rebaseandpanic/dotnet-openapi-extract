@@ -143,9 +143,31 @@ public class RoleRequirementsTests(RoleRequirementsFixture fixture) : IClassFixt
         var (document, diagnostics) = fixture.Builds[version];
         var roles = version == OpenApiSpecVersion.OpenApi3_0 ? "[]" : """["A"]""";
 
-        Same(Security(document, "/roles/oauth"), $$"""[{"oauth":[],"key":{{roles}}}]""").Should().BeTrue(Security(document, "/roles/oauth")!.ToJsonString());
+        // The schemes of AuthenticationSchemes are alternatives (ASP.NET Core's PolicyEvaluator accepts the
+        // request when any of them authenticates it): one requirement each.
+        Same(Security(document, "/roles/oauth"), $$"""[{"oauth":[]},{"key":{{roles}}}]""").Should().BeTrue(Security(document, "/roles/oauth")!.ToJsonString());
         diagnostics.Where(d => d.Location == "GET /roles/oauth" && d.Feature == "security.roles.oauth").Should().ContainSingle()
             .Which.Subjects.Should().Equal("oauth", "A");
+    }
+
+    /// <summary>
+    /// <c>AuthenticationSchemes = "key,bearer"</c>, and a scheme on the controller with another on the
+    /// action, are one policy whose schemes ASP.NET Core tries in turn: the request passes when any of
+    /// them authenticates it. The schemes are written as alternatives — one requirement each — not as
+    /// one requirement of both, which would ask the client for both credentials.
+    /// </summary>
+    [Theory]
+    [InlineData(OpenApiSpecVersion.OpenApi3_0)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_1)]
+    [InlineData(OpenApiSpecVersion.OpenApi3_2)]
+    public void SeveralAuthenticationSchemes_AreAlternatives(OpenApiSpecVersion version)
+    {
+        var (document, _) = fixture.Builds[version];
+
+        Same(Security(document, "/scheme-alternatives/either"), """[{"key":[]},{"bearer":[]}]""")
+            .Should().BeTrue(Security(document, "/scheme-alternatives/either")!.ToJsonString());
+        Same(Security(document, "/scheme-alternatives-combined"), """[{"bearer":[]},{"key":[]}]""")
+            .Should().BeTrue(Security(document, "/scheme-alternatives-combined")!.ToJsonString());
     }
 
     [Fact]

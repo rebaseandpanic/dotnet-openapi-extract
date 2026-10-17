@@ -57,3 +57,26 @@ public class ControllerRolesController : ControllerBase
     [HttpGet("plain")]
     public IActionResult Plain() => Ok();
 }
+
+/// <summary>Several authentication schemes: ASP.NET Core accepts a request any one of them authenticates.</summary>
+[ApiController]
+[Route("scheme-alternatives")]
+public class SchemeAlternativesController : ControllerBase
+{
+    /// <summary>Two schemes of one attribute.</summary>
+    [HttpGet("either")]
+    [Authorize(AuthenticationSchemes = "key,bearer")]
+    public IActionResult Either() => Ok();
+}
+
+/// <summary>A scheme on the controller and another on the action: one policy of both schemes.</summary>
+[ApiController]
+[Route("scheme-alternatives-combined")]
+[Authorize(AuthenticationSchemes = "key")]
+public class CombinedSchemesController : ControllerBase
+{
+    /// <summary>The action's scheme and the controller's.</summary>
+    [HttpGet]
+    [Authorize(AuthenticationSchemes = "bearer")]
+    public IActionResult Get() => Ok();
+}

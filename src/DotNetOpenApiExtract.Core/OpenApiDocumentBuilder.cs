@@ -519,12 +519,19 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Security extraction (Roslyn, best-effort, before operation loop) ──
         var securityResult = SecuritySchemeExtractor.Extract(sourceContext, diagnostics.Report);
-        if (options.DefaultSecurityScheme is { } defaultScheme)
-            EnsureSecuritySchemeDefined(securityResult, defaultScheme, $"The default security scheme '{defaultScheme}'");
+        // The default scheme names a definition, or an authentication scheme the map names one for.
+        var defaultDefinition = options.DefaultSecurityScheme is { } defaultScheme
+                                && options.SecuritySchemeMap?.TryGetValue(defaultScheme, out var mappedDefault) == true
+            ? mappedDefault
+            : options.DefaultSecurityScheme;
+        if (defaultDefinition != null)
+            EnsureSecuritySchemeDefined(securityResult, defaultDefinition, $"The default security scheme '{defaultDefinition}'");
         foreach (var (authenticationScheme, definition) in options.SecuritySchemeMap ?? new Dictionary<string, string>())
             EnsureSecuritySchemeDefined(securityResult, definition,
                 $"The security definition '{definition}' that the authentication scheme '{authenticationScheme}' is mapped to");
-        var securityNaming = new SecurityNaming(options.DefaultSecurityScheme, options.SecuritySchemeMap);
+        var securityNaming = new SecurityNaming(defaultDefinition, options.SecuritySchemeMap);
+        if (defaultDefinition != options.DefaultSecurityScheme)
+            securityNaming.UsedKeys.Add(options.DefaultSecurityScheme!);
 
         // ── JSON options extraction (Roslyn, best-effort) ────────────────────
         var jsonOptions = JsonOptionsExtractor.Extract(sourceContext, diagnostics.Report);
@@ -833,6 +840,16 @@ public sealed class OpenApiDocumentBuilder
                 // Skip operations whose types have unresolvable dependencies
             }
         }
+
+        // A map entry no [Authorize] names is most likely a misspelt scheme: its operations stay unmapped.
+        foreach (var unused in (options.SecuritySchemeMap?.Keys ?? []).Where(k => !securityNaming.UsedKeys.Contains(k)).Order(StringComparer.Ordinal))
+            diagnostics.Report(new ExtractionDiagnostic
+            {
+                Code     = ExtractionDiagnosticCodes.SecuritySchemeMapUnused,
+                Message  = $"--security-scheme-map entry '{unused}' (OpenApiDocumentOptions.SecuritySchemeMap) matches no " +
+                           "[Authorize(AuthenticationSchemes = ...)] and no --default-security-scheme: it maps nothing.",
+                Subjects = [unused],
+            });
 
         // ── Step 3a: Schemas of the HTTP serialization context ──────────────
         var httpGenerator = schemaGenerator;
@@ -2132,7 +2149,8 @@ public sealed class OpenApiDocumentBuilder
                     Code     = ExtractionDiagnosticCodes.SecurityRequirementUndeclaredScheme,
                     Message  = $"security requirement references undeclared scheme '{reference.Reference.Id}' " +
                                $"({location}) — omitted; declare it with AddSecurityDefinition, or, when it is an authentication " +
-                               "scheme whose security definition has another name, map it with --security-scheme-map <scheme>=<definition>.",
+                               "scheme whose security definition has another name, map it with --security-scheme-map <scheme>=<definition> " +
+                               "(OpenApiDocumentOptions.SecuritySchemeMap).",
                     Location = diagnosticLocation,
                     Subjects = reference.Reference.Id is { } schemeName ? [schemeName] : [],
                 });
@@ -2150,7 +2168,11 @@ public sealed class OpenApiDocumentBuilder
     /// How the authentication schemes of <c>[Authorize]</c> name security definitions: the definition an
     /// <c>[Authorize]</c> without schemes stands for, and the definition of each mapped scheme.
     /// </summary>
-    private sealed record SecurityNaming(string? DefaultScheme, IReadOnlyDictionary<string, string>? Map);
+    private sealed record SecurityNaming(string? DefaultScheme, IReadOnlyDictionary<string, string>? Map)
+    {
+        /// <summary>The keys of <see cref="Map"/> some <c>[Authorize]</c> named.</summary>
+        public HashSet<string> UsedKeys { get; } = new(StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// Throws <see cref="OpenApiConfigurationException"/> when <paramref name="definition"/> is not a
@@ -2175,7 +2197,8 @@ public sealed class OpenApiDocumentBuilder
     /// <remarks>
     /// <list type="bullet">
     ///   <item><c>[AllowAnonymous]</c> → <c>security: []</c> (empty list, overrides global requirement).</item>
-    ///   <item><c>[Authorize(AuthenticationSchemes = "Bearer")]</c> → explicit security requirement.</item>
+    ///   <item><c>[Authorize(AuthenticationSchemes = "Bearer,Cookie")]</c> → one requirement per scheme: ASP.NET
+    ///   Core accepts the request when any of them authenticates it (OR).</item>
     ///   <item><c>[Authorize]</c> without schemes and a default scheme in <paramref name="securityNaming"/> → a
     ///   requirement of that scheme, as if it were named in <c>AuthenticationSchemes</c>.</item>
     ///   <item>A name in <c>AuthenticationSchemes</c> mapped in <paramref name="securityNaming"/> → the
@@ -2194,13 +2217,18 @@ public sealed class OpenApiDocumentBuilder
     {
         var auth = AuthorizationExtractor.Extract(actionAttrs, controllerAttrs);
 
+        string Definition(string scheme)
+        {
+            if (securityNaming.Map is null || !securityNaming.Map.TryGetValue(scheme, out var definition))
+                return scheme;
+            securityNaming.UsedKeys.Add(scheme);
+            return definition;
+        }
+
         // An authentication scheme names its security definition through the map; [Authorize] without
         // schemes authenticates with the application's default scheme.
         if (auth.AuthenticationSchemes is { Count: > 0 } named && securityNaming.Map is { Count: > 0 } map)
-            auth = auth.WithAuthenticationSchemes(named
-                .Select(name => map.TryGetValue(name, out var definition) ? definition : name)
-                .Distinct(StringComparer.Ordinal)
-                .ToList());
+            auth = auth.WithAuthenticationSchemes(named.Select(Definition).Distinct(StringComparer.Ordinal).ToList());
         else if (auth is { RequiresAuthorization: true, AuthenticationSchemes: null } && securityNaming.DefaultScheme != null)
             auth = auth.WithAuthenticationSchemes([securityNaming.DefaultScheme]);
 
@@ -2217,20 +2245,24 @@ public sealed class OpenApiDocumentBuilder
             return;
         }
 
+        // ASP.NET Core authenticates with every scheme of the policy and accepts the request when any
+        // of them succeeds: the schemes are alternatives, one requirement each.
         if (auth.AuthenticationSchemes is { Count: > 0 })
         {
-            var requirement = new OpenApiSecurityRequirement();
+            var requirements = new List<OpenApiSecurityRequirement>();
             foreach (var schemeName in auth.AuthenticationSchemes)
             {
+                var requirement = new OpenApiSecurityRequirement();
                 // The host document is required for serialization: Microsoft.OpenApi writes a
                 // requirement key only if its reference resolves against the host document's
                 // components/securitySchemes (OpenApiSecurityRequirement.CanSerializeSecurityScheme);
                 // with a null host document every key is dropped and the requirement becomes {}.
                 var reference = new OpenApiSecuritySchemeReference(schemeName, document, null);
                 requirement[reference] = [];
+                requirements.Add(requirement);
             }
 
-            operation.Security = [requirement];
+            operation.Security = requirements;
         }
 
         // If only RequiresAuthorization (no explicit schemes), we do nothing —
@@ -2240,7 +2272,7 @@ public sealed class OpenApiDocumentBuilder
 
     /// <summary>
     /// The requirements of an operation with <c>[Authorize(Roles)]</c>. The effective schemes are the
-    /// attribute's explicit <c>AuthenticationSchemes</c> (one requirement) or, without them, the
+    /// attribute's explicit <c>AuthenticationSchemes</c> (alternatives, one requirement each) or, without them, the
     /// document's requirements, copied onto the operation. Every scheme requirement is combined with
     /// every role alternative (both lists are OR, the product is written in full): a non-OAuth scheme
     /// carries the alternative's roles (3.1+), an OAuth2 / OpenID Connect scheme keeps its scopes.
@@ -2257,7 +2289,7 @@ public sealed class OpenApiDocumentBuilder
     {
         var allRoles = roleAlternatives.SelectMany(r => r).Distinct(StringComparer.Ordinal).ToList();
         IReadOnlyList<IReadOnlyList<SecurityRequirementEntry>> schemeRequirements = auth.AuthenticationSchemes is { Count: > 0 } explicitSchemes
-            ? [explicitSchemes.Select(name => new SecurityRequirementEntry(name, [])).ToList()]
+            ? explicitSchemes.Select(name => (IReadOnlyList<SecurityRequirementEntry>)[new SecurityRequirementEntry(name, [])]).ToList()
             : securityResult.GlobalRequirementEntries;
 
         if (schemeRequirements.Count == 0)

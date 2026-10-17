@@ -54,6 +54,13 @@ public static class ExtractionDiagnosticCodes
     public const string SecurityRequirementUndeclaredScheme = "security.requirement-undeclared-scheme";
 
     /// <summary>
+    /// A key of <c>OpenApiDocumentOptions.SecuritySchemeMap</c> (<c>--security-scheme-map</c>) that no
+    /// <c>[Authorize(AuthenticationSchemes = …)]</c> and no default security scheme names: the entry maps
+    /// nothing, most likely a misspelt scheme. Subjects: the key.
+    /// </summary>
+    public const string SecuritySchemeMapUnused = "security.scheme-map-unused";
+
+    /// <summary>
     /// A contact URL, license URL or terms-of-service value is not an absolute URI and is ignored.
     /// Subjects: the rejected value. Location: the field in <c>info</c>.
     /// </summary>
