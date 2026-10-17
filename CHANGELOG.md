@@ -2,7 +2,7 @@
 
 All notable changes to this project.
 
-## [Unreleased]
+## [0.19.0] - 2026-10-17
 
 - [BUGFIX] `[Authorize(AuthenticationSchemes = "A,B")]` is written as two requirements, `[{A}, {B}]`: ASP.NET Core authenticates with each scheme of the policy and accepts the request when any of them succeeds, the schemes of the controller's and the action's attributes included. It was one requirement `{A, B}`, which in OpenAPI asks for both credentials at once. With `[Authorize(Roles)]` each scheme carries the roles in its own requirement. *SDK:* a client may send either credential.
 - [FEATURE] `--default-security-scheme` also takes an authentication scheme that `--security-scheme-map` maps, and requires its definition. A map entry no `[Authorize]` names is reported (`security.scheme-map-unused`): a misspelt scheme no longer leaves its operations unmapped without a word. The advice of the undeclared-scheme warning and of `operation.security` names the library options (`SecuritySchemeMap`, `DefaultSecurityScheme`) beside the flags.
