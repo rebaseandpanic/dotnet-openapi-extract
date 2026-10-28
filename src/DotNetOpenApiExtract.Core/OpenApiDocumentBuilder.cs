@@ -837,7 +837,16 @@ public sealed class OpenApiDocumentBuilder
                                         or TypeLoadException
                                         or BadImageFormatException)
             {
-                // Skip operations whose types have unresolvable dependencies
+                // The operation is left out of the document: say so, or a live endpoint vanishes without a trace.
+                diagnostics.Report(new ExtractionDiagnostic
+                {
+                    Code     = ExtractionDiagnosticCodes.OperationSkippedUnresolvedType,
+                    Message  = $"{httpMethod.Method.ToUpperInvariant()} {path} ({OperationConflicts.DisplayName(action)}) is left out " +
+                               $"of the document: a type it uses cannot be loaded ({ex.GetType().Name}: {ex.Message}).",
+                    Location = $"{httpMethod.Method.ToUpperInvariant()} {path}",
+                    Feature  = "operation",
+                    Subjects = [OperationConflicts.DisplayName(action), ex.GetType().FullName!],
+                });
             }
         }
 

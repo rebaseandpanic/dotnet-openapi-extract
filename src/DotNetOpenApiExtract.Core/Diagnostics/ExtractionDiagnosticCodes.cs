@@ -124,6 +124,13 @@ public static class ExtractionDiagnosticCodes
     public const string OperationPathMethodConflict = "operation.path-method-conflict";
 
     /// <summary>
+    /// A type the operation uses (a parameter, a response, an attribute) cannot be loaded — a missing
+    /// dependency or a broken assembly — and the operation is left out of the document. Location:
+    /// <c>METHOD /path</c>. Subjects: the action (<c>Controller.Method</c>), then the exception type.
+    /// </summary>
+    public const string OperationSkippedUnresolvedType = "operation.skipped-unresolved-type";
+
+    /// <summary>
     /// For a 3.0/3.1 target, an operation whose method has no Path Item field there (QUERY, or a
     /// non-standard method) is written whole into <c>x-oai-additionalOperations</c>, invisible to
     /// tools of that version. One per operation. Location: the JSON pointer of the moved operation.

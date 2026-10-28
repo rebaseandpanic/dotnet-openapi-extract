@@ -2,6 +2,11 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [BUGFIX] An operation is no longer left out of the document when the application ships a package build of an assembly the tool's runtime also has under the same identity (`System.Text.Json` 10.0.0 from NuGet beside the shared framework's): loading a type that refers to it, such as `ValidationProblemDetails` in `[ProducesResponseType]`, failed with "has already been loaded", and the whole operation was dropped. The application's file is used for each assembly identity; different versions of one assembly are kept, and native DLLs in the application's directory are passed over.
+- [FEATURE] An operation that uses a type which cannot be loaded (a missing dependency, a broken assembly) is still left out of the document, but now with the warning `operation.skipped-unresolved-type`: the operation (`METHOD /path`), the action and the exception. It was dropped without a word, so a live endpoint could vanish from the document unnoticed.
+
 ## [0.19.0] - 2026-10-17
 
 - [BUGFIX] `[Authorize(AuthenticationSchemes = "A,B")]` is written as two requirements, `[{A}, {B}]`: ASP.NET Core authenticates with each scheme of the policy and accepts the request when any of them succeeds, the schemes of the controller's and the action's attributes included. It was one requirement `{A, B}`, which in OpenAPI asks for both credentials at once. With `[Authorize(Roles)]` each scheme carries the roles in its own requirement. *SDK:* a client may send either credential.
