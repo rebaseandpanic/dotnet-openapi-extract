@@ -2,7 +2,7 @@
 
 All notable changes to this project.
 
-## [Unreleased]
+## [0.20.0] - 2026-10-28
 
 - [BUGFIX] An operation is no longer left out of the document when the application ships a package build of an assembly the tool's runtime also has under the same identity (`System.Text.Json` 10.0.0 from NuGet beside the shared framework's): loading a type that refers to it, such as `ValidationProblemDetails` in `[ProducesResponseType]`, failed with "has already been loaded", and the whole operation was dropped. The application's file is used for each assembly identity; different versions of one assembly are kept, and native DLLs or files the tool cannot read in the application's directory are passed over.
 - [FEATURE] An operation that uses a type which cannot be loaded (a missing dependency, a broken assembly) is still left out of the document, but now with the warning `operation.skipped-unresolved-type`: the operation (`METHOD /path`), the action and the exception; a path left without operations is not written. It was dropped without a word, so a live endpoint could vanish from the document unnoticed.
