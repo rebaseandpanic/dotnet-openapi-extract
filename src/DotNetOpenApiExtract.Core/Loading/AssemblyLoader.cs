@@ -55,7 +55,25 @@ public sealed class AssemblyLoader : IDisposable
                 paths.Add(dll);
         }
 
-        var resolver = new PathAssemblyResolver(paths);
+        // MetadataLoadContext cannot load two different files with the same assembly
+        // identity. An application's package and the tool's shared runtime often
+        // contain different servicing builds of System.Text.Json with one identity.
+        // Preserve app-first precedence, while keeping distinct assembly versions.
+        var identities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            try
+            {
+                var identity = AssemblyName.GetAssemblyName(path).FullName;
+                if (identity is not null)
+                    identities.TryAdd(identity, path);
+            }
+            catch (BadImageFormatException)
+            {
+                // Native application dependencies are not metadata assemblies.
+            }
+        }
+        var resolver = new PathAssemblyResolver(identities.Values);
         _context = new MetadataLoadContext(resolver);
         _assembly = _context.LoadFromAssemblyPath(assemblyPath);
 

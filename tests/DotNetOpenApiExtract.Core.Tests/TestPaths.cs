@@ -9,6 +9,8 @@ internal static class TestPaths
 
     public static string SolutionRoot => _solutionRoot.Value;
 
+    public static string PackageJsonApiDll => FindFixtureDll("PackageJsonApi");
+
     public static string SampleApiDll        => FindFixtureDll("SampleApi");
 
     public static string SampleApiXml        => Path.ChangeExtension(SampleApiDll, ".xml");

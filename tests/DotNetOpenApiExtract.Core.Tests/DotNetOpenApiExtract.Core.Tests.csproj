@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\DotNetOpenApiExtract.Cli\DotNetOpenApiExtract.Cli.csproj" ReferenceOutputAssembly="false" />
     <!-- Referenced as an assembly: tests serialize its types with the real System.Text.Json and run its results. -->
     <ProjectReference Include="..\TestAssemblies\ModernApi\ModernApi.csproj" />
+    <ProjectReference Include="..\TestAssemblies\PackageJsonApi\PackageJsonApi.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
