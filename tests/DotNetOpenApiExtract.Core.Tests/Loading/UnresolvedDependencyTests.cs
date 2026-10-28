@@ -32,6 +32,7 @@ public sealed class UnresolvedDependencyTests
         if (removeContracts)
         {
             operations.Should().BeEmpty();
+            document.Paths.Should().NotContainKey("/envelope");
             skipped.Should().ContainSingle();
             skipped[0].Location.Should().Be("GET /envelope");
             skipped[0].Subjects.Should().Equal("PackageTypesApi.Controllers.EnvelopeController.Get", "System.IO.FileNotFoundException");

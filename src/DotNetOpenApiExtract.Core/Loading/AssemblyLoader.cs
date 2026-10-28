@@ -72,6 +72,11 @@ public sealed class AssemblyLoader : IDisposable
             {
                 // Native application dependencies are not metadata assemblies.
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A file that cannot be read (removed, locked, no permission) is skipped like a native
+                // one: a dependency the application actually uses still fails where it is resolved.
+            }
         }
         var resolver = new PathAssemblyResolver(identities.Values);
         _context = new MetadataLoadContext(resolver);

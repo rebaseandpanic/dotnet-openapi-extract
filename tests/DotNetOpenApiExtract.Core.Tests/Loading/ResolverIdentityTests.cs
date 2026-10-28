@@ -9,15 +9,23 @@ namespace DotNetOpenApiExtract.Core.Tests.Loading;
 public sealed class ResolverIdentityTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void A_ValidationProblemDetails_Response_Does_Not_Remove_The_Operation(bool nativeDependency)
+    [InlineData(null)]
+    [InlineData("native")]
+    [InlineData("unreadable")]
+    public void ValidationProblemDetailsResponse_KeepsTheOperation(string? extraDll)
     {
         using var directory = new TempDirectory();
         foreach (var file in Directory.GetFiles(Path.GetDirectoryName(TestPaths.PackageJsonApiDll)!))
             File.Copy(file, Path.Combine(directory.Path, Path.GetFileName(file)));
-        if (nativeDependency)
+        if (extraDll == "native")
             File.WriteAllBytes(Path.Combine(directory.Path, "native-library.dll"), [0, 1, 2, 3]);
+        if (extraDll == "unreadable")
+        {
+            // A DLL the application does not use and the tool cannot open.
+            var unreadable = Path.Combine(directory.Path, "unreadable-library.dll");
+            File.Copy(TestPaths.PackageJsonApiDll, unreadable);
+            File.SetUnixFileMode(unreadable, UnixFileMode.None);
+        }
         var document = OpenApiDocumentBuilder.Build(new OpenApiDocumentOptions
         {
             AssemblyPath = Path.Combine(directory.Path, "PackageJsonApi.dll"),

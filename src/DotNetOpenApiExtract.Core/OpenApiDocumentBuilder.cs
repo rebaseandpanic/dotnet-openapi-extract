@@ -847,6 +847,10 @@ public sealed class OpenApiDocumentBuilder
                     Feature  = "operation",
                     Subjects = [OperationConflicts.DisplayName(action), ex.GetType().FullName!],
                 });
+
+                // A path whose only operations were left out is not written as an empty path item.
+                if (pathItem.Operations is not { Count: > 0 })
+                    document.Paths.Remove(path);
             }
         }
 
