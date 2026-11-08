@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [0.21.1] - 2026-11-08
+
+- [SECURITY] The release workflow publishes to NuGet through trusted publishing: nuget.org exchanges the workflow's GitHub OIDC token for a short-lived API key, so no long-lived key can expire. Version 0.21.0 was tagged but never reached NuGet, because the stored key had expired; 0.21.1 is the first published version with its changes.
+
 ## [0.21.0] - 2026-11-08
 
 - [BUGFIX] The discriminator property the generator adds to a polymorphic variant (`{D}As{B}`, from `[JsonPolymorphic]` / `[JsonDerivedType]`) and to the base branch of a concrete base that reads unrecognized values has a description: the value that selects the schema, or the values that do not. It had none, so `schema.property-description` reported every variant, and nothing in the code could describe a property that has no CLR member. The rule still reports the application's own properties without documentation. *SDK:* the discriminator properties get a description; their schemas are otherwise unchanged.
