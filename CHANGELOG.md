@@ -2,6 +2,10 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [BUGFIX] The discriminator property the generator adds to a polymorphic variant (`{D}As{B}`, from `[JsonPolymorphic]` / `[JsonDerivedType]`) and to the base branch of a concrete base that reads unrecognized values has a description: the value that selects the schema, or the values that do not. It had none, so `schema.property-description` reported every variant, and nothing in the code could describe a property that has no CLR member. The rule still reports the application's own properties without documentation. *SDK:* the discriminator properties get a description; their schemas are otherwise unchanged.
+
 ## [0.20.0] - 2026-10-28
 
 - [BUGFIX] An operation is no longer left out of the document when the application ships a package build of an assembly the tool's runtime also has under the same identity (`System.Text.Json` 10.0.0 from NuGet beside the shared framework's): loading a type that refers to it, such as `ValidationProblemDetails` in `[ProducesResponseType]`, failed with "has already been loaded", and the whole operation was dropped. The application's file is used for each assembly identity; different versions of one assembly are kept, and native DLLs or files the tool cannot read in the application's directory are passed over.

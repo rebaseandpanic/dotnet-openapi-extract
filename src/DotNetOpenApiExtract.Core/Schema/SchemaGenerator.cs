@@ -1309,6 +1309,8 @@ public sealed class SchemaGenerator
     /// </summary>
     private static OpenApiSchema UnmappedDiscriminatorSchema(IReadOnlyList<object> mappedValues) => new()
     {
+        Description = "Type discriminator: absent, or a value other than " +
+                      $"{string.Join(", ", mappedValues.Select(v => DiscriminatorValueNode(v).ToJsonString()))}, selects this schema.",
         AnyOf =
         [
             new OpenApiSchema { Type = JsonSchemaType.String },
@@ -1348,8 +1350,8 @@ public sealed class SchemaGenerator
     internal void AttachLedger(LossLedger ledger) => _ledger = ledger;
 
     /// <summary>
-    /// The derived type's properties with the discriminator property first, required and limited
-    /// to the variant's value. A derived property serialized under the discriminator's name is a
+    /// The derived type's properties with the discriminator property first, required, limited
+    /// to the variant's value and described by it. A derived property serialized under the discriminator's name is a
     /// contract System.Text.Json rejects, so it is an extraction error.
     /// </summary>
     private void PopulateVariantSchema(OpenApiSchema variant, DerivedTypeInfo derived, string propertyName, string variantId)
@@ -1370,9 +1372,12 @@ public sealed class SchemaGenerator
                 member);
         }
 
+        // The property has no CLR member whose documentation could describe it: the generator writes the description.
+        var discriminator = VersionedSchemaForms.SingleValue(derived.DiscriminatorValue!, _options.OpenApiVersion);
+        discriminator.Description = $"Type discriminator: {DiscriminatorValueNode(derived.DiscriminatorValue!).ToJsonString()} selects this schema.";
         var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
         {
-            [propertyName] = VersionedSchemaForms.SingleValue(derived.DiscriminatorValue!, _options.OpenApiVersion),
+            [propertyName] = discriminator,
         };
         foreach (var (name, schema) in variant.Properties ?? new Dictionary<string, IOpenApiSchema>())
             properties[name] = schema;
