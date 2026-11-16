@@ -76,6 +76,43 @@ public static class RouteBuilder
         return formatted;
     }
 
+    /// <summary>
+    /// The names of the API version route parameters of the combined template — the parameters with the
+    /// <c>apiVersion</c> route constraint of <c>Asp.Versioning</c> (<c>{version:apiVersion}</c>), compared
+    /// ignoring case as ASP.NET Core does — in template order. The arguments are those of
+    /// <see cref="BuildPath"/>.
+    /// </summary>
+    public static IReadOnlyList<string> ApiVersionParameterNames(
+        string? controllerRoute,
+        string? actionRoute,
+        string controllerName,
+        string actionName)
+    {
+        var template = ResolveTokens(
+            CombineTemplates(NullIfEmpty(controllerRoute), NullIfEmpty(actionRoute)), controllerName, actionName);
+
+        var names = new List<string>();
+        foreach (Match match in InlineParameterRegex.Matches(template))
+        {
+            var constraints = match.Groups[3].Value;
+            if (constraints.Length == 0)
+                continue;
+
+            // ":apiVersion", ":apiVersion:minlength(1)", ":apiVersion?" (optional), ":apiVersion=1.0" (default)
+            // → the constraint names, without arguments, the optional marker or the default value.
+            var hasVersionConstraint = constraints[1..].Split(':')
+                .Select(c => c.Split('(')[0].Split('=')[0].TrimEnd('?'))
+                .Any(c => string.Equals(c, ApiVersionConstraint, StringComparison.OrdinalIgnoreCase));
+            if (hasVersionConstraint)
+                names.Add(match.Groups[2].Value);
+        }
+
+        return names;
+    }
+
+    /// <summary>The route constraint name <c>Asp.Versioning</c> registers for API version parameters.</summary>
+    private const string ApiVersionConstraint = "apiVersion";
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------

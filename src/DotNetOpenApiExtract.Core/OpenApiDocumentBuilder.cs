@@ -107,6 +107,36 @@ public sealed class OpenApiDocumentOptions
     public IReadOnlyList<string>? ExcludePathPrefixes { get; init; }
 
     /// <summary>
+    /// The API version (<c>Asp.Versioning</c>) the document describes, as in <c>[ApiVersion]</c>:
+    /// <c>major[.minor][-status]</c>, compared as <c>Asp.Versioning</c> compares versions (<c>1</c> is
+    /// <c>1.0</c>, the status ignores case). Operations that declare other versions are left out;
+    /// version-neutral operations and operations that declare no version stay. When the version is
+    /// substituted into the URL, it is this one. <see langword="null"/>: every operation; the version is
+    /// substituted only when the versioned operations declare exactly one.
+    /// </summary>
+    /// <exception cref="OpenApiConfigurationException">
+    /// Thrown by the build when the value is not a version of that form, or no operation declares it.
+    /// </exception>
+    public string? ApiVersion { get; init; }
+
+    /// <summary>
+    /// Whether the API version is substituted into the URL, as <c>ApiExplorerOptions.SubstituteApiVersionInUrl</c>
+    /// of <c>Asp.Versioning</c> does: <c>api/v{version:apiVersion}/items</c> becomes <c>/api/v1/items</c>
+    /// without a <c>version</c> parameter. <see langword="null"/> (default): as the source code sets it —
+    /// the entry point and the project methods it calls; not set there, not substituted. Without the
+    /// substitution, an API version route parameter is a required path parameter.
+    /// </summary>
+    public bool? SubstituteApiVersionInUrl { get; init; }
+
+    /// <summary>
+    /// The format the substituted API version is written in, as <c>ApiExplorerOptions.SubstitutionFormat</c>
+    /// (for example <c>VVV</c>, <c>VV</c>, <c>'v'V</c>). <see langword="null"/> (default): as the source
+    /// code sets it, else <c>VVV</c> (the default of <c>Asp.Versioning</c>: major, the minor version when
+    /// it is not 0, the status).
+    /// </summary>
+    public string? ApiVersionSubstitutionFormat { get; init; }
+
+    /// <summary>
     /// Optional path to a specific source file (e.g. the entry point).
     /// Reserved for future use; currently not consumed by the builder.
     /// </summary>
@@ -348,7 +378,8 @@ public sealed class OpenApiDocumentBuilder
         IReadOnlyList<ControllerInfo> Controllers,
         IReadOnlyList<ActionInfo> Actions,
         IReadOnlyDictionary<string, Type> SchemaTypes,
-        SourceAnalysisContext SourceContext);
+        SourceAnalysisContext SourceContext,
+        ApiVersionRouting Routing);
 
     /// <summary>
     /// Builds a complete OpenAPI document and runs validation.
@@ -388,7 +419,7 @@ public sealed class OpenApiDocumentBuilder
         // ActionByOperationKey: "METHOD /path" → (Controller, Action)
         // Bound to the same winner the document uses for each path and method.
         var actionByKey = new Dictionary<string, (ControllerInfo, ActionInfo)>(StringComparer.Ordinal);
-        foreach (var group in OperationConflicts.Group(core.Actions))
+        foreach (var group in OperationConflicts.Group(core.Actions, core.Routing.PathOf))
         {
             var key = $"{group.HttpMethod} {group.Path}";
             actionByKey.TryAdd(key, (group.Winner.Controller, group.Winner));
@@ -576,7 +607,11 @@ public sealed class OpenApiDocumentBuilder
 
         // ── Step 1: Discovery ───────────────────────────────────────────────
         var controllers = ControllerDiscovery.DiscoverControllers(loader.Assembly);
-        var actions = ActionDiscovery.DiscoverActions(controllers, diagnostics.Report);
+        // The API versions decide which actions the document describes and how their paths are written.
+        var explorerOptions = ApiExplorerOptionsExtractor.Extract(sourceContext, diagnostics.Report);
+        var versionRouting = ApiVersionRouting.Create(
+            ActionDiscovery.DiscoverActions(controllers, diagnostics.Report), options, explorerOptions, diagnostics);
+        var actions = versionRouting.Actions;
 
         // ── Step 2: Initialise document skeleton ────────────────────────────
 
@@ -794,7 +829,7 @@ public sealed class OpenApiDocumentBuilder
 
         // One operation per path and method: the winner by the ordinal key, independent of
         // discovery order; a conflict is reported once, naming every action involved.
-        foreach (var group in OperationConflicts.Group(actions))
+        foreach (var group in OperationConflicts.Group(actions, versionRouting.PathOf))
         {
             var action = group.Winner;
             var path = group.Path;
@@ -825,6 +860,7 @@ public sealed class OpenApiDocumentBuilder
 
                 var operation = BuildOperation(action, actionAttrs, controllerAttrs, docResolver, schemaGenerator, securityResult, securityNaming, document, ledger, httpSlots);
                 ApplyApiVersionExtension(operation, actionAttrs, controllerAttrs);
+                ApplyApiVersionParameters(operation, versionRouting, action);
                 ApplyRateLimitingAndCaching(operation, actionAttrs, controllerAttrs);
                 pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
                 pathItem.Operations[httpMethod] = operation;
@@ -1018,7 +1054,7 @@ public sealed class OpenApiDocumentBuilder
                 schemaTypes.TryAdd(id, type);
         }
 
-        return new BuildCoreResult(document, controllers, actions, schemaTypes, sourceContext);
+        return new BuildCoreResult(document, controllers, actions, schemaTypes, sourceContext, versionRouting);
     }
 
     /// <summary>
@@ -1421,7 +1457,7 @@ public sealed class OpenApiDocumentBuilder
                 // Emit a Content section when there is a typed body, or when the content types
                 // were declared explicitly via [Produces] (e.g. text/event-stream with no body).
                 apiResponse.Content = BuildResponseContent(
-                    resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots,
+                    statusKey, resp.ContentTypes, resp.BodyType, schemaGenerator, ledger, operation, httpSlots,
                     httpContext: resp.BodyFromHttpResult, bodyPositions: resp.BodyPositions);
             }
 
@@ -1524,23 +1560,6 @@ public sealed class OpenApiDocumentBuilder
         });
     }
 
-    /// <summary>Sequential media types whose items are JSON texts (spec 3.2 §4.14.3.1, as .NET formatters produce them).</summary>
-    private static readonly HashSet<string> SequentialJsonMediaTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/jsonl",
-        "application/x-ndjson",
-        "application/json-seq",
-    };
-
-    private const string EventStreamMediaType = "text/event-stream";
-
-    /// <summary>The media type without parameters (<c>application/x-ndjson; charset=utf-8</c> → <c>application/x-ndjson</c>).</summary>
-    private static string BaseMediaType(string contentType)
-    {
-        var separator = contentType.IndexOf(';');
-        return (separator < 0 ? contentType : contentType[..separator]).Trim();
-    }
-
     /// <summary>
     /// The content of one response, chosen per media type. <c>ServerSentEventsResult&lt;T&gt;</c> gets
     /// <c>text/event-stream</c> with the event schema as <c>itemSchema</c>, filled in later through
@@ -1548,12 +1567,19 @@ public sealed class OpenApiDocumentBuilder
     /// sequence (<c>IAsyncEnumerable&lt;T&gt;</c>): a sequential JSON media type gets
     /// <c>itemSchema: T</c> and no <c>schema</c>; <c>text/event-stream</c> gets no schema, because
     /// standard MVC has no formatter for it (warning on the operation); any other media type gets
-    /// the body schema (an array of <c>T</c>). Other body types get the body schema everywhere.
+    /// the body schema (an array of <c>T</c>). Any other body type declared with a sequential JSON
+    /// media type is the type of one item (<c>itemSchema</c>), unless its schema is an array or a file:
+    /// a <c>schema</c> of a sequential media type describes the whole content, read as an array of the
+    /// items (spec 3.2 §4.14.3), so an array schema is that whole content and stays <c>schema</c>. Other
+    /// media types get the body schema. A sequential JSON media type of a response without a body type
+    /// is written without a schema, with a warning on the operation: the body is a stream, but its
+    /// items are not described.
     /// <paramref name="bodyPositions"/> are the annotations of the body type in the action's signature:
     /// the body schema and the item schema mark the elements and dictionary values annotated nullable
     /// there; <see langword="null"/> (a body type from an attribute) marks none.
     /// </summary>
     private static Dictionary<string, IOpenApiMediaType> BuildResponseContent(
+        string statusKey,
         IEnumerable<string> contentTypes,
         Type? bodyType,
         SchemaGenerator schemaGenerator,
@@ -1581,7 +1607,7 @@ public sealed class OpenApiDocumentBuilder
         if (bodyType != null && httpSlots != null && SseEventSchema.TryGetItemType(bodyType, out var sseItemType))
         {
             var eventStream = new OpenApiMediaType();
-            content[EventStreamMediaType] = eventStream;
+            content[SequentialMediaTypes.EventStream] = eventStream;
             httpSlots.Add(httpGenerator => eventStream.ItemSchema = SseEventSchema.Create(sseItemType, httpGenerator));
             return content;
         }
@@ -1596,17 +1622,17 @@ public sealed class OpenApiDocumentBuilder
             elementPositions = bodyPositions?.Implemented(sequence).Argument(0);
         }
         IOpenApiSchema? bodySchema = null;
+        var undescribedSequences = new List<string>();
 
         foreach (var contentType in contentTypes)
         {
-            var mediaType = BaseMediaType(contentType);
-            if (isSequence && SequentialJsonMediaTypes.Contains(mediaType))
+            if (isSequence && SequentialMediaTypes.HasJsonItems(contentType))
             {
                 var sequential = new OpenApiMediaType();
                 content[contentType] = sequential;
                 WithGenerator(generator => sequential.ItemSchema = generator.GenerateElementSchema(elementType!, elementPositions));
             }
-            else if (isSequence && string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
+            else if (isSequence && SequentialMediaTypes.IsEventStream(contentType))
             {
                 content[contentType] = new OpenApiMediaType();
                 ledger.Add(new PendingLoss
@@ -1615,15 +1641,29 @@ public sealed class OpenApiDocumentBuilder
                     Code     = ExtractionDiagnosticCodes.ResponseEventStreamWithoutFormatter,
                     Anchor   = new LossAnchor.Operation(operation),
                     Message  = httpContext
-                        ? $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
+                        ? $"IAsyncEnumerable<{elementType!.Name}> response declared as {SequentialMediaTypes.EventStream}: " +
                           "a JSON result writes the sequence as a JSON array, not as server-sent events; " +
                           "ServerSentEventsResult<T> is needed. The media type is written without a schema."
-                        : $"IAsyncEnumerable<{elementType!.Name}> response declared as {EventStreamMediaType}: " +
+                        : $"IAsyncEnumerable<{elementType!.Name}> response declared as {SequentialMediaTypes.EventStream}: " +
                           "standard MVC has no server-sent events output formatter; a custom formatter or " +
                           "ServerSentEventsResult<T> is needed. The media type is written without a schema.",
                     Feature  = "mediaType.schema",
                     Action   = DiagnosticAction.Omitted,
                     Subjects = [elementType.FullName ?? elementType.Name],
+                });
+            }
+            else if (bodyType != null && SequentialMediaTypes.HasJsonItems(contentType))
+            {
+                // The declared type is one item of the stream, unless its schema is the whole content.
+                var sequential = new OpenApiMediaType();
+                content[contentType] = sequential;
+                WithGenerator(generator =>
+                {
+                    var schema = bodySchema ??= generator.GenerateSchema(bodyType, bodyPositions);
+                    if (FileTypes.IsFile(bodyType) || IsArraySchema(schema))
+                        sequential.Schema = schema;
+                    else
+                        sequential.ItemSchema = schema;
                 });
             }
             else
@@ -1634,15 +1674,87 @@ public sealed class OpenApiDocumentBuilder
                 {
                     WithGenerator(generator => plain.Schema = bodySchema ??= generator.GenerateSchema(bodyType, bodyPositions));
                 }
+                else if (SequentialMediaTypes.HasJsonItems(contentType))
+                {
+                    undescribedSequences.Add(contentType);
+                }
             }
         }
 
+        if (undescribedSequences.Count > 0)
+            RecordUndescribedSequence(ledger, operation, statusKey, undescribedSequences);
+
         return content;
+    }
+
+    /// <summary>Whether <paramref name="schema"/> is an inline schema of type <c>array</c>.</summary>
+    private static bool IsArraySchema(IOpenApiSchema schema) =>
+        schema is OpenApiSchema { Type: { } type } && type.HasFlag(JsonSchemaType.Array);
+
+    /// <summary>
+    /// One warning on the operation for the sequential JSON media types of the response
+    /// <paramref name="statusKey"/> that have no body type: they are written without a schema.
+    /// </summary>
+    private static void RecordUndescribedSequence(
+        LossLedger ledger, OpenApiOperation operation, string statusKey, IReadOnlyList<string> mediaTypes)
+    {
+        var listed = string.Join(", ", mediaTypes);
+        ledger.Add(new PendingLoss
+        {
+            Class    = LossClass.Source,
+            Code     = ExtractionDiagnosticCodes.ResponseSequenceItemTypeUnknown,
+            Anchor   = new LossAnchor.Operation(operation),
+            Message  = $"response {statusKey} is declared as {listed} without a type: the media type is written " +
+                       "without a schema, so the items of the stream are not described. Declare the item type with " +
+                       $"[ProducesResponseType(typeof(T), {statusKey}, \"{mediaTypes[0]}\")] or return IAsyncEnumerable<T>.",
+            Feature  = "mediaType.itemSchema",
+            Action   = DiagnosticAction.Omitted,
+            Subjects = [statusKey, .. mediaTypes],
+        });
     }
 
     // =========================================================================
     // API versioning
     // =========================================================================
+
+    /// <summary>
+    /// Puts the API version route parameters of <paramref name="action"/> in step with its path: a
+    /// parameter the version replaced is removed (as <c>Asp.Versioning</c> removes it), a parameter that
+    /// stays in the path is a required string path parameter — the route binds it, not a parameter of the
+    /// action — unless the action already declares it.
+    /// </summary>
+    private static void ApplyApiVersionParameters(OpenApiOperation operation, ApiVersionRouting routing, ActionInfo action)
+    {
+        static bool IsPathParameter(IOpenApiParameter parameter, string name) =>
+            parameter.In == OpenApiParameterLocation.Path
+            && string.Equals(parameter.Name, name, StringComparison.OrdinalIgnoreCase);
+
+        var substituted = routing.SubstitutedParametersOf(action);
+        if (substituted.Count > 0 && operation.Parameters != null)
+        {
+            foreach (var name in substituted)
+            {
+                foreach (var parameter in operation.Parameters.Where(p => IsPathParameter(p, name)).ToList())
+                    operation.Parameters.Remove(parameter);
+            }
+        }
+
+        foreach (var name in routing.VersionParametersOf(action))
+        {
+            if (operation.Parameters?.Any(p => IsPathParameter(p, name)) == true)
+                continue;
+
+            operation.Parameters ??= new List<IOpenApiParameter>();
+            operation.Parameters.Add(new OpenApiParameter
+            {
+                Name        = name,
+                In          = OpenApiParameterLocation.Path,
+                Required    = true,
+                Description = routing.VersionParameterDescription,
+                Schema      = new OpenApiSchema { Type = JsonSchemaType.String },
+            });
+        }
+    }
 
     /// <summary>
     /// Adds the <c>x-api-version</c> extension to an operation based on
@@ -2598,7 +2710,7 @@ public sealed class OpenApiDocumentBuilder
                         if (bodyTypes.TryGetValue(statusKey, out var bodyResponse))
                         {
                             response.Content = BuildResponseContent(
-                                globalMediaTypes.ProducesContentTypes, bodyResponse.BodyType, schemaGenerator, ledger, operation,
+                                statusKey, globalMediaTypes.ProducesContentTypes, bodyResponse.BodyType, schemaGenerator, ledger, operation,
                                 httpSlots: null, bodyPositions: bodyResponse.BodyPositions);
                             continue;
                         }

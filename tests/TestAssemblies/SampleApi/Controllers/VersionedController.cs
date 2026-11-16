@@ -150,3 +150,17 @@ public class VersioningNeutralOverridesVersionController : ControllerBase
     [ApiVersion("1.0")]
     public IActionResult Get() => Ok();
 }
+
+/// <summary>
+/// A prerelease version whose status has a dot ([ApiVersion("1.0-preview.1")]), with the API version
+/// route parameter optional (<c>{version:apiVersion?}</c>).
+/// </summary>
+[ApiController]
+[Route("api/v{version:apiVersion?}/preview")]
+[ApiVersion("1.0-preview.1")]
+public class VersioningPreviewController : ControllerBase
+{
+    /// <summary>Preview action.</summary>
+    [HttpGet]
+    public IActionResult Get() => Ok();
+}

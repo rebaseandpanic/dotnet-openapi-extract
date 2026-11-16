@@ -174,6 +174,61 @@ public static class ExtractionDiagnosticCodes
     public const string ResponseEventStreamWithoutFormatter = "response.event-stream-without-formatter";
 
     /// <summary>
+    /// A response declares a sequential JSON media type (<c>application/jsonl</c>,
+    /// <c>application/x-ndjson</c>, <c>application/json-seq</c>) but no type — <c>[Produces]</c> with
+    /// <c>[ProducesResponseType(200)]</c> on an action that writes the stream itself: the media type is
+    /// written without a schema, and the items of the stream are not described. Declaring the item type
+    /// (<c>[ProducesResponseType(typeof(T), 200, "application/x-ndjson")]</c>) or returning
+    /// <c>IAsyncEnumerable&lt;T&gt;</c> gives the item schema. One per response. In every version.
+    /// Location: the operation. Subjects: the status code, then the media types.
+    /// </summary>
+    public const string ResponseSequenceItemTypeUnknown = "response.sequence-item-type-unknown";
+
+    /// <summary>
+    /// <c>ApiExplorerOptions.SubstituteApiVersionInUrl</c> or <c>SubstitutionFormat</c> of
+    /// <c>Asp.Versioning</c> is set to a value that is not a constant: the setting is left unknown
+    /// (<c>--substitute-api-version-in-url</c> / <c>--api-version-format</c> set it). Location in
+    /// <see cref="ExtractionDiagnostic.SourceLocation"/>: the assignment. Subjects: the setting.
+    /// </summary>
+    public const string ApiVersionSettingNotStatic = "api-version.setting-not-static";
+
+    /// <summary>
+    /// <c>ApiExplorerOptions.SubstituteApiVersionInUrl</c> or <c>SubstitutionFormat</c> of
+    /// <c>Asp.Versioning</c> is assigned in code that runs only under a condition the tool does not
+    /// evaluate (a branch of <c>if</c> / <c>switch</c> / <c>?:</c>, a loop, a <c>catch</c>, the right
+    /// operand of <c>&amp;&amp;</c> / <c>||</c> / <c>??</c>): the setting is left unknown from that point,
+    /// until an unconditional assignment after it (<c>--substitute-api-version-in-url</c> /
+    /// <c>--api-version-format</c> set it). Location in <see cref="ExtractionDiagnostic.SourceLocation"/>:
+    /// the assignment. Subjects: the setting.
+    /// </summary>
+    public const string ApiVersionSettingConditional = "api-version.setting-conditional";
+
+    /// <summary>
+    /// The API version is substituted into the URL (<c>SubstituteApiVersionInUrl</c>), but the versioned
+    /// operations declare several API versions and <c>--api-version</c> does not choose one: a document
+    /// describes one version, so the route parameter is kept as a path parameter and the paths keep it.
+    /// One per document. Subjects: the versions, in order.
+    /// </summary>
+    public const string ApiVersionSeveralVersions = "api-version.several-versions";
+
+    /// <summary>
+    /// The API version cannot be substituted into the URL: the substitution format uses a specifier
+    /// the tool does not compute (the group version specifiers <c>F</c>, <c>G</c>, <c>M</c>, <c>d</c>,
+    /// <c>y</c>, or an unsupported run such as <c>VVVVV</c>), or the version is a group (date) version.
+    /// The route parameter is kept as a path parameter. One per document. Subjects: the format, then the
+    /// version.
+    /// </summary>
+    public const string ApiVersionSubstitutionNotComputed = "api-version.substitution-not-computed";
+
+    /// <summary>
+    /// A route has an API version parameter (<c>{version:apiVersion}</c>) and the version is substituted
+    /// into the URL, but the operation declares no <c>[ApiVersion]</c> / <c>[MapToApiVersion]</c>: its
+    /// version is the application's default API version, which the tool does not read, so the parameter
+    /// is kept. Location: the operation. Subjects: the action.
+    /// </summary>
+    public const string ApiVersionOperationUnversioned = "api-version.operation-unversioned";
+
+    /// <summary>
     /// The MVC and HTTP JSON options differ in what shapes a schema (naming policy, ignore condition,
     /// number handling, converters) and some CLR types are used in both contexts: each context gets
     /// its own schema of such a type. One per document. Subjects: the full names of those types.

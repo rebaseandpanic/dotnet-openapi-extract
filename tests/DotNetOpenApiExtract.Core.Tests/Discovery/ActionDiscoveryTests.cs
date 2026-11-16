@@ -280,9 +280,10 @@ public class ActionDiscoveryTests : IDisposable
         // EventStream (Bug #4 fixture): Subscribe — 1
         // RefProperty (Bug #3 fixture): Get — 1
         // FrameworkTypeRef (framework XML doc test): GetResource — 1
-        // Total: 57
+        // VersioningPreview (dotted status, optional version parameter): Get — 1
+        // Total: 58
         var allActions = ActionDiscovery.DiscoverActions(_controllers);
-        allActions.Should().HaveCount(57);
+        allActions.Should().HaveCount(58);
     }
 
     // -------------------------------------------------------------------------

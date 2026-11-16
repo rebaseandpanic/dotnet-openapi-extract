@@ -65,6 +65,13 @@ internal static class TestPaths
     public static string SwaggerSetupApiDll  => FindFixtureDll("SwaggerSetupApi");
 
     /// <summary>
+    /// Path to the VersionedApi test fixture DLL: Asp.Versioning (the real package) with
+    /// <c>SubstituteApiVersionInUrl</c> and <c>SubstitutionFormat</c> set outside the entry point — in a
+    /// static method of another class that an extension method called from Program.cs calls.
+    /// </summary>
+    public static string VersionedApiDll     => FindFixtureDll("VersionedApi");
+
+    /// <summary>
     /// Path to the PackageTypesApi test fixture DLL: a component of its own, one of a library it references
     /// as a project (PackageTypesContracts) and one of a NuGet package without its XML documentation in bin.
     /// </summary>

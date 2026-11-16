@@ -25,19 +25,17 @@ internal static class OperationConflicts
     /// Groups <paramref name="actions"/> by path and method (methods compared case-insensitively,
     /// like <see cref="System.Net.Http.HttpMethod"/>). Groups keep the order in which their first
     /// action was discovered, so documents without conflicts keep their path order.
+    /// <paramref name="pathOf"/> gives the OpenAPI path of an action (its route, with the API version
+    /// substituted when it is).
     /// </summary>
-    public static IReadOnlyList<OperationGroup> Group(IEnumerable<ActionInfo> actions)
+    public static IReadOnlyList<OperationGroup> Group(IEnumerable<ActionInfo> actions, Func<ActionInfo, string> pathOf)
     {
         var groups = new List<(string Path, string Method, List<ActionInfo> Actions)>();
         var index = new Dictionary<(string, string), int>();
 
         foreach (var action in actions)
         {
-            var path = RouteBuilder.BuildPath(
-                action.Controller.RouteTemplate,
-                action.RouteTemplate,
-                action.Controller.Type.Name,
-                action.Name);
+            var path = pathOf(action);
             var key = (path, action.HttpMethod.ToUpperInvariant());
 
             if (!index.TryGetValue(key, out var position))

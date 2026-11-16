@@ -96,7 +96,8 @@ public class ControllerDiscoveryTests : IDisposable
         // + EventStream (1 SSE content-type fixture for Bug #4 fix)
         // + RefProperty (1 $ref-siblings fixture for Bug #3 fix)
         // + FrameworkTypeRef (1 controller for framework XML doc loading test)
-        _controllers.Should().HaveCount(27);
+        // + VersioningPreview (1 controller: dotted prerelease status, optional {version:apiVersion?})
+        _controllers.Should().HaveCount(28);
     }
 
     // -------------------------------------------------------------------------

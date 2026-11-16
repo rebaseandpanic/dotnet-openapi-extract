@@ -176,6 +176,29 @@ var excludePathsOption = new Option<string[]>("--exclude-path")
     AllowMultipleArgumentsPerToken = false,
 };
 
+var apiVersionOption = new Option<string?>("--api-version")
+{
+    Description = "API version (Asp.Versioning) the document describes, as in [ApiVersion]: major[.minor][-status], " +
+                  "e.g. 1.0 (1 and 1.0 are the same version). Operations that declare other versions are left out; " +
+                  "version-neutral and unversioned operations stay. It is the version substituted into the URL. " +
+                  "Default: every operation, and the version is substituted only when the operations declare exactly one. " +
+                  "A value that is not a version, or that no operation declares, is an error (exit 2)",
+};
+
+var substituteApiVersionOption = new Option<bool>("--substitute-api-version-in-url")
+{
+    Description = "Substitute the API version into the URL (api/v{version:apiVersion}/items → /api/v1/items, no version " +
+                  "parameter), as ApiExplorerOptions.SubstituteApiVersionInUrl of Asp.Versioning does, when the setting " +
+                  "is where the tool does not read it (IConfigureOptions<ApiExplorerOptions>, Startup, a computed value). " +
+                  "Default: as the entry point and the project methods it calls set it",
+};
+
+var apiVersionFormatOption = new Option<string?>("--api-version-format")
+{
+    Description = "Format of the substituted API version, as ApiExplorerOptions.SubstitutionFormat: V, VV, VVV, VVVV, v, " +
+                  "S, P[n], PP, PPP, PPPP, p[n] and quoted literals, e.g. VV or 'v'V. Default: as the source sets it, else VVV",
+};
+
 var sourceOption = new Option<string?>("--source")
 {
     Description = "Path to a specific source file (e.g. entry point). Reserved for future use.",
@@ -302,7 +325,16 @@ var rootCommand = new RootCommand(
     "but cannot compute is reported as a warning with its file:line and, where one exists, the flag that sets it. " +
     "Document metadata is read from the OpenApiInfo of SwaggerDoc / AddOpenApi in Program.cs; a flag overrides it. " +
     "Set document metadata explicitly with --title, --version, --description, --summary, --contact-name, " +
-    "--contact-email, --contact-url, --license-name, --license-url, --license-identifier, --terms-of-service and --server.");
+    "--contact-email, --contact-url, --license-name, --license-url, --license-identifier, --terms-of-service and --server.\n\n" +
+    "Streaming responses: a sequential media type (application/x-ndjson, application/jsonl, application/json-seq) gets the " +
+    "schema of one item — itemSchema in 3.2, x-oai-itemSchema with a warning in 3.0/3.1 — from IAsyncEnumerable<T> or from " +
+    "a type declared for it, [ProducesResponseType(typeof(T), 200, \"application/x-ndjson\")]; a declared array or file " +
+    "type describes the whole stream as schema. Declared without a type, the media type is written without a schema, " +
+    "with a warning.\n\n" +
+    "API versioning (Asp.Versioning): with ApiExplorerOptions.SubstituteApiVersionInUrl, read from the entry point and " +
+    "the project methods it calls, api/v{version:apiVersion}/items becomes /api/v1/items, the version written in " +
+    "SubstitutionFormat (default VVV). A document describes one version: --api-version chooses it when the operations " +
+    "declare several. Without the substitution, the version is a required path parameter.");
 
 // Remove the built-in --version option so our --version (document version) option is unambiguous.
 // The framework's VersionOption occupies the same name and short-circuits normal command handling.
@@ -321,6 +353,9 @@ rootCommand.Options.Add(namingPolicyOption);
 rootCommand.Options.Add(enumAsStringOption);
 rootCommand.Options.Add(openapiVersionOption);
 rootCommand.Options.Add(excludePathsOption);
+rootCommand.Options.Add(apiVersionOption);
+rootCommand.Options.Add(substituteApiVersionOption);
+rootCommand.Options.Add(apiVersionFormatOption);
 rootCommand.Options.Add(sourceOption);
 rootCommand.Options.Add(sourceRootOption);
 rootCommand.Options.Add(contactNameOption);
@@ -366,6 +401,9 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var enumAsStr    = parseResult.GetValue(enumAsStringOption);
     var openapiVer   = parseResult.GetValue(openapiVersionOption)!;
     var excludePaths = parseResult.GetValue(excludePathsOption);
+    var apiVersion   = parseResult.GetValue(apiVersionOption);
+    var substituteApiVersion = parseResult.GetValue(substituteApiVersionOption);
+    var apiVersionFormat     = parseResult.GetValue(apiVersionFormatOption);
     var source       = parseResult.GetValue(sourceOption);
     var sourceRoot   = parseResult.GetValue(sourceRootOption);
     var contactName  = parseResult.GetValue(contactNameOption);
@@ -515,6 +553,9 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
             NamingPolicy        = resolvedNamingPolicy,
             EnumAsString        = enumAsStr,
             ExcludePathPrefixes = excludePaths is { Length: > 0 } ? excludePaths : null,
+            ApiVersion          = string.IsNullOrWhiteSpace(apiVersion) ? null : apiVersion,
+            SubstituteApiVersionInUrl = substituteApiVersion ? true : null,
+            ApiVersionSubstitutionFormat = string.IsNullOrEmpty(apiVersionFormat) ? null : apiVersionFormat,
             SourcePath          = source,
             SourceRoot          = sourceRoot,
             ContactName         = contactName,

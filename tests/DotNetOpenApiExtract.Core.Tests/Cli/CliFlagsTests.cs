@@ -271,4 +271,35 @@ public class CliFlagsTests
         plain.ExitCode.Should().Be(0);
         plain.StdErr.Should().Contain("Warning:");
     }
+
+    [Fact]
+    public async Task ApiVersionFlags_ChooseSubstituteAndFormatTheVersion()
+    {
+        using var directory = new TempDirectory();
+        var output = Path.Combine(directory.Path, "openapi.json");
+
+        var result = await CliRunner.RunAsync(
+            ["--assembly", TestPaths.SampleApiDll, "--output", output,
+             "--substitute-api-version-in-url", "--api-version", "2", "--api-version-format", "VV"],
+            directory.Path,
+            TestContext.Current.CancellationToken);
+
+        result.ExitCode.Should().Be(0, result.StdErr);
+        var paths = JsonNode.Parse(await File.ReadAllTextAsync(output, TestContext.Current.CancellationToken))!["paths"]!.AsObject();
+        paths.Select(p => p.Key).Should().Contain("/api/v2.0/items/all").And.NotContain("/api/dedup");
+    }
+
+    [Fact]
+    public async Task ApiVersionNoOperationDeclares_ExitsWithTwo()
+    {
+        using var directory = new TempDirectory();
+
+        var result = await CliRunner.RunAsync(
+            ["--assembly", TestPaths.SampleApiDll, "--output", Path.Combine(directory.Path, "openapi.json"), "--api-version", "9.0"],
+            directory.Path,
+            TestContext.Current.CancellationToken);
+
+        result.ExitCode.Should().Be(2, result.StdErr);
+        result.StdErr.Should().Contain("--api-version");
+    }
 }

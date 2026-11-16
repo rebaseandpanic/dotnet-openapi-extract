@@ -217,23 +217,19 @@ public sealed class ResponseRulesTests
             .Should().BeEmpty();
     }
 
-    [Theory]
-    [MemberData(nameof(ItemSchemaForms))]
-    public void ResponseSchemaWhenBody_SequentialMediaTypeWithoutAnySchema_OneViolation(string openapi, string key)
-    {
-        _ = key;
-        var (doc, version) = ParseSequentialResponse(openapi, "{ }");
-
-        new ResponseSchemaWhenBodyRule().Validate(doc, new ValidationContext { OpenApiSpecVersion = version })
-            .Should().ContainSingle()
-            .Which.JsonPointer.Should().Be("#/paths/~1a/get/responses/200/content/application~1x-ndjson");
-    }
-
+    /// <summary>
+    /// A stream the action writes itself, of which only the media type is known, is not a violation:
+    /// the generator writes it that way, with a warning, when no item type is declared.
+    /// </summary>
     [Theory]
     [InlineData("text/event-stream")]
     [InlineData("text/event-stream; charset=utf-8")]
     [InlineData("Text/Event-Stream")]
-    public void ResponseSchemaWhenBody_EventStreamWithoutSchema_NoViolation(string mediaType)
+    [InlineData("application/x-ndjson")]
+    [InlineData("application/jsonl")]
+    [InlineData("application/json-seq; charset=utf-8")]
+    [InlineData("Application/X-NDJSON")]
+    public void ResponseSchemaWhenBody_SequentialMediaTypeWithoutSchema_NoViolation(string mediaType)
     {
         foreach (var version in VersionedDocumentHarness.Versions)
         {

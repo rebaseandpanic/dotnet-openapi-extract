@@ -181,6 +181,66 @@ public class SequentialMediaTypeTests(SequentialMediaTypeFixture fixture) : ICla
         At(build.Diagnostics, "#/paths/~1sequential~1event-stream/").Should().BeEmpty();
     }
 
+    // ── Row: a stream the action writes itself, typed by the attributes ─────
+    // A schema of a sequential media type is the whole content read as an array of the items
+    // (OpenAPI 3.2 §4.14.3, §4.14.3.1); itemSchema is one item.
+
+    private static JsonObject PostContent(JsonNode document, string path, string code = "200") =>
+        document["paths"]![path]!["post"]!["responses"]![code]!["content"]!.AsObject();
+
+    private static string ItemKey(OpenApiSpecVersion version) =>
+        version == OpenApiSpecVersion.OpenApi3_2 ? "itemSchema" : "x-oai-itemSchema";
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void DeclaredWithoutAType_MediaTypeWithoutSchemaAndOneWarning(OpenApiSpecVersion version)
+    {
+        var build = fixture.ModernApi[version];
+
+        var content = PostContent(build.Document, "/declared-sequence/untyped");
+        content.Select(p => p.Key).Should().Equal("application/x-ndjson");
+        content["application/x-ndjson"]!.AsObject().Should().BeEmpty(because: "nothing describes the items of the stream");
+        PostContent(build.Document, "/declared-sequence/untyped", "422")["application/json"]!["schema"]!["$ref"]!
+            .GetValue<string>().Should().Be("#/components/schemas/StreamError");
+
+        var warning = build.Diagnostics.Should().ContainSingle(d => d.Location == "POST /declared-sequence/untyped").Subject;
+        warning.Code.Should().Be(ExtractionDiagnosticCodes.ResponseSequenceItemTypeUnknown);
+        warning.Subjects.Should().Equal("200", "application/x-ndjson");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void DeclaredItemType_IsTheItemSchema(OpenApiSpecVersion version)
+    {
+        var media = PostContent(fixture.ModernApi[version].Document, "/declared-sequence/typed")["application/x-ndjson"]!.AsObject();
+
+        media.Select(p => p.Key).Should().Equal(ItemKey(version));
+        media[ItemKey(version)]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void DeclaredArray_IsTheSchemaOfTheWholeStream(OpenApiSpecVersion version)
+    {
+        var media = PostContent(fixture.ModernApi[version].Document, "/declared-sequence/array")["application/jsonl"]!.AsObject();
+
+        media.Select(p => p.Key).Should().Equal("schema");
+        media["schema"]!["type"]!.GetValue<string>().Should().Be("array");
+        media["schema"]!["items"]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void DeclaredTypeForJsonAndASequence_JsonGetsTheSchemaTheSequenceTheItemSchema(OpenApiSpecVersion version)
+    {
+        var content = PostContent(fixture.ModernApi[version].Document, "/declared-sequence/mixed");
+
+        content["application/json"]!.AsObject().Select(p => p.Key).Should().Equal("schema");
+        content["application/json"]!["schema"]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+        content["application/json-seq"]!.AsObject().Select(p => p.Key).Should().Equal(ItemKey(version));
+        content["application/json-seq"]![ItemKey(version)]!["$ref"]!.GetValue<string>().Should().Be(StreamItemRef);
+    }
+
     // ── Row: suppression under a moved operation ────────────────────────────
 
     [Fact]
