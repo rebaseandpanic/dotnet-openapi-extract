@@ -41,6 +41,20 @@ public class InfoAttributePrecedenceTests
 
     private const string WithoutSwaggerDoc = "builder.Services.AddSwaggerGen();";
 
+    /// <summary>The document built (v1) has no description; the second document has one of its own.</summary>
+    private const string SecondDocumentDescribed = """
+        builder.Services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo { Title = "Sample API Title", Version = "v1" });
+            c.SwaggerDoc("operator", new OpenApiInfo
+            {
+                Title = "Operator API",
+                Version = "v1",
+                Description = "Operator API description",
+            });
+        });
+        """;
+
     private static (JsonNode Document, IReadOnlyList<ExtractionDiagnostic> Diagnostics) Build(string fixture, string program)
     {
         using var sourceRoot = new TempDirectory();
@@ -69,6 +83,7 @@ public class InfoAttributePrecedenceTests
         { "ModernApi", WithSwaggerDoc, "/info/title", "Doc title" },
         { "ModernApi", WithSwaggerDoc, "/info/contact/name", "Doc team" },
         { "ModernApi", WithSwaggerDoc, "/info/description", "Doc description" },
+        { "SampleApi", SecondDocumentDescribed, "/info/description", "Sample API description for testing info.description auto-default" },
         // without SwaggerDoc, as in 0.16: the MSBuild defaults, then v1
         { "ModernApi", WithoutSwaggerDoc, "/info/title", "ModernApi" },
         { "ModernApi", WithoutSwaggerDoc, "/info/contact/name", "ModernApi" },
@@ -100,6 +115,8 @@ public class InfoAttributePrecedenceTests
     {
         { "SampleApi", SameAsSampleApiAttributes },
         { "ModernApi", WithSwaggerDoc },
+        // the description of another document is not the SwaggerDoc text of the document built
+        { "SampleApi", SecondDocumentDescribed },
     };
 
     /// <summary>Equal values, or an attribute that is only the MSBuild default, are no difference to report.</summary>

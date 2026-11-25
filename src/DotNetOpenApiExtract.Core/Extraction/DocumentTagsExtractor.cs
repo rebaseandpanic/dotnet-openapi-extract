@@ -47,6 +47,11 @@ public sealed record ContactMetadata(string? Name, string? Email, string? Url);
 /// Result of scanning Roslyn source for document-level tag registrations and
 /// root-level <c>externalDocs</c>.
 /// </summary>
+/// <remarks>
+/// The info fields and the root-level <c>externalDocs</c> are those of one document: the first one
+/// <c>SwaggerDoc</c> / <c>AddOpenApi</c> declares. "The first declaration that sets it" below counts only
+/// the calls that declare that document; another document's info is never read.
+/// </remarks>
 public sealed class DocumentTagsExtractionResult
 {
     /// <summary>
@@ -104,6 +109,12 @@ public sealed class DocumentTagsExtractionResult
     /// <see cref="DocumentTagsExtractor.InfoFieldDescription"/>, <see cref="DocumentTagsExtractor.InfoFieldContactName"/>.
     /// </summary>
     public IReadOnlyDictionary<string, string> InfoSourceLocations { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The method that declares the document built — <c>SwaggerDoc</c> or <c>AddOpenApi</c> — or
+    /// <see langword="null"/> when Program.cs declares no document.
+    /// </summary>
+    public string? InfoSourceMethod { get; init; }
 }
 
 /// <summary>
@@ -154,13 +165,14 @@ public static class DocumentTagsExtractor
         if (!context.IsAvailable || context.EntryPointNode == null)
             return new DocumentTagsExtractionResult();
 
-        ReportUnreadMetadata(context, onDiagnostic);
+        var compilation = context.CompilationResult?.Compilation;
+        var builtDocumentCalls = BuiltDocumentDeclarations(context, compilation);
+        ReportUnreadMetadata(context, builtDocumentCalls, onDiagnostic);
 
         var tagsByName = new Dictionary<string, TagMetadata>(StringComparer.Ordinal);
         string? rootExternalDocsUrl = null;
         string? rootExternalDocsDesc = null;
         InfoMetadata infoMetadata = new();
-        var compilation = context.CompilationResult?.Compilation;
 
         // ── 1. AddTag(new OpenApiTag { ... }) ─────────────────────────────────
         foreach (var invocation in InvocationMatcher.FindInvocations(context, "AddTag"))
@@ -181,23 +193,19 @@ public static class DocumentTagsExtractor
             }
         }
 
-        // ── 2. Root-level externalDocs from SwaggerDoc / AddOpenApi ───────────
-        // Look for new OpenApiInfo { ExternalDocs = new OpenApiExternalDocs { ... } }
-        // inside SwaggerDoc or AddOpenApi calls.
-        foreach (var methodName in SwaggerDocMethodNames)
+        // ── 2. Info and root-level externalDocs from SwaggerDoc / AddOpenApi ──
+        // Only the calls that declare the document built, in source order: field by field, the first call that
+        // sets a field first. Another document's info never fills a field of this one.
+        foreach (var invocation in builtDocumentCalls)
         {
-            foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
+            var (url, desc) = TryExtractRootExternalDocs(invocation, compilation);
+            if (!string.IsNullOrWhiteSpace(url))
             {
-                var (url, desc) = TryExtractRootExternalDocs(invocation, compilation);
-                if (!string.IsNullOrWhiteSpace(url))
-                {
-                    rootExternalDocsUrl ??= url;
-                    rootExternalDocsDesc ??= desc;
-                }
-
-                // The other info fields follow the same choice, field by field: the first declaration that sets them.
-                infoMetadata = infoMetadata.OrElse(TryExtractInfoMetadata(invocation, compilation, context.CompilationResult?.SourceRoot));
+                rootExternalDocsUrl ??= url;
+                rootExternalDocsDesc ??= desc;
             }
+
+            infoMetadata = infoMetadata.OrElse(TryExtractInfoMetadata(invocation, compilation, context.CompilationResult?.SourceRoot));
         }
 
         return new DocumentTagsExtractionResult
@@ -213,7 +221,37 @@ public static class DocumentTagsExtractor
             Contact = infoMetadata.Contact,
             TermsOfService = infoMetadata.TermsOfService,
             InfoSourceLocations = infoMetadata.Locations ?? new Dictionary<string, string>(StringComparer.Ordinal),
+            InfoSourceMethod = builtDocumentCalls.Count > 0 ? InvocationMatcher.GetSimpleMethodName(builtDocumentCalls[0].Expression) : null,
         };
+    }
+
+    /// <summary>
+    /// The <c>SwaggerDoc</c> / <c>AddOpenApi</c> calls that declare the document built — the first one declared
+    /// in source order — in source order. Two calls of one chain (<c>AddOpenApi("a").AddOpenApi("b")</c>) are
+    /// ordered by their argument lists. A Swashbuckle document and an ASP.NET Core document are different
+    /// documents even under the same name; ASP.NET Core compares its names in lower case.
+    /// </summary>
+    private static IReadOnlyList<InvocationExpressionSyntax> BuiltDocumentDeclarations(
+        SourceAnalysisContext context, CSharpCompilation? compilation)
+    {
+        var declarations = SwaggerDocMethodNames
+            .SelectMany(m => InvocationMatcher.FindInvocations(context, m))
+            .OrderBy(invocation => invocation.ArgumentList.SpanStart)
+            .ToList();
+
+        string? builtDocument = null;
+        var calls = new List<InvocationExpressionSyntax>();
+        foreach (var invocation in declarations)
+        {
+            // A call whose document name is not a constant declares a document of its own.
+            var document = DocumentKey(invocation, compilation)
+                ?? UnnamedDocumentPrefix + invocation.ArgumentList.SpanStart.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            builtDocument ??= document;
+            if (string.Equals(document, builtDocument, StringComparison.Ordinal))
+                calls.Add(invocation);
+        }
+
+        return calls;
     }
 
     /// <summary>The fields of the <c>OpenApiInfo</c> initializers read so far; <see langword="null"/> where none sets one.</summary>
@@ -224,13 +262,21 @@ public static class DocumentTagsExtractor
     {
         /// <summary>
         /// These fields, each one this does not set taken from <paramref name="later"/>; the contact field by
-        /// field (<c>Name</c>, <c>Email</c>, <c>Url</c>), the license as a whole (its URL and identifier
-        /// exclude each other, so they come from one declaration).
+        /// field (<c>Name</c>, <c>Email</c>, <c>Url</c>); the license name alone, its URL and identifier
+        /// together (they exclude each other, so they come from one declaration).
         /// </summary>
         public InfoMetadata OrElse(InfoMetadata later) => new(
             Title ?? later.Title, Description ?? later.Description, Version ?? later.Version, Summary ?? later.Summary,
-            TermsOfService ?? later.TermsOfService, MergeContact(Contact, later.Contact), License ?? later.License,
+            TermsOfService ?? later.TermsOfService, MergeContact(Contact, later.Contact), MergeLicense(License, later.License),
             MergeLocations(Locations, later.Locations));
+
+        private static LicenseMetadata? MergeLicense(LicenseMetadata? first, LicenseMetadata? later)
+        {
+            if (first == null || later == null)
+                return first ?? later;
+            var link = first.Url != null || first.Identifier != null ? first : later;
+            return new LicenseMetadata(first.Name ?? later.Name, link.Url, link.Identifier);
+        }
 
         // A location is recorded only with a value, so the first one of each field is the one of its value.
         private static IReadOnlyDictionary<string, string>? MergeLocations(
@@ -576,9 +622,108 @@ public static class DocumentTagsExtractor
         if (InvocationMatcher.GetSimpleMethodName(invocation.Expression) != "SwaggerDoc")
             return null;
 
-        var arguments = invocation.ArgumentList.Arguments;
-        return arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.Text == "info")
-            ?? (arguments.Count > 1 && arguments[1].NameColon == null ? arguments[1] : null);
+        var (named, positional) = Arguments(invocation, compilation: null);
+        return named.GetValueOrDefault("info") ?? (positional.Count > 1 ? positional[1] : null);
+    }
+
+    /// <summary>The name <c>AddOpenApi</c> gives the document when none is passed.</summary>
+    private const string DefaultOpenApiDocumentName = "v1";
+
+    /// <summary>Starts the key of a document whose name is not a constant; no document name starts with NUL.</summary>
+    private const string UnnamedDocumentPrefix = "\0";
+
+    /// <summary>The static classes whose extension methods declare a document, when called as static methods.</summary>
+    private static readonly string[] DeclaringExtensionClasses = ["SwaggerGenOptionsExtensions", "OpenApiServiceCollectionExtensions"];
+
+    /// <summary>
+    /// The named arguments (by name, <c>@name:</c> read as <c>name:</c>) and the positional ones of a call,
+    /// without the receiver of an extension method called as a static method
+    /// (<c>SwaggerGenOptionsExtensions.SwaggerDoc(c, "v1", info)</c>).
+    /// </summary>
+    private static (IReadOnlyDictionary<string, ArgumentSyntax> Named, IReadOnlyList<ArgumentSyntax> Positional) Arguments(
+        InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    {
+        var named = new Dictionary<string, ArgumentSyntax>(StringComparer.Ordinal);
+        var positional = new List<ArgumentSyntax>();
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            if (argument.NameColon is { } nameColon)
+                named.TryAdd(nameColon.Name.Identifier.ValueText, argument);
+            else
+                positional.Add(argument);
+        }
+
+        if (IsStaticExtensionCall(invocation, compilation) && positional.Count > 0)
+            positional.RemoveAt(0);
+        return (named, positional);
+    }
+
+    /// <summary>Whether the call is an extension method called as a static method of its class.</summary>
+    private static bool IsStaticExtensionCall(InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    {
+        if (invocation.Expression is not MemberAccessExpressionSyntax { Expression: var receiver })
+            return false;
+        var receiverName = receiver switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+            AliasQualifiedNameSyntax alias => alias.Name.Identifier.ValueText,
+            _ => null,
+        };
+        if (receiverName != null && DeclaringExtensionClasses.Contains(receiverName, StringComparer.Ordinal))
+            return true;
+        return SemanticModelOf(invocation, compilation)?.GetSymbolInfo(receiver).Symbol is INamedTypeSymbol;
+    }
+
+    private static SemanticModel? SemanticModelOf(SyntaxNode node, CSharpCompilation? compilation) =>
+        compilation != null && compilation.ContainsSyntaxTree(node.SyntaxTree) ? compilation.GetSemanticModel(node.SyntaxTree) : null;
+
+    /// <summary>
+    /// The key of the document a <c>SwaggerDoc(name, info)</c> / <c>AddOpenApi(documentName, …)</c> call
+    /// declares, or <see langword="null"/> when its name is not a constant. The name is the argument named
+    /// <c>name:</c> / <c>documentName:</c>, else the first positional one, read as a literal or an in-project
+    /// constant. <c>AddOpenApi</c> without a name — no argument, or only the options (a lambda, a method group,
+    /// a delegate) — declares <c>v1</c>, and its names are compared in lower case, as ASP.NET Core registers
+    /// them; Swashbuckle compares its names as they are.
+    /// </summary>
+    private static string? DocumentKey(InvocationExpressionSyntax invocation, CSharpCompilation? compilation)
+    {
+        var isSwaggerDoc = InvocationMatcher.GetSimpleMethodName(invocation.Expression) == "SwaggerDoc";
+        var (named, positional) = Arguments(invocation, compilation);
+        var argument = named.GetValueOrDefault(isSwaggerDoc ? "name" : "documentName");
+        if (argument == null && positional.Count > 0
+            && (isSwaggerDoc || positional.Count > 1 || !IsOpenApiOptions(positional[0].Expression, compilation)))
+            argument = positional[0];
+
+        if (isSwaggerDoc)
+        {
+            var swaggerDocName = argument == null ? null : InvocationMatcher.GetStringValue(argument.Expression, compilation);
+            return swaggerDocName == null ? null : "SwaggerDoc:" + swaggerDocName;
+        }
+
+        var name = argument == null ? DefaultOpenApiDocumentName : InvocationMatcher.GetStringValue(argument.Expression, compilation);
+        return name == null ? null : "AddOpenApi:" + name.ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Whether the only positional argument of <c>AddOpenApi</c> is its options, not a document name: a lambda
+    /// (also in parentheses or a cast), a method group or a value of a delegate type. A string, and a value of a
+    /// type the source does not show, is a name.
+    /// </summary>
+    private static bool IsOpenApiOptions(ExpressionSyntax expression, CSharpCompilation? compilation)
+    {
+        var unwrapped = expression;
+        while (unwrapped is ParenthesizedExpressionSyntax or CastExpressionSyntax)
+            unwrapped = unwrapped is ParenthesizedExpressionSyntax parenthesized ? parenthesized.Expression : ((CastExpressionSyntax)unwrapped).Expression;
+        if (unwrapped is AnonymousFunctionExpressionSyntax)
+            return true;
+
+        if (SemanticModelOf(expression, compilation) is not { } model)
+            return false;
+        var symbolInfo = model.GetSymbolInfo(unwrapped);
+        if (symbolInfo.Symbol is IMethodSymbol || symbolInfo.CandidateSymbols.Any(c => c is IMethodSymbol))
+            return true;
+        return model.GetTypeInfo(unwrapped).Type is { TypeKind: TypeKind.Delegate };
     }
 
     /// <summary>CLI flags that set what an <c>OpenApiInfo</c> from Program.cs would give.</summary>
@@ -605,7 +750,8 @@ public static class DocumentTagsExtractor
     /// that are not literals or constants. <c>null</c> and <c>default</c> are a known absence, not a loss. Each warning carries
     /// the place in the source and, as its last subjects, the CLI flags that set the value instead.
     /// </summary>
-    private static void ReportUnreadMetadata(SourceAnalysisContext context, Action<ExtractionDiagnostic>? onDiagnostic)
+    private static void ReportUnreadMetadata(
+        SourceAnalysisContext context, IReadOnlyList<InvocationExpressionSyntax> builtDocumentCalls, Action<ExtractionDiagnostic>? onDiagnostic)
     {
         if (onDiagnostic == null)
             return;
@@ -660,9 +806,11 @@ public static class DocumentTagsExtractor
             }
         }
 
-        foreach (var methodName in SwaggerDocMethodNames)
-        foreach (var invocation in InvocationMatcher.FindInvocations(context, methodName))
+        // Only the declarations of the document built: another document's info is not read, so its values
+        // are no loss of this one, and a flag would set them on the wrong document.
+        foreach (var invocation in builtDocumentCalls)
         {
+            var methodName = InvocationMatcher.GetSimpleMethodName(invocation.Expression);
             if (SwaggerDocInfoArgument(invocation) is { } info && ObjectCreations.Of(info.Expression) == null)
                 ReportCreation("SwaggerDoc info", info.Expression, InfoFlags);
 

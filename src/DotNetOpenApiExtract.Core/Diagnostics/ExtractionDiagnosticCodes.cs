@@ -418,8 +418,8 @@ public static class ExtractionDiagnosticCodes
     /// <c>[AssemblyProduct]</c>, <c>[AssemblyDescription]</c>, <c>[AssemblyCompany]</c> as the contact name;
     /// a value equal to the assembly name is the MSBuild default and does not count) and by the
     /// <c>OpenApiInfo</c> of <c>SwaggerDoc</c> / <c>AddOpenApi</c>, differently, and no CLI flag chooses: the
-    /// document takes the attribute, Swagger UI shows the SwaggerDoc text. Location: the field in the
-    /// document. <see cref="ExtractionDiagnostic.SourceLocation"/>: the SwaggerDoc value. Subjects: the
+    /// document takes the attribute, the document the running service serves shows the SwaggerDoc /
+    /// AddOpenApi text. Location: the field in the document. <see cref="ExtractionDiagnostic.SourceLocation"/>: the SwaggerDoc value. Subjects: the
     /// field (<c>info.title</c>, <c>info.description</c>, <c>info.contact.name</c>), the attribute value, the
     /// SwaggerDoc value.
     /// </summary>

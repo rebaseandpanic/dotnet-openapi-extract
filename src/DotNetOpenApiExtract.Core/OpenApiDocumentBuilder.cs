@@ -655,7 +655,8 @@ public sealed class OpenApiDocumentBuilder
             ?? Given(docTagsResult.InfoDescription);
 
         // A value the project set in both places, differently, and no option to choose: the document takes
-        // the assembly attribute, Swagger UI shows the SwaggerDoc text — say so.
+        // the assembly attribute, the UI of the running service shows the SwaggerDoc / AddOpenApi text — say so.
+        var declaringMethod = docTagsResult.InfoSourceMethod ?? "SwaggerDoc";
         void WarnIfDiffers(string field, string? option, string? attribute, string attributeSource, string? swaggerDoc, string locationKey, string flag)
         {
             if (Given(option) != null || attribute == null || Given(swaggerDoc) is not { } fromSwaggerDoc
@@ -665,8 +666,8 @@ public sealed class OpenApiDocumentBuilder
             diagnostics.Report(new ExtractionDiagnostic
             {
                 Code           = ExtractionDiagnosticCodes.DocumentInfoSourcesDiffer,
-                Message        = $"{(where != null ? where + ": " : "")}{field} in SwaggerDoc ('{fromSwaggerDoc}') differs from {attributeSource} ('{attribute}'): " +
-                                 $"the document takes {attributeSource}, Swagger UI shows the SwaggerDoc text. Make them equal, or set {flag}.",
+                Message        = $"{(where != null ? where + ": " : "")}{field} in {declaringMethod} ('{fromSwaggerDoc}') differs from {attributeSource} ('{attribute}'): " +
+                                 $"the document takes {attributeSource}, the document the running service serves shows the {declaringMethod} text. Make them equal, or set {flag}.",
                 Location       = "#/" + field.Replace('.', '/'),
                 SourceLocation = where,
                 Subjects       = [field, attribute, fromSwaggerDoc],

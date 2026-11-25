@@ -2,6 +2,12 @@
 
 All notable changes to this project.
 
+## [Unreleased]
+
+- [BUGFIX] With several documents (`SwaggerDoc("v1", …)` and `SwaggerDoc("operator", …)`, or several `AddOpenApi`), `info` and the root `externalDocs` come from the document built — the first one declared in source order — only. A field the first document does not set was filled from another document, so the document could carry the description of another API, and `document.info-sources-differ` compared `<Description>` of the `.csproj` with that other document's text and advised making them equal. The calls that declare the same document are still read field by field, in source order: a name as a literal or a constant, also as a named argument or in a static call (`SwaggerGenOptionsExtensions.SwaggerDoc(c, "v1", …)`); `AddOpenApi` without a name or with only its options (a lambda, a method group, a delegate) declares `v1`, and its names compare in lower case, as ASP.NET Core registers them. Of two declarations of the license, the name comes from the first that sets it and the URL or identifier from the first that sets one. `document.metadata-not-static` no longer reports a value of another document, whose flag would set the document built. *SDK:* `DocumentTagsExtractionResult` holds the info of the document built only, and `InfoSourceMethod` names the method that declares it.
+- [BEHAVIOR] A warning printed to stderr names its code: `Warning: [document.info-sources-differ] Program.cs:872: …` instead of `Warning: Program.cs:872: …`, so it can be found by the id the documentation uses. Every extraction warning starts with `Warning:`, `schema.unknown-json-converter` included (it was printed as `[DotNetOpenApiExtract] Unknown [JsonConverter]: …`); the warnings delivered to `OnDiagnostic` are unchanged. The CLI's own notices about its arguments (an unknown rule id, a missing `--xml` file) have no code.
+- [BEHAVIOR] `document.info-sources-differ` names the method that declares the document (`SwaggerDoc` or `AddOpenApi`) instead of always `SwaggerDoc`.
+
 ## [0.22.0] - 2026-11-16
 
 - [BUGFIX] A route parameter with the `apiVersion` constraint of Asp.Versioning (`[Route("api/v{version:apiVersion}/items")]`) is a required string path parameter `version`, as in the Swagger of the running service. The path kept `{version}` without a parameter, so `path.params-match` failed on every versioned operation. *SDK:* versioned operations get a `version` path argument.

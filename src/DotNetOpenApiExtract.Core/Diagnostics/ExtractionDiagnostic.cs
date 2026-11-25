@@ -23,7 +23,7 @@ public enum DiagnosticAction
 /// <remarks>
 /// Subscribe through <see cref="OpenApiDocumentOptions.OnDiagnostic"/> or
 /// <see cref="Schema.SchemaOptions.OnDiagnostic"/>. Without a subscriber each diagnostic is printed
-/// to <see cref="Console.Error"/> as a single line, as before. Rely on <see cref="Code"/>,
+/// to <see cref="Console.Error"/> as a single line, <c>Warning: [</c><i>code</i><c>] </c><i>message</i>. Rely on <see cref="Code"/>,
 /// <see cref="Location"/> and <see cref="Subjects"/>; <see cref="Message"/> is for people.
 /// </remarks>
 public sealed record ExtractionDiagnostic
@@ -31,7 +31,7 @@ public sealed record ExtractionDiagnostic
     /// <summary>Stable identifier of the kind of diagnostic; see <see cref="ExtractionDiagnosticCodes"/>.</summary>
     public required string Code { get; init; }
 
-    /// <summary>Human-readable text: the line printed after <c>Warning: </c> when nobody subscribes.</summary>
+    /// <summary>Human-readable text: the line printed after <c>Warning: [</c><see cref="Code"/><c>] </c> when nobody subscribes.</summary>
     public required string Message { get; init; }
 
     /// <summary>The OpenAPI version the build targets, for diagnostics that depend on it; otherwise <see langword="null"/>.</summary>
@@ -69,11 +69,6 @@ public sealed record ExtractionDiagnostic
     /// </summary>
     public IReadOnlyList<string> Subjects { get; init; } = [];
 
-    /// <summary>
-    /// The exact line printed to stderr without a subscriber, when it is not
-    /// <c>Warning: </c> + <see cref="Message"/> (kept for warnings whose text predates the channel).
-    /// </summary>
-    internal string? StderrLine { get; init; }
-
-    internal string ToStderrLine() => StderrLine ?? "Warning: " + Message;
+    /// <summary>The line printed to stderr without a subscriber: the code first, so the warning can be found by it.</summary>
+    internal string ToStderrLine() => $"Warning: [{Code}] {Message}";
 }

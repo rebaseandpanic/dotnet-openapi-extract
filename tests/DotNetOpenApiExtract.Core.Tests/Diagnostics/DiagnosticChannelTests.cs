@@ -196,7 +196,8 @@ public class DiagnosticChannelTests
 
         result.ExitCode.Should().Be(0, because: result.StdErr);
         delivered.Should().NotBeEmpty();
-        WarningLines(result.StdErr).Should().HaveCount(delivered.Count);
+        // Each line names its code, so a warning can be found by the id the documentation uses.
+        WarningLines(result.StdErr).Should().BeEquivalentTo(delivered.Select(d => $"Warning: [{d.Code}] {d.Message}"));
     }
 
     // ── Deduplication within one build ───────────────────────────────────────
@@ -265,6 +266,16 @@ public class DiagnosticChannelTests
         stderr.Should().BeEmpty();
     }
 
+    /// <summary>The warning of the schema generator is printed as every other one: with its code.</summary>
+    [Fact]
+    public void SchemaGenerator_UnknownConverter_WithoutSubscriber_PrintsItsCode()
+    {
+        var stderr = CaptureStdErr(() => new SchemaGenerator(new SchemaOptions()).GenerateSchema(typeof(WithUnregisteredConverter)));
+
+        WarningLines(stderr).Should().ContainSingle()
+            .Which.Should().StartWith($"Warning: [{ExtractionDiagnosticCodes.SchemaUnknownJsonConverter}] Unknown [JsonConverter]: {typeof(UnregisteredConverter).FullName}");
+    }
+
     // ── Public extractor overloads ───────────────────────────────────────────
 
     [Fact]
@@ -330,7 +341,7 @@ public class DiagnosticChannelTests
     }
 
     private static IReadOnlyList<string> WarningLines(string stderr) =>
-        stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        stderr.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Where(line => line.StartsWith("Warning:", StringComparison.Ordinal))
             .ToList();
 

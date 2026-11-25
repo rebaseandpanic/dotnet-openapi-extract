@@ -709,7 +709,6 @@ public sealed class SchemaGenerator
                 Code       = ExtractionDiagnosticCodes.SchemaUnknownJsonConverter,
                 Message    = message,
                 Subjects   = [converterFullName],
-                StderrLine = "[DotNetOpenApiExtract] " + message,
             });
             return null;
         }
