@@ -1,0 +1,15 @@
+schema = 1
+root = ".."
+[defaults]
+adapter = "dotnet"
+image = "mcr.microsoft.com/dotnet/sdk:10.0"
+prepare_image = true
+network = "grant"
+nuget_cache = true
+cpu = 4
+memory_mib = 8192
+# The fixtures in tests/TestAssemblies are found in their bin: the whole solution is built first.
+prepare = ["dotnet build DotNetOpenApiExtract.slnx -c Release"]
+[kind.unit.options]
+project = "DotNetOpenApiExtract.slnx"
+configuration = "Release"
